@@ -1,0 +1,223 @@
+@import "tailwindcss";
+
+/*
+ * Deuce Design System
+ * GitHub Primer Dark Theme + Slack Layout DNA
+ * Colors sourced from primer/primitives dark.json5
+ */
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  /* ── Neutral Scale (Primer Dark) ─────────────────────────── */
+  --color-neutral-0: #010409;
+  --color-neutral-1: #0D1117;
+  --color-neutral-2: #151B23;
+  --color-neutral-3: #212830;
+  --color-neutral-4: #262C36;
+  --color-neutral-5: #2A313C;
+  --color-neutral-6: #2F3742;
+  --color-neutral-7: #3D444D;
+  --color-neutral-8: #656C76;
+  --color-neutral-9: #9198A1;
+  --color-neutral-10: #B7BDC8;
+  --color-neutral-11: #D1D7E0;
+  --color-neutral-12: #F0F6FC;
+
+  /* ── Semantic Backgrounds ────────────────────────────────── */
+  --color-background: #0D1117;
+  --color-background-subtle: #151B23;
+  --color-background-inset: #010409;
+  --color-background-emphasis: #262C36;
+  --color-background-hover: #212830;
+  --color-background-input: #2A313C;
+  --color-background-overlay: #2F3742;
+
+  /* ── Semantic Foreground (Text) ──────────────────────────── */
+  --color-foreground: #D1D7E0;
+  --color-foreground-emphasis: #F0F6FC;
+  --color-foreground-muted: #9198A1;
+  --color-foreground-subtle: #656C76;
+  --color-foreground-on-emphasis: #FFFFFF;
+
+  /* ── Borders ─────────────────────────────────────────────── */
+  --color-border: #3D444D;
+  --color-border-muted: #2F3742;
+  --color-border-emphasis: #656C76;
+
+  /* ── Accent (Blue) ───────────────────────────────────────── */
+  --color-accent: #58a6ff;
+  --color-accent-emphasis: #1f6feb;
+  --color-accent-muted: #0c2d6b;
+
+  /* ── Success (Green) ─────────────────────────────────────── */
+  --color-success: #3fb950;
+  --color-success-emphasis: #238636;
+  --color-success-muted: #033a16;
+
+  /* ── Danger (Red) ────────────────────────────────────────── */
+  --color-danger: #f85149;
+  --color-danger-emphasis: #da3633;
+  --color-danger-muted: #67060c;
+
+  /* ── Warning (Yellow) ────────────────────────────────────── */
+  --color-warning: #d29922;
+  --color-warning-emphasis: #9e6a03;
+  --color-warning-muted: #4b2900;
+
+  /* ── Purple ──────────────────────────────────────────────── */
+  --color-purple: #BE8FFF;
+  --color-purple-emphasis: #8957e5;
+  --color-purple-muted: #3c1e70;
+
+  /* ── Pink ────────────────────────────────────────────────── */
+  --color-pink: #f778ba;
+  --color-pink-emphasis: #bf4b8a;
+  --color-pink-muted: #5e103e;
+
+  /* ── Orange ──────────────────────────────────────────────── */
+  --color-orange: #f0883e;
+  --color-orange-emphasis: #bd561d;
+  --color-orange-muted: #5a1e02;
+
+  /* ── Agent Colors ────────────────────────────────────────── */
+  --color-agent-coder: #58a6ff;
+  --color-agent-coder-muted: #0c2d6b;
+  --color-agent-reviewer: #BE8FFF;
+  --color-agent-reviewer-muted: #3c1e70;
+  --color-agent-planner: #3fb950;
+  --color-agent-planner-muted: #033a16;
+  --color-agent-tester: #d29922;
+  --color-agent-tester-muted: #4b2900;
+  --color-agent-designer: #f778ba;
+  --color-agent-designer-muted: #5e103e;
+
+  /* ── Typography ──────────────────────────────────────────── */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
+    Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  /* ── Radii ───────────────────────────────────────────────── */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-full: 9999px;
+
+  /* ── Shadows ─────────────────────────────────────────────── */
+  --shadow-sm: 0 1px 2px rgba(1, 4, 9, 0.3);
+  --shadow-md: 0 3px 6px rgba(1, 4, 9, 0.4);
+  --shadow-lg: 0 8px 24px rgba(1, 4, 9, 0.5);
+  --shadow-overlay: 0 16px 32px rgba(1, 4, 9, 0.6);
+}
+
+/* ── Base Styles ─────────────────────────────────────────────── */
+html {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Prevent text selection on UI elements, allow in content areas */
+button,
+[role="tab"],
+[role="menuitem"] {
+  user-select: none;
+}
+
+/* Scrollbar styling for dark theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-neutral-6);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-neutral-7);
+}
+
+/* ── Animations ──────────────────────────────────────────────── */
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.2);
+  }
+}
+
+@keyframes typing-dots {
+  0%,
+  20% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.2;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+.animate-typing-dot {
+  animation: typing-dots 1.4s ease-in-out infinite;
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-neutral-2) 25%,
+    var(--color-neutral-3) 50%,
+    var(--color-neutral-2) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 150ms ease-out;
+}

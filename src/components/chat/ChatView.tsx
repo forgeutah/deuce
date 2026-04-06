@@ -1,0 +1,381 @@
+import { useState, useRef, useEffect } from "react";
+import { SendHorizontal, Bot } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
+import { useSessionStore } from "@/stores/session-store";
+import type { Message, Agent, User } from "@/types";
+
+function TypingIndicator({ agentName, agentColor }: { agentName: string; agentColor: string }) {
+  return (
+    <div className="flex items-center gap-2 px-4 py-2 animate-fade-in-up">
+      <div
+        className="flex h-7 w-7 items-center justify-center rounded text-xs font-semibold text-foreground-on-emphasis shrink-0"
+        style={{ backgroundColor: agentColor }}
+      >
+        {agentName[0]}
+      </div>
+      <span className="text-sm text-foreground-muted">{agentName} is thinking</span>
+      <div className="flex gap-1">
+        <span className="h-1.5 w-1.5 rounded-full bg-foreground-muted animate-typing-dot" style={{ animationDelay: "0s" }} />
+        <span className="h-1.5 w-1.5 rounded-full bg-foreground-muted animate-typing-dot" style={{ animationDelay: "0.2s" }} />
+        <span className="h-1.5 w-1.5 rounded-full bg-foreground-muted animate-typing-dot" style={{ animationDelay: "0.4s" }} />
+      </div>
+    </div>
+  );
+}
+
+function MessageBubble({
+  message,
+  author,
+  showHeader,
+}: {
+  message: Message;
+  author: Agent | User | undefined;
+  showHeader: boolean;
+}) {
+  const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set());
+  const isAgent = message.authorType === "agent";
+  const agentAuthor = isAgent ? (author as Agent) : undefined;
+
+  const toggleExpand = (index: number) => {
+    setExpandedItems((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
+
+  return (
+    <div
+      className={cn(
+        "group px-4 py-1 animate-fade-in-up",
+        isAgent && "border-l-2 bg-opacity-5",
+      )}
+      style={
+        isAgent && agentAuthor
+          ? {
+              borderLeftColor: agentAuthor.color,
+              backgroundColor: `${agentAuthor.color}08`,
+            }
+          : undefined
+      }
+    >
+      {showHeader && (
+        <div className="flex items-center gap-2 mb-0.5">
+          {isAgent && agentAuthor ? (
+            <div
+              className="flex h-7 w-7 items-center justify-center rounded text-xs font-semibold text-foreground-on-emphasis shrink-0"
+              style={{ backgroundColor: agentAuthor.color }}
+            >
+              {agentAuthor.name[0]}
+            </div>
+          ) : (
+            <img
+              src={(author as User)?.avatar ?? ""}
+              alt=""
+              className="h-7 w-7 rounded-full shrink-0"
+            />
+          )}
+          <span className="text-sm font-semibold text-foreground-emphasis">
+            {isAgent ? agentAuthor?.name : (author as User)?.name}
+          </span>
+          <span className="text-xs text-foreground-subtle">
+            {new Date(message.createdAt).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </span>
+        </div>
+      )}
+      <div className={cn("text-sm text-foreground", showHeader && "pl-9")}>
+        <p className="whitespace-pre-wrap">{message.content}</p>
+
+        {/* Expandable content */}
+        {message.expandableContent?.map((item, i) => (
+          <div key={i} className="mt-2">
+            <button
+              onClick={() => toggleExpand(i)}
+              className="text-xs text-accent hover:underline"
+            >
+              {expandedItems.has(i) ? "Hide" : "Show"} {item.title}
+            </button>
+            {expandedItems.has(i) && (
+              <div className="mt-1 rounded-md border border-border bg-background-subtle p-3 font-mono text-xs animate-fade-in-up">
+                <div className="mb-1 text-foreground-muted">{item.summary}</div>
+                <pre className="overflow-x-auto whitespace-pre text-foreground">
+                  {item.content}
+                </pre>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function ChatView() {
+  const { activeSessionId, sessions, messages, thinkingAgents, addMessage } =
+    useSessionStore();
+  const [input, setInput] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const session = sessions.find((s) => s.id === activeSessionId);
+  const sessionMessages = activeSessionId
+    ? (messages[activeSessionId] ?? [])
+    : [];
+  const thinking = activeSessionId
+    ? (thinkingAgents[activeSessionId] ?? [])
+    : [];
+
+  const allParticipants = session
+    ? [...session.agents, ...session.members]
+    : [];
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [sessionMessages.length, thinking.length]);
+
+  const handleSend = () => {
+    if (!input.trim() || !activeSessionId || !session) return;
+    if (session.status !== "active") return;
+
+    const msg: Message = {
+      id: crypto.randomUUID(),
+      sessionId: activeSessionId,
+      authorId: "current-user",
+      authorType: "human",
+      content: input.trim(),
+      mentions: [],
+      createdAt: new Date().toISOString(),
+      status: "sent",
+    };
+    addMessage(msg);
+    setInput("");
+
+    // Simulate agent response if @mentioned
+    const mentionMatch = input.match(/@(\w+)/g);
+    if (mentionMatch) {
+      mentionMatch.forEach((mention) => {
+        const agentName = mention.slice(1);
+        const agent = session.agents.find(
+          (a) => a.name.toLowerCase() === agentName.toLowerCase(),
+        );
+        if (agent) {
+          simulateAgentResponse(activeSessionId, agent);
+        }
+      });
+    }
+  };
+
+  const simulateAgentResponse = (sessionId: string, agent: Agent) => {
+    const store = useSessionStore.getState();
+    store.setThinkingAgent(sessionId, agent.id);
+    store.updateAgentStatus(sessionId, agent.id, "working");
+
+    const delay = 1500 + Math.random() * 2000;
+    setTimeout(() => {
+      const s = useSessionStore.getState();
+      s.clearThinkingAgent(sessionId, agent.id);
+      s.updateAgentStatus(sessionId, agent.id, "idle");
+      s.addMessage({
+        id: crypto.randomUUID(),
+        sessionId,
+        authorId: agent.id,
+        authorType: "agent",
+        content: getAgentResponse(agent.role),
+        expandableContent: getExpandableContent(agent.role),
+        mentions: [],
+        createdAt: new Date().toISOString(),
+        status: "sent",
+      });
+      s.addActivity({
+        id: crypto.randomUUID(),
+        sessionId,
+        type: "agent-action",
+        description: `${agent.name} completed a task`,
+        timestamp: new Date().toISOString(),
+        agentId: agent.id,
+      });
+    }, delay);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const isReadOnly = session?.status !== "active";
+
+  return (
+    <div className="flex h-full flex-col">
+      {/* Messages */}
+      <ScrollArea className="flex-1" ref={scrollRef}>
+        <div className="flex flex-col gap-1 py-4">
+          {sessionMessages.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <Bot className="h-10 w-10 text-foreground-subtle mb-3" />
+              <h3 className="text-sm font-medium text-foreground-muted">
+                Start a conversation
+              </h3>
+              <p className="mt-1 text-xs text-foreground-subtle max-w-xs">
+                @mention an agent to get started.
+                {session?.agents.map((a) => (
+                  <button
+                    key={a.id}
+                    onClick={() => setInput(`@${a.name} `)}
+                    className="mx-1 rounded-full px-2 py-0.5 text-xs font-medium text-foreground-on-emphasis"
+                    style={{ backgroundColor: a.color }}
+                  >
+                    @{a.name}
+                  </button>
+                ))}
+              </p>
+            </div>
+          )}
+
+          {sessionMessages.map((msg, i) => {
+            const prevMsg = sessionMessages[i - 1];
+            const showHeader =
+              !prevMsg ||
+              prevMsg.authorId !== msg.authorId ||
+              new Date(msg.createdAt).getTime() -
+                new Date(prevMsg.createdAt).getTime() >
+                300000;
+
+            const author =
+              msg.authorType === "agent"
+                ? session?.agents.find((a) => a.id === msg.authorId)
+                : allParticipants.find(
+                    (p) => "email" in p && p.id === msg.authorId,
+                  ) ?? session?.members.find((m) => m.id === msg.authorId);
+
+            return (
+              <MessageBubble
+                key={msg.id}
+                message={msg}
+                author={author}
+                showHeader={showHeader}
+              />
+            );
+          })}
+
+          {/* Typing indicators */}
+          {thinking.map((agentId) => {
+            const agent = session?.agents.find((a) => a.id === agentId);
+            if (!agent) return null;
+            return (
+              <TypingIndicator
+                key={agentId}
+                agentName={agent.name}
+                agentColor={agent.color}
+              />
+            );
+          })}
+        </div>
+      </ScrollArea>
+
+      {/* Input */}
+      <div className="border-t border-border-muted p-3">
+        {isReadOnly ? (
+          <div className="flex items-center justify-center rounded-md border border-border-muted bg-background-subtle py-2 text-xs text-foreground-subtle">
+            {session?.status === "paused"
+              ? "Session is paused"
+              : "Session is archived"}
+          </div>
+        ) : (
+          <div className="flex items-end gap-2">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Message (@ to mention an agent)"
+              rows={1}
+              className="flex-1 resize-none rounded-md border border-border-muted bg-background-input px-3 py-2 text-sm text-foreground placeholder:text-foreground-subtle focus:border-accent focus:outline-none"
+            />
+            <Button
+              onClick={handleSend}
+              disabled={!input.trim()}
+              size="icon"
+              className="h-9 w-9 bg-accent-emphasis hover:bg-accent text-foreground-on-emphasis"
+            >
+              <SendHorizontal className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function getAgentResponse(role: string): string {
+  const responses: Record<string, string> = {
+    coder:
+      "I've updated the implementation. The changes include proper error handling and input validation.",
+    reviewer:
+      "I've reviewed the changes. The code looks clean, but I have a few suggestions for improvement.",
+    planner:
+      "Here's the implementation plan broken down into phases. Each phase has clear deliverables and success criteria.",
+    tester:
+      "All tests are passing. I've added new test cases covering the edge cases we discussed.",
+    designer:
+      "I've analyzed the UI and have some suggestions for improving the user experience.",
+  };
+  return responses[role] ?? "Task completed successfully.";
+}
+
+function getExpandableContent(role: string) {
+  if (role === "coder") {
+    return [
+      {
+        type: "diff" as const,
+        title: "changes",
+        summary: "auth.go (+12 -3)",
+        content: `@@ -42,8 +42,19 @@ func Validate(token string) error {
+     return ErrInvalidFormat
+   }
+
++  // Check token expiration
++  claims, err := ParseClaims(token)
++  if err != nil {
++    return fmt.Errorf("parse claims: %w", err)
++  }
++
++  if claims.ExpiresAt.Before(time.Now()) {
++    return ErrTokenExpired
++  }
++
+   return nil
+ }`,
+      },
+    ];
+  }
+  if (role === "tester") {
+    return [
+      {
+        type: "test-results" as const,
+        title: "test results",
+        summary: "4/4 passing",
+        content: `=== RUN   TestValidate
+--- PASS: TestValidate (0.00s)
+=== RUN   TestValidateExpired
+--- PASS: TestValidateExpired (0.00s)
+=== RUN   TestValidateInvalid
+--- PASS: TestValidateInvalid (0.00s)
+=== RUN   TestValidateEmpty
+--- PASS: TestValidateEmpty (0.00s)
+PASS
+ok  	forge-api/auth	0.003s`,
+      },
+    ];
+  }
+  return undefined;
+}
