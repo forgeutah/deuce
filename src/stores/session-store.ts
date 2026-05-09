@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { api } from "@/lib/api";
 import type {
   Session,
   Project,
@@ -15,14 +16,14 @@ interface SessionState {
   teams: Team[];
   projects: Project[];
   sessions: Session[];
-  messages: Record<string, Message[]>; // sessionId -> messages
-  activities: Record<string, ActivityItem[]>; // sessionId -> activities
-  fileTrees: Record<string, FileNode[]>; // sessionId -> file tree
-  thinkingAgents: Record<string, string[]>; // sessionId -> agent IDs currently thinking
+  messages: Record<string, Message[]>;
+  activities: Record<string, ActivityItem[]>;
+  fileTrees: Record<string, FileNode[]>;
+  thinkingAgents: Record<string, string[]>;
 
   // UI state
   activeSessionId: string | null;
-  activeTabMap: Record<string, TabType>; // sessionId -> active tab
+  activeTabMap: Record<string, TabType>;
   searchQuery: string;
 
   // Actions
@@ -46,7 +47,7 @@ interface SessionState {
     status: Session["workspaceStatus"],
   ) => void;
 
-  // Data setters (for mock initialization)
+  // Data setters
   setTeams: (teams: Team[]) => void;
   setProjects: (projects: Project[]) => void;
   setSessions: (sessions: Session[]) => void;
@@ -55,7 +56,7 @@ interface SessionState {
   setFileTrees: (sessionId: string, files: FileNode[]) => void;
 }
 
-export const useSessionStore = create<SessionState>((set) => ({
+export const useSessionStore = create<SessionState>((set, get) => ({
   teams: [],
   projects: [],
   sessions: [],
@@ -68,13 +69,27 @@ export const useSessionStore = create<SessionState>((set) => ({
   activeTabMap: {},
   searchQuery: "",
 
-  setActiveSession: (sessionId) =>
+  setActiveSession: (sessionId) => {
     set((state) => ({
       activeSessionId: sessionId,
       sessions: state.sessions.map((s) =>
         s.id === sessionId ? { ...s, unreadCount: 0 } : s,
       ),
-    })),
+    }));
+
+    // Load messages and activities from API if not already loaded
+    const state = get();
+    if (!state.messages[sessionId]) {
+      api.listMessages(sessionId).then((data) => {
+        get().setMessages(sessionId, data.messages.reverse());
+      }).catch(console.error);
+    }
+    if (!state.activities[sessionId]) {
+      api.listActivities(sessionId).then((activities) => {
+        get().setActivities(sessionId, activities);
+      }).catch(console.error);
+    }
+  },
 
   setActiveTab: (sessionId, tab) =>
     set((state) => ({
@@ -93,6 +108,10 @@ export const useSessionStore = create<SessionState>((set) => ({
   addMessage: (message) =>
     set((state) => {
       const sessionMessages = state.messages[message.sessionId] ?? [];
+      // Deduplicate by ID
+      if (sessionMessages.some((m) => m.id === message.id)) {
+        return state;
+      }
       return {
         messages: {
           ...state.messages,
@@ -104,9 +123,7 @@ export const useSessionStore = create<SessionState>((set) => ({
                 ...s,
                 lastActivityAt: message.createdAt,
                 unreadCount:
-                  s.id === state.activeSessionId
-                    ? 0
-                    : s.unreadCount + 1,
+                  s.id === state.activeSessionId ? 0 : s.unreadCount + 1,
               }
             : s,
         ),
@@ -116,6 +133,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   setThinkingAgent: (sessionId, agentId) =>
     set((state) => {
       const current = state.thinkingAgents[sessionId] ?? [];
+      if (current.includes(agentId)) return state;
       return {
         thinkingAgents: {
           ...state.thinkingAgents,
@@ -152,6 +170,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   addActivity: (activity) =>
     set((state) => {
       const current = state.activities[activity.sessionId] ?? [];
+      if (current.some((a) => a.id === activity.id)) return state;
       return {
         activities: {
           ...state.activities,

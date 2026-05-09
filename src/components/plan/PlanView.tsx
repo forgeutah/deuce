@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { FileText, Eye, Split, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
 import { useSessionStore } from "@/stores/session-store";
 
 type ViewMode = "split" | "editor" | "preview";
@@ -10,6 +11,7 @@ type ViewMode = "split" | "editor" | "preview";
 export function PlanView() {
   const { activeSessionId, sessions, updateSessionPlan } = useSessionStore();
   const [viewMode, setViewMode] = useState<ViewMode>("split");
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
   const session = sessions.find((s) => s.id === activeSessionId);
   const content = session?.planContent ?? "";
@@ -17,6 +19,21 @@ export function PlanView() {
   if (!session) return null;
 
   const isReadOnly = session.status !== "active";
+
+  const handleChange = useCallback(
+    (value: string) => {
+      if (!activeSessionId) return;
+      // Update local state immediately
+      updateSessionPlan(activeSessionId, value);
+
+      // Debounce API call
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        api.updateSession(activeSessionId, { planContent: value }).catch(console.error);
+      }, 500);
+    },
+    [activeSessionId, updateSessionPlan],
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -59,9 +76,7 @@ export function PlanView() {
             {content || !isReadOnly ? (
               <textarea
                 value={content}
-                onChange={(e) =>
-                  !isReadOnly && activeSessionId && updateSessionPlan(activeSessionId, e.target.value)
-                }
+                onChange={(e) => !isReadOnly && handleChange(e.target.value)}
                 readOnly={isReadOnly}
                 className="h-full w-full resize-none bg-background-inset p-4 font-mono text-sm text-foreground placeholder:text-foreground-subtle focus:outline-none"
                 placeholder="Start writing your plan..."

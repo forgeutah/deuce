@@ -3,8 +3,9 @@ import { SendHorizontal, Bot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
 import { useSessionStore } from "@/stores/session-store";
-import type { Message, Agent, User } from "@/types";
+import type { Message, User } from "@/types";
 
 function TypingIndicator({ agentName, agentColor }: { agentName: string; agentColor: string }) {
   return (
@@ -141,68 +142,34 @@ export function ChatView() {
     }
   }, [sessionMessages.length, thinking.length]);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!input.trim() || !activeSessionId || !session) return;
     if (session.status !== "active") return;
 
-    const msg: Message = {
-      id: crypto.randomUUID(),
-      sessionId: activeSessionId,
-      authorId: "current-user",
-      authorType: "human",
-      content: input.trim(),
-      mentions: [],
-      createdAt: new Date().toISOString(),
-      status: "sent",
-    };
-    addMessage(msg);
+    const content = input.trim();
     setInput("");
 
-    // Simulate agent response if @mentioned
-    const mentionMatch = input.match(/@(\w+)/g);
+    // Detect @mentions — match agent names to IDs
+    const mentionMatch = content.match(/@(\w+)/g);
+    const mentions: string[] = [];
     if (mentionMatch) {
-      mentionMatch.forEach((mention) => {
+      for (const mention of mentionMatch) {
         const agentName = mention.slice(1);
         const agent = session.agents.find(
           (a) => a.name.toLowerCase() === agentName.toLowerCase(),
         );
-        if (agent) {
-          simulateAgentResponse(activeSessionId, agent);
-        }
-      });
+        if (agent) mentions.push(agent.id);
+      }
     }
-  };
 
-  const simulateAgentResponse = (sessionId: string, agent: Agent) => {
-    const store = useSessionStore.getState();
-    store.setThinkingAgent(sessionId, agent.id);
-    store.updateAgentStatus(sessionId, agent.id, "working");
-
-    const delay = 1500 + Math.random() * 2000;
-    setTimeout(() => {
-      const s = useSessionStore.getState();
-      s.clearThinkingAgent(sessionId, agent.id);
-      s.updateAgentStatus(sessionId, agent.id, "idle");
-      s.addMessage({
-        id: crypto.randomUUID(),
-        sessionId,
-        authorId: agent.id,
-        authorType: "agent",
-        content: getAgentResponse(agent.role),
-        expandableContent: getExpandableContent(agent.role),
-        mentions: [],
-        createdAt: new Date().toISOString(),
-        status: "sent",
-      });
-      s.addActivity({
-        id: crypto.randomUUID(),
-        sessionId,
-        type: "agent-action",
-        description: `${agent.name} completed a task`,
-        timestamp: new Date().toISOString(),
-        agentId: agent.id,
-      });
-    }, delay);
+    try {
+      // POST to API — server handles persistence, broadcasting, and agent responses
+      const msg = await api.sendMessage(activeSessionId, { content, mentions });
+      // Add our own message locally (server broadcasts to OTHER clients)
+      addMessage(msg);
+    } catch (err) {
+      console.error("Failed to send message:", err);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -316,66 +283,3 @@ export function ChatView() {
   );
 }
 
-function getAgentResponse(role: string): string {
-  const responses: Record<string, string> = {
-    coder:
-      "I've updated the implementation. The changes include proper error handling and input validation.",
-    reviewer:
-      "I've reviewed the changes. The code looks clean, but I have a few suggestions for improvement.",
-    planner:
-      "Here's the implementation plan broken down into phases. Each phase has clear deliverables and success criteria.",
-    tester:
-      "All tests are passing. I've added new test cases covering the edge cases we discussed.",
-    designer:
-      "I've analyzed the UI and have some suggestions for improving the user experience.",
-  };
-  return responses[role] ?? "Task completed successfully.";
-}
-
-function getExpandableContent(role: string) {
-  if (role === "coder") {
-    return [
-      {
-        type: "diff" as const,
-        title: "changes",
-        summary: "auth.go (+12 -3)",
-        content: `@@ -42,8 +42,19 @@ func Validate(token string) error {
-     return ErrInvalidFormat
-   }
-
-+  // Check token expiration
-+  claims, err := ParseClaims(token)
-+  if err != nil {
-+    return fmt.Errorf("parse claims: %w", err)
-+  }
-+
-+  if claims.ExpiresAt.Before(time.Now()) {
-+    return ErrTokenExpired
-+  }
-+
-   return nil
- }`,
-      },
-    ];
-  }
-  if (role === "tester") {
-    return [
-      {
-        type: "test-results" as const,
-        title: "test results",
-        summary: "4/4 passing",
-        content: `=== RUN   TestValidate
---- PASS: TestValidate (0.00s)
-=== RUN   TestValidateExpired
---- PASS: TestValidateExpired (0.00s)
-=== RUN   TestValidateInvalid
---- PASS: TestValidateInvalid (0.00s)
-=== RUN   TestValidateEmpty
---- PASS: TestValidateEmpty (0.00s)
-PASS
-ok  	forge-api/auth	0.003s`,
-      },
-    ];
-  }
-  return undefined;
-}
