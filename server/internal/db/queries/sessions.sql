@@ -8,8 +8,8 @@ ORDER BY s.last_activity_at DESC;
 SELECT * FROM sessions WHERE id = $1;
 
 -- name: CreateSession :one
-INSERT INTO sessions (name, project_id, status, workspace_status, plan_content)
-VALUES ($1, $2, 'active', 'starting', '')
+INSERT INTO sessions (name, project_id, repo_url, status, workspace_status, plan_content)
+VALUES ($1, $2, $3, 'active', 'starting', '')
 RETURNING *;
 
 -- name: UpdateSessionStatus :one

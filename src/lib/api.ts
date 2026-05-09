@@ -34,6 +34,7 @@ export const api = {
   createSession: (body: {
     name: string;
     projectId: string;
+    repoUrl?: string;
     agentIds: string[];
     memberIds: string[];
   }) =>
@@ -80,4 +81,17 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ agentIds }),
     }),
+
+  listGitHubRepos: () =>
+    request<
+      {
+        name: string;
+        fullName: string;
+        cloneUrl: string;
+        description: string;
+        language: string;
+        private: boolean;
+        defaultBranch: string;
+      }[]
+    >("/github/repos"),
 };

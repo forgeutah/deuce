@@ -60,6 +60,7 @@ type Session struct {
 	PlanContent     string    `json:"plan_content"`
 	CreatedAt       time.Time `json:"created_at"`
 	LastActivityAt  time.Time `json:"last_activity_at"`
+	RepoUrl         string    `json:"repo_url"`
 }
 
 type SessionAgent struct {

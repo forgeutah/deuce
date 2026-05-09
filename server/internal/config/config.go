@@ -7,9 +7,12 @@ import (
 )
 
 type Config struct {
-	Port        int    `env:"PORT" envDefault:"8080"`
-	DatabaseURL string `env:"DATABASE_URL" envDefault:"postgres://deuce:deuce@localhost:5432/deuce?sslmode=disable"`
-	UserID      string `env:"DEUCE_USER_ID" envDefault:"10000000-0000-0000-0000-000000000001"`
+	Port           int    `env:"PORT" envDefault:"8080"`
+	DatabaseURL    string `env:"DATABASE_URL" envDefault:"postgres://deuce:deuce@localhost:5432/deuce?sslmode=disable"`
+	UserID         string `env:"DEUCE_USER_ID" envDefault:"10000000-0000-0000-0000-000000000001"`
+	GitHubToken    string `env:"GITHUB_TOKEN" envDefault:""`
+	DevPodBin      string `env:"DEVPOD_BIN" envDefault:"devpod"`
+	DevPodProvider string `env:"DEVPOD_PROVIDER" envDefault:""`
 }
 
 func Load() (*Config, error) {

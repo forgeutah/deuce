@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -155,6 +157,7 @@ func (h *Handler) GetSession(w http.ResponseWriter, r *http.Request) {
 type createSessionRequest struct {
 	Name      string   `json:"name"`
 	ProjectID string   `json:"projectId"`
+	RepoURL   string   `json:"repoUrl"`
 	AgentIDs  []string `json:"agentIds"`
 	MemberIDs []string `json:"memberIds"`
 }
@@ -186,6 +189,7 @@ func (h *Handler) CreateSession(w http.ResponseWriter, r *http.Request) {
 	session, err := h.queries.CreateSession(r.Context(), db.CreateSessionParams{
 		Name:      req.Name,
 		ProjectID: projectID,
+		RepoUrl:   req.RepoURL,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to create session")
@@ -232,6 +236,11 @@ func (h *Handler) CreateSession(w http.ResponseWriter, r *http.Request) {
 	msg, _ := ws.NewServerMessage(ws.TypeSessionUpdate, session.ID.String(), sr)
 	for _, mid := range req.MemberIDs {
 		h.hub.BroadcastToUser(mid, msg)
+	}
+
+	// Kick off DevPod workspace in background
+	if req.RepoURL != "" && h.workspaces != nil && h.workspaces.Available() {
+		go h.startWorkspace(session.ID, req.Name, req.RepoURL)
 	}
 
 	writeJSON(w, http.StatusCreated, sr)
@@ -315,4 +324,32 @@ func (h *Handler) UpdateSession(w http.ResponseWriter, r *http.Request) {
 	h.hub.BroadcastToSession(sessionID.String(), msg, nil)
 
 	writeJSON(w, http.StatusOK, sr)
+}
+
+func (h *Handler) startWorkspace(sessionID uuid.UUID, workspaceID, repoURL string) {
+	ctx := context.Background()
+	slog.Info("starting workspace", "sessionID", sessionID, "workspaceID", workspaceID, "repoURL", repoURL)
+
+	err := h.workspaces.Create(ctx, workspaceID, repoURL)
+
+	var newStatus string
+	if err != nil {
+		slog.Error("workspace creation failed", "sessionID", sessionID, "error", err)
+		newStatus = "failed"
+	} else {
+		newStatus = "ready"
+	}
+
+	_, dbErr := h.queries.UpdateSessionWorkspaceStatus(ctx, db.UpdateSessionWorkspaceStatusParams{
+		ID:              sessionID,
+		WorkspaceStatus: newStatus,
+	})
+	if dbErr != nil {
+		slog.Error("failed to update workspace status in DB", "error", dbErr)
+	}
+
+	wsMsg, _ := ws.NewServerMessage(ws.TypeSessionUpdate, sessionID.String(), map[string]string{
+		"workspaceStatus": newStatus,
+	})
+	h.hub.BroadcastToSession(sessionID.String(), wsMsg, nil)
 }

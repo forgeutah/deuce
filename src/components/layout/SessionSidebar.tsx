@@ -19,6 +19,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { useSessionStore } from "@/stores/session-store";
+import { CreateSessionDialog } from "@/components/session/CreateSessionDialog";
 import type { Session, Project } from "@/types";
 
 function SessionCard({
@@ -110,6 +111,7 @@ function ProjectGroup({
 }
 
 export function SessionSidebar() {
+  const [createOpen, setCreateOpen] = useState(false);
   const {
     projects,
     sessions,
@@ -141,6 +143,7 @@ export function SessionSidebar() {
               variant="ghost"
               size="icon"
               className="h-7 w-7 text-foreground-muted hover:text-foreground"
+              onClick={() => setCreateOpen(true)}
             >
               <Plus className="h-4 w-4" />
             </Button>
@@ -198,6 +201,8 @@ export function SessionSidebar() {
           Settings
         </button>
       </div>
+
+      <CreateSessionDialog open={createOpen} onOpenChange={setCreateOpen} />
     </div>
   );
 }

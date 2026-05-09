@@ -9,17 +9,26 @@ import (
 
 	"github.com/forgeutah/deuce/server/internal/auth"
 	db "github.com/forgeutah/deuce/server/internal/db"
+	"github.com/forgeutah/deuce/server/internal/workspace"
 	"github.com/forgeutah/deuce/server/internal/ws"
 )
 
 type Handler struct {
-	queries *db.Queries
-	pool    *pgxpool.Pool
-	hub     *ws.Hub
+	queries     *db.Queries
+	pool        *pgxpool.Pool
+	hub         *ws.Hub
+	githubToken string
+	workspaces  *workspace.Manager
 }
 
-func New(queries *db.Queries, pool *pgxpool.Pool, hub *ws.Hub) *Handler {
-	return &Handler{queries: queries, pool: pool, hub: hub}
+func New(queries *db.Queries, pool *pgxpool.Pool, hub *ws.Hub, githubToken string, wm *workspace.Manager) *Handler {
+	return &Handler{
+		queries:     queries,
+		pool:        pool,
+		hub:         hub,
+		githubToken: githubToken,
+		workspaces:  wm,
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

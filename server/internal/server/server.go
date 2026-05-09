@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -12,6 +13,7 @@ import (
 	"github.com/forgeutah/deuce/server/internal/config"
 	db "github.com/forgeutah/deuce/server/internal/db"
 	"github.com/forgeutah/deuce/server/internal/handler"
+	"github.com/forgeutah/deuce/server/internal/workspace"
 	"github.com/forgeutah/deuce/server/internal/ws"
 )
 
@@ -48,7 +50,12 @@ func (s *Server) Router() http.Handler {
 
 	r.Use(auth.Middleware(s.cfg.UserID))
 
-	h := handler.New(s.queries, s.pool, s.hub)
+	wm := workspace.NewManager(s.cfg.DevPodBin, s.cfg.DevPodProvider)
+	if !wm.Available() {
+		slog.Warn("devpod binary not found, workspace creation will be skipped")
+	}
+
+	h := handler.New(s.queries, s.pool, s.hub, s.cfg.GitHubToken, wm)
 
 	go s.hub.Run()
 
@@ -57,6 +64,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/teams", h.ListTeams)
 		r.Get("/projects", h.ListProjects)
 		r.Get("/agents", h.ListAgents)
+		r.Get("/github/repos", h.ListGitHubRepos)
 
 		r.Route("/sessions", func(r chi.Router) {
 			r.Get("/", h.ListSessions)
