@@ -64,6 +64,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/teams", h.ListTeams)
 		r.Get("/projects", h.ListProjects)
 		r.Get("/agents", h.ListAgents)
+		r.Get("/github/orgs", h.ListGitHubOrgs)
 		r.Get("/github/repos", h.ListGitHubRepos)
 
 		r.Route("/sessions", func(r chi.Router) {

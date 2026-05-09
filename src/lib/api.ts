@@ -82,7 +82,10 @@ export const api = {
       body: JSON.stringify({ agentIds }),
     }),
 
-  listGitHubRepos: () =>
+  listGitHubOrgs: () =>
+    request<{ login: string; avatarUrl: string }[]>("/github/orgs"),
+
+  listGitHubRepos: (owner: string) =>
     request<
       {
         name: string;
@@ -93,5 +96,5 @@ export const api = {
         private: boolean;
         defaultBranch: string;
       }[]
-    >("/github/repos"),
+    >(`/github/repos?owner=${encodeURIComponent(owner)}`),
 };

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { Hash, Loader2, Lock, Globe, Search } from "lucide-react";
+import { Hash, Loader2, Lock, Globe, Search, ChevronDown } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -8,10 +8,14 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useSessionStore } from "@/stores/session-store";
+
+interface GitHubOrg {
+  login: string;
+  avatarUrl: string;
+}
 
 interface GitHubRepo {
   name: string;
@@ -53,13 +57,25 @@ export function CreateSessionDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const [name, setName] = useState("");
+
+  // GitHub orgs
+  const [orgs, setOrgs] = useState<GitHubOrg[]>([]);
+  const [orgsLoading, setOrgsLoading] = useState(false);
+  const [selectedOrg, setSelectedOrg] = useState<GitHubOrg | null>(null);
+  const [orgDropdownOpen, setOrgDropdownOpen] = useState(false);
+
+  // Repos for selected org
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
   const [reposLoading, setReposLoading] = useState(false);
   const [reposError, setReposError] = useState<string | null>(null);
   const [selectedRepo, setSelectedRepo] = useState<GitHubRepo | null>(null);
   const [repoSearch, setRepoSearch] = useState("");
+
+  // Agents
   const [agents, setAgents] = useState<AgentPreset[]>([]);
-  const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
+  const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,27 +95,47 @@ export function CreateSessionDialog({
     );
   }, [repos, repoSearch]);
 
-  // Load repos and agents when dialog opens
+  // Load orgs and agents when dialog opens
   useEffect(() => {
     if (!open) return;
-    setReposLoading(true);
-    setReposError(null);
 
+    setOrgsLoading(true);
     api
-      .listGitHubRepos()
-      .then(setRepos)
-      .catch((err) => setReposError(err.message))
-      .finally(() => setReposLoading(false));
+      .listGitHubOrgs()
+      .then((orgList) => {
+        setOrgs(orgList);
+        // Auto-select the first org (personal account)
+        if (orgList.length > 0 && !selectedOrg) {
+          setSelectedOrg(orgList[0]);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setOrgsLoading(false));
 
     api.listAgents().then((agentList) => {
       setAgents(agentList);
-      // Pre-select Coder
       const coder = agentList.find((a: AgentPreset) => a.role === "coder");
       if (coder) {
         setSelectedAgentIds(new Set([coder.id]));
       }
     });
   }, [open]);
+
+  // Load repos when org changes
+  useEffect(() => {
+    if (!selectedOrg) return;
+    setRepos([]);
+    setSelectedRepo(null);
+    setRepoSearch("");
+    setReposLoading(true);
+    setReposError(null);
+
+    api
+      .listGitHubRepos(selectedOrg.login)
+      .then(setRepos)
+      .catch((err) => setReposError(err.message))
+      .finally(() => setReposLoading(false));
+  }, [selectedOrg]);
 
   const toggleAgent = (id: string) => {
     setSelectedAgentIds((prev) => {
@@ -116,7 +152,6 @@ export function CreateSessionDialog({
     setError(null);
 
     try {
-      // Use the first project as default (or we could let the user pick)
       const projectId = projects[0]?.id;
       if (!projectId) {
         setError("No project available");
@@ -145,6 +180,7 @@ export function CreateSessionDialog({
 
   const resetForm = () => {
     setName("");
+    setSelectedOrg(null);
     setSelectedRepo(null);
     setRepoSearch("");
     setSelectedAgentIds(new Set());
@@ -187,25 +223,103 @@ export function CreateSessionDialog({
             )}
           </div>
 
+          {/* Org Selector */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-foreground-muted">
+              Organization
+            </label>
+            {orgsLoading ? (
+              <div className="flex items-center gap-2 rounded-md border border-border-muted bg-background-input px-3 py-2">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-foreground-subtle" />
+                <span className="text-xs text-foreground-subtle">
+                  Loading...
+                </span>
+              </div>
+            ) : (
+              <div className="relative">
+                <button
+                  onClick={() => setOrgDropdownOpen(!orgDropdownOpen)}
+                  className="flex w-full items-center gap-2 rounded-md border border-border-muted bg-background-input px-3 py-2 text-left text-xs hover:border-border-emphasis"
+                >
+                  {selectedOrg ? (
+                    <>
+                      <img
+                        src={selectedOrg.avatarUrl}
+                        alt=""
+                        className="h-4 w-4 rounded-full"
+                      />
+                      <span className="flex-1 text-foreground">
+                        {selectedOrg.login}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="flex-1 text-foreground-subtle">
+                      Select an organization...
+                    </span>
+                  )}
+                  <ChevronDown className="h-3 w-3 text-foreground-subtle" />
+                </button>
+
+                {orgDropdownOpen && (
+                  <div className="absolute z-50 mt-1 w-full rounded-md border border-border bg-background-overlay shadow-lg">
+                    {orgs.map((org) => (
+                      <button
+                        key={org.login}
+                        onClick={() => {
+                          setSelectedOrg(org);
+                          setOrgDropdownOpen(false);
+                        }}
+                        className={cn(
+                          "flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-background-hover",
+                          selectedOrg?.login === org.login &&
+                            "bg-background-emphasis",
+                        )}
+                      >
+                        <img
+                          src={org.avatarUrl}
+                          alt=""
+                          className="h-4 w-4 rounded-full"
+                        />
+                        <span className="text-foreground">{org.login}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Repository */}
           <div>
             <label className="mb-1 block text-xs font-medium text-foreground-muted">
               Repository
             </label>
 
-            {reposLoading ? (
+            {!selectedOrg ? (
+              <p className="text-xs text-foreground-subtle">
+                Select an organization first
+              </p>
+            ) : reposLoading ? (
               <div className="flex items-center gap-2 rounded-md border border-border-muted bg-background-input p-3">
                 <Loader2 className="h-4 w-4 animate-spin text-foreground-subtle" />
-                <span className="text-xs text-foreground-subtle">Loading repos from GitHub...</span>
+                <span className="text-xs text-foreground-subtle">
+                  Loading repos...
+                </span>
               </div>
             ) : reposError ? (
               <div className="rounded-md border border-danger-muted bg-danger-muted/20 p-3">
                 <p className="text-xs text-danger">{reposError}</p>
                 <button
                   onClick={() => {
-                    setReposLoading(true);
-                    setReposError(null);
-                    api.listGitHubRepos().then(setRepos).catch((e) => setReposError(e.message)).finally(() => setReposLoading(false));
+                    if (selectedOrg) {
+                      setReposLoading(true);
+                      setReposError(null);
+                      api
+                        .listGitHubRepos(selectedOrg.login)
+                        .then(setRepos)
+                        .catch((e) => setReposError(e.message))
+                        .finally(() => setReposLoading(false));
+                    }
                   }}
                   className="mt-1 text-xs text-accent hover:underline"
                 >
@@ -226,7 +340,7 @@ export function CreateSessionDialog({
                 </div>
 
                 {/* Repo list */}
-                <ScrollArea className="max-h-40">
+                <div className="h-48 overflow-y-auto">
                   <div className="flex flex-col">
                     {filteredRepos.map((repo) => (
                       <button
@@ -244,7 +358,7 @@ export function CreateSessionDialog({
                           <Globe className="h-3 w-3 shrink-0 text-foreground-subtle" />
                         )}
                         <span className="flex-1 truncate font-medium text-foreground">
-                          {repo.fullName}
+                          {repo.name}
                         </span>
                         {repo.language && (
                           <span className="rounded-full bg-background-subtle px-1.5 py-0.5 text-[10px] text-foreground-muted">
@@ -259,7 +373,7 @@ export function CreateSessionDialog({
                       </p>
                     )}
                   </div>
-                </ScrollArea>
+                </div>
               </div>
             )}
 
@@ -305,9 +419,7 @@ export function CreateSessionDialog({
           </div>
 
           {/* Error */}
-          {error && (
-            <p className="text-xs text-danger">{error}</p>
-          )}
+          {error && <p className="text-xs text-danger">{error}</p>}
 
           {/* Submit */}
           <Button
