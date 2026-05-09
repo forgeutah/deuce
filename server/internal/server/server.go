@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/forgeutah/deuce/server/internal/config"
 	db "github.com/forgeutah/deuce/server/internal/db"
 	"github.com/forgeutah/deuce/server/internal/handler"
+	"github.com/forgeutah/deuce/server/internal/terminal"
 	"github.com/forgeutah/deuce/server/internal/workspace"
 	"github.com/forgeutah/deuce/server/internal/ws"
 )
@@ -53,9 +55,14 @@ func (s *Server) Router() http.Handler {
 	wm := workspace.NewManager(s.cfg.DevPodBin, s.cfg.DevPodProvider)
 	if !wm.Available() {
 		slog.Warn("devpod binary not found, workspace creation will be skipped")
+	} else {
+		if err := wm.EnsureDockerProvider(context.Background()); err != nil {
+			slog.Warn("failed to ensure docker provider", "error", err)
+		}
 	}
 
-	h := handler.New(s.queries, s.pool, s.hub, s.cfg.GitHubToken, wm)
+	tm := terminal.NewManager()
+	h := handler.New(s.queries, s.pool, s.hub, s.cfg.GitHubToken, wm, tm)
 
 	go s.hub.Run()
 
@@ -82,6 +89,7 @@ func (s *Server) Router() http.Handler {
 	})
 
 	r.Get("/ws", h.HandleWebSocket)
+	r.Get("/ws/terminal/{sessionID}", h.HandleTerminalWebSocket)
 
 	return r
 }

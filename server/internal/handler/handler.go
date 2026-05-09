@@ -9,6 +9,7 @@ import (
 
 	"github.com/forgeutah/deuce/server/internal/auth"
 	db "github.com/forgeutah/deuce/server/internal/db"
+	"github.com/forgeutah/deuce/server/internal/terminal"
 	"github.com/forgeutah/deuce/server/internal/workspace"
 	"github.com/forgeutah/deuce/server/internal/ws"
 )
@@ -19,15 +20,17 @@ type Handler struct {
 	hub         *ws.Hub
 	githubToken string
 	workspaces  *workspace.Manager
+	terminals   *terminal.Manager
 }
 
-func New(queries *db.Queries, pool *pgxpool.Pool, hub *ws.Hub, githubToken string, wm *workspace.Manager) *Handler {
+func New(queries *db.Queries, pool *pgxpool.Pool, hub *ws.Hub, githubToken string, wm *workspace.Manager, tm *terminal.Manager) *Handler {
 	return &Handler{
 		queries:     queries,
 		pool:        pool,
 		hub:         hub,
 		githubToken: githubToken,
 		workspaces:  wm,
+		terminals:   tm,
 	}
 }
 

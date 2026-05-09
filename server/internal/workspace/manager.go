@@ -30,6 +30,42 @@ func (m *Manager) Available() bool {
 	return err == nil
 }
 
+// EnsureDockerProvider checks if a docker provider exists and adds one if not.
+func (m *Manager) EnsureDockerProvider(ctx context.Context) error {
+	// List existing providers
+	cmd := exec.CommandContext(ctx, m.bin, "provider", "list", "--output", "json")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		slog.Warn("failed to list devpod providers", "error", err)
+		// Fall through to try adding anyway
+	} else if strings.Contains(string(output), "docker") {
+		slog.Info("docker provider already exists")
+		return nil
+	}
+
+	// Add docker provider
+	slog.Info("adding docker provider to devpod")
+	addCmd := exec.CommandContext(ctx, m.bin, "provider", "add", "docker")
+	addOutput, err := addCmd.CombinedOutput()
+	if err != nil {
+		// May already exist — check if the error says so
+		if strings.Contains(string(addOutput), "already exists") {
+			slog.Info("docker provider already exists")
+			return nil
+		}
+		return fmt.Errorf("failed to add docker provider: %w: %s", err, string(addOutput))
+	}
+
+	slog.Info("docker provider added successfully")
+
+	// Set as default if no provider is configured
+	if m.provider == "" {
+		m.provider = "docker"
+	}
+
+	return nil
+}
+
 // Create starts a new DevPod workspace from a git repo URL.
 // Output is streamed line-by-line to logFn (if non-nil).
 // This blocks until the workspace is ready or fails.
@@ -109,4 +145,10 @@ func (m *Manager) Status(ctx context.Context, workspaceID string) (string, error
 func (m *Manager) Exists(ctx context.Context, workspaceID string) bool {
 	status, _ := m.Status(ctx, workspaceID)
 	return status != "NotFound"
+}
+
+// SSHCommand returns an unstarted *exec.Cmd for `devpod ssh <workspaceID>`.
+// The caller is responsible for attaching a PTY and starting the command.
+func (m *Manager) SSHCommand(ctx context.Context, workspaceID string) *exec.Cmd {
+	return exec.CommandContext(ctx, m.bin, "ssh", workspaceID)
 }
