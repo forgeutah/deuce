@@ -17,6 +17,7 @@ const (
 	TypeActivityUpdate = "activity_update"
 	TypeSessionUpdate  = "session_update"
 	TypeUnreadUpdate   = "unread_update"
+	TypeWorkspaceLog   = "workspace_log"
 )
 
 // ClientMessage is a message from a client

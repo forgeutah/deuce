@@ -1,12 +1,16 @@
 package workspace
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log/slog"
 	"os/exec"
 	"strings"
 )
+
+// LogFunc receives each line of output from a DevPod command.
+type LogFunc func(line string)
 
 type Manager struct {
 	bin      string
@@ -27,8 +31,9 @@ func (m *Manager) Available() bool {
 }
 
 // Create starts a new DevPod workspace from a git repo URL.
+// Output is streamed line-by-line to logFn (if non-nil).
 // This blocks until the workspace is ready or fails.
-func (m *Manager) Create(ctx context.Context, workspaceID, repoURL string) error {
+func (m *Manager) Create(ctx context.Context, workspaceID, repoURL string, logFn LogFunc) error {
 	args := []string{"up", repoURL, "--id", workspaceID, "--ide", "none"}
 	if m.provider != "" {
 		args = append(args, "--provider", m.provider)
@@ -37,9 +42,32 @@ func (m *Manager) Create(ctx context.Context, workspaceID, repoURL string) error
 	slog.Info("starting devpod workspace", "id", workspaceID, "repo", repoURL)
 	cmd := exec.CommandContext(ctx, m.bin, args...)
 
-	output, err := cmd.CombinedOutput()
+	// Merge stderr into stdout so we capture everything
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		slog.Error("devpod up failed", "id", workspaceID, "error", err, "output", string(output))
+		return fmt.Errorf("stdout pipe: %w", err)
+	}
+	cmd.Stderr = cmd.Stdout
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("devpod start: %w", err)
+	}
+
+	// Stream output line by line
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024) // handle long lines
+	for scanner.Scan() {
+		line := scanner.Text()
+		slog.Debug("devpod output", "id", workspaceID, "line", line)
+		if logFn != nil {
+			logFn(line)
+		}
+	}
+
+	if err := cmd.Wait(); err != nil {
+		if logFn != nil {
+			logFn(fmt.Sprintf("ERROR: devpod up failed: %v", err))
+		}
 		return fmt.Errorf("devpod up failed: %w", err)
 	}
 

@@ -22,6 +22,7 @@ export function useWebSocket() {
     clearThinkingAgent,
     updateAgentStatus,
     addActivity,
+    appendWorkspaceLog,
   } = useSessionStore();
 
   const connect = useCallback(() => {
@@ -115,6 +116,12 @@ export function useWebSocket() {
           break;
         }
 
+        case "workspace_log": {
+          const { line } = msg.payload;
+          appendWorkspaceLog(msg.sessionId, line);
+          break;
+        }
+
         case "session_update": {
           // Refresh the session list to pick up changes
           api.listSessions().then((sessions) => {
@@ -135,7 +142,7 @@ export function useWebSocket() {
         }
       }
     },
-    [addMessage, updateAgentStatus, setThinkingAgent, clearThinkingAgent, addActivity],
+    [addMessage, updateAgentStatus, setThinkingAgent, clearThinkingAgent, addActivity, appendWorkspaceLog],
   );
 
   // Connect on mount

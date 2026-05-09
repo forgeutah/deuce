@@ -330,7 +330,15 @@ func (h *Handler) startWorkspace(sessionID uuid.UUID, workspaceID, repoURL strin
 	ctx := context.Background()
 	slog.Info("starting workspace", "sessionID", sessionID, "workspaceID", workspaceID, "repoURL", repoURL)
 
-	err := h.workspaces.Create(ctx, workspaceID, repoURL)
+	// Stream DevPod output line-by-line to WebSocket clients
+	logFn := func(line string) {
+		msg, _ := ws.NewServerMessage(ws.TypeWorkspaceLog, sessionID.String(), map[string]string{
+			"line": line,
+		})
+		h.hub.BroadcastToSession(sessionID.String(), msg, nil)
+	}
+
+	err := h.workspaces.Create(ctx, workspaceID, repoURL, logFn)
 
 	var newStatus string
 	if err != nil {

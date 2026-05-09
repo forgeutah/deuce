@@ -20,10 +20,12 @@ interface SessionState {
   activities: Record<string, ActivityItem[]>;
   fileTrees: Record<string, FileNode[]>;
   thinkingAgents: Record<string, string[]>;
+  workspaceLogs: Record<string, string[]>;
 
   // UI state
   activeSessionId: string | null;
   activeTabMap: Record<string, TabType>;
+  showLogs: boolean;
   searchQuery: string;
 
   // Actions
@@ -41,6 +43,8 @@ interface SessionState {
   ) => void;
   addActivity: (activity: ActivityItem) => void;
   updateSessionPlan: (sessionId: string, content: string) => void;
+  appendWorkspaceLog: (sessionId: string, line: string) => void;
+  setShowLogs: (show: boolean) => void;
   addSession: (session: Session) => void;
   updateWorkspaceStatus: (
     sessionId: string,
@@ -64,9 +68,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   activities: {},
   fileTrees: {},
   thinkingAgents: {},
+  workspaceLogs: {},
 
   activeSessionId: null,
   activeTabMap: {},
+  showLogs: false,
   searchQuery: "",
 
   setActiveSession: (sessionId) => {
@@ -185,6 +191,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         s.id === sessionId ? { ...s, planContent: content } : s,
       ),
     })),
+
+  appendWorkspaceLog: (sessionId, line) =>
+    set((state) => {
+      const current = state.workspaceLogs[sessionId] ?? [];
+      return {
+        workspaceLogs: {
+          ...state.workspaceLogs,
+          [sessionId]: [...current, line],
+        },
+      };
+    }),
+
+  setShowLogs: (show) => set({ showLogs: show }),
 
   addSession: (session) =>
     set((state) => ({
