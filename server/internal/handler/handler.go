@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/forgeutah/deuce/server/internal/agent"
 	"github.com/forgeutah/deuce/server/internal/auth"
 	db "github.com/forgeutah/deuce/server/internal/db"
 	"github.com/forgeutah/deuce/server/internal/terminal"
@@ -21,9 +22,11 @@ type Handler struct {
 	githubToken string
 	workspaces  *workspace.Manager
 	terminals   *terminal.Manager
+	executor    *agent.Executor
+	agentQueue  *agent.Queue
 }
 
-func New(queries *db.Queries, pool *pgxpool.Pool, hub *ws.Hub, githubToken string, wm *workspace.Manager, tm *terminal.Manager) *Handler {
+func New(queries *db.Queries, pool *pgxpool.Pool, hub *ws.Hub, githubToken string, wm *workspace.Manager, tm *terminal.Manager, exec *agent.Executor, aq *agent.Queue) *Handler {
 	return &Handler{
 		queries:     queries,
 		pool:        pool,
@@ -31,6 +34,8 @@ func New(queries *db.Queries, pool *pgxpool.Pool, hub *ws.Hub, githubToken strin
 		githubToken: githubToken,
 		workspaces:  wm,
 		terminals:   tm,
+		executor:    exec,
+		agentQueue:  aq,
 	}
 }
 

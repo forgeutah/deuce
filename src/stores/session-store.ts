@@ -21,6 +21,7 @@ interface SessionState {
   fileTrees: Record<string, FileNode[]>;
   thinkingAgents: Record<string, string[]>;
   workspaceLogs: Record<string, string[]>;
+  agentOutput: Record<string, { agentId: string; content: string; contentType: string }[]>;
 
   // UI state
   activeSessionId: string | null;
@@ -44,6 +45,8 @@ interface SessionState {
   addActivity: (activity: ActivityItem) => void;
   updateSessionPlan: (sessionId: string, content: string) => void;
   appendWorkspaceLog: (sessionId: string, line: string) => void;
+  appendAgentOutput: (sessionId: string, output: { agentId: string; content: string; contentType: string }) => void;
+  clearAgentOutput: (sessionId: string) => void;
   setShowLogs: (show: boolean) => void;
   addSession: (session: Session) => void;
   updateWorkspaceStatus: (
@@ -69,6 +72,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   fileTrees: {},
   thinkingAgents: {},
   workspaceLogs: {},
+  agentOutput: {},
 
   activeSessionId: null,
   activeTabMap: {},
@@ -202,6 +206,22 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         },
       };
     }),
+
+  appendAgentOutput: (sessionId, output) =>
+    set((state) => {
+      const current = state.agentOutput[sessionId] ?? [];
+      return {
+        agentOutput: {
+          ...state.agentOutput,
+          [sessionId]: [...current, output],
+        },
+      };
+    }),
+
+  clearAgentOutput: (sessionId) =>
+    set((state) => ({
+      agentOutput: { ...state.agentOutput, [sessionId]: [] },
+    })),
 
   setShowLogs: (show) => set({ showLogs: show }),
 

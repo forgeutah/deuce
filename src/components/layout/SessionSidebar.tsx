@@ -20,6 +20,7 @@ import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { useSessionStore } from "@/stores/session-store";
 import { CreateSessionDialog } from "@/components/session/CreateSessionDialog";
+import { AgentSettingsDialog } from "@/components/settings/AgentSettingsDialog";
 import type { Session, Project } from "@/types";
 
 function SessionCard({
@@ -112,6 +113,7 @@ function ProjectGroup({
 
 export function SessionSidebar() {
   const [createOpen, setCreateOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const {
     projects,
     sessions,
@@ -196,13 +198,17 @@ export function SessionSidebar() {
           <Users className="h-4 w-4" />
           Teams
         </button>
-        <button className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground-muted hover:bg-background-hover hover:text-foreground">
+        <button
+          onClick={() => setSettingsOpen(true)}
+          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground-muted hover:bg-background-hover hover:text-foreground"
+        >
           <Settings className="h-4 w-4" />
           Settings
         </button>
       </div>
 
       <CreateSessionDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <AgentSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   );
 }

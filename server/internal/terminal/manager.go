@@ -10,6 +10,11 @@ import (
 	"github.com/creack/pty/v2"
 )
 
+// replayBufferSize caps the recent-output buffer replayed to new clients.
+// 100 KiB is enough for a shell banner plus a few screens of scrollback while
+// keeping memory per terminal session bounded.
+const replayBufferSize = 100 * 1024
+
 // Session represents a single PTY session attached to a devpod ssh process.
 type Session struct {
 	ptmx *os.File
@@ -17,6 +22,7 @@ type Session struct {
 
 	mu      sync.Mutex
 	clients map[io.Writer]bool
+	replay  []byte        // recent PTY output, replayed to new clients
 	done    chan struct{} // closed when the reader goroutine exits
 }
 
@@ -78,6 +84,7 @@ func (s *Session) readLoop(sessionID string) {
 			copy(data, buf[:n])
 
 			s.mu.Lock()
+			s.appendReplay(data)
 			for w := range s.clients {
 				if _, werr := w.Write(data); werr != nil {
 					// Mark broken client for removal — don't block others
@@ -109,10 +116,29 @@ func (s *Session) Resize(cols, rows uint16) error {
 	})
 }
 
-// AddClient registers a writer to receive PTY output.
+// appendReplay records recent PTY output for replay to new clients.
+// Caller must hold s.mu.
+func (s *Session) appendReplay(data []byte) {
+	s.replay = append(s.replay, data...)
+	if len(s.replay) > replayBufferSize {
+		trimmed := make([]byte, replayBufferSize)
+		copy(trimmed, s.replay[len(s.replay)-replayBufferSize:])
+		s.replay = trimmed
+	}
+}
+
+// AddClient registers a writer to receive PTY output and replays the
+// recent buffer so the client doesn't land on a blank terminal.
+// The replay write happens under the session lock to keep ordering
+// consistent with concurrent readLoop fan-out.
 func (s *Session) AddClient(w io.Writer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if len(s.replay) > 0 {
+		if _, err := w.Write(s.replay); err != nil {
+			return
+		}
+	}
 	s.clients[w] = true
 }
 

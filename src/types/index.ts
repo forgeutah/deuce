@@ -7,12 +7,7 @@ export type UserStatus = "online" | "offline";
 export type MessageStatus = "sent" | "thinking" | "error";
 export type AuthorType = "human" | "agent";
 
-export type AgentRole =
-  | "coder"
-  | "reviewer"
-  | "planner"
-  | "tester"
-  | "designer";
+export type AgentRole = string;
 
 export interface Team {
   id: string;
@@ -71,6 +66,7 @@ export interface Agent {
   provider: string;
   model: string;
   description: string;
+  systemPrompt: string;
 }
 
 export interface User {

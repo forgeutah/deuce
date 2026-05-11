@@ -7,8 +7,10 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const addSessionAgent = `-- name: AddSessionAgent :exec
@@ -113,22 +115,26 @@ func (q *Queries) GetUnreadCount(ctx context.Context, arg GetUnreadCountParams) 
 }
 
 const listSessionAgents = `-- name: ListSessionAgents :many
-SELECT a.id, a.name, a.role, a.color, a.color_muted, a.provider, a.model, a.description, sa.status as agent_status FROM agents a
+SELECT a.id, a.name, a.role, a.color, a.color_muted, a.provider, a.model, a.description, a.system_prompt, a.deleted_at, a.created_at, a.updated_at, sa.status as agent_status FROM agents a
 JOIN session_agents sa ON a.id = sa.agent_id
 WHERE sa.session_id = $1
 ORDER BY a.name
 `
 
 type ListSessionAgentsRow struct {
-	ID          uuid.UUID `json:"id"`
-	Name        string    `json:"name"`
-	Role        string    `json:"role"`
-	Color       string    `json:"color"`
-	ColorMuted  string    `json:"color_muted"`
-	Provider    string    `json:"provider"`
-	Model       string    `json:"model"`
-	Description string    `json:"description"`
-	AgentStatus string    `json:"agent_status"`
+	ID           uuid.UUID          `json:"id"`
+	Name         string             `json:"name"`
+	Role         string             `json:"role"`
+	Color        string             `json:"color"`
+	ColorMuted   string             `json:"color_muted"`
+	Provider     string             `json:"provider"`
+	Model        string             `json:"model"`
+	Description  string             `json:"description"`
+	SystemPrompt string             `json:"system_prompt"`
+	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
+	CreatedAt    time.Time          `json:"created_at"`
+	UpdatedAt    time.Time          `json:"updated_at"`
+	AgentStatus  string             `json:"agent_status"`
 }
 
 func (q *Queries) ListSessionAgents(ctx context.Context, sessionID uuid.UUID) ([]ListSessionAgentsRow, error) {
@@ -149,6 +155,10 @@ func (q *Queries) ListSessionAgents(ctx context.Context, sessionID uuid.UUID) ([
 			&i.Provider,
 			&i.Model,
 			&i.Description,
+			&i.SystemPrompt,
+			&i.DeletedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 			&i.AgentStatus,
 		); err != nil {
 			return nil, err

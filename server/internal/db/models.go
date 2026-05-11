@@ -22,14 +22,18 @@ type ActivityItem struct {
 }
 
 type Agent struct {
-	ID          uuid.UUID `json:"id"`
-	Name        string    `json:"name"`
-	Role        string    `json:"role"`
-	Color       string    `json:"color"`
-	ColorMuted  string    `json:"color_muted"`
-	Provider    string    `json:"provider"`
-	Model       string    `json:"model"`
-	Description string    `json:"description"`
+	ID           uuid.UUID          `json:"id"`
+	Name         string             `json:"name"`
+	Role         string             `json:"role"`
+	Color        string             `json:"color"`
+	ColorMuted   string             `json:"color_muted"`
+	Provider     string             `json:"provider"`
+	Model        string             `json:"model"`
+	Description  string             `json:"description"`
+	SystemPrompt string             `json:"system_prompt"`
+	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
+	CreatedAt    time.Time          `json:"created_at"`
+	UpdatedAt    time.Time          `json:"updated_at"`
 }
 
 type Message struct {
@@ -64,9 +68,10 @@ type Session struct {
 }
 
 type SessionAgent struct {
-	SessionID uuid.UUID `json:"session_id"`
-	AgentID   uuid.UUID `json:"agent_id"`
-	Status    string    `json:"status"`
+	SessionID       uuid.UUID `json:"session_id"`
+	AgentID         uuid.UUID `json:"agent_id"`
+	Status          string    `json:"status"`
+	ClaudeSessionID string    `json:"claude_session_id"`
 }
 
 type SessionMember struct {

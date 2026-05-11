@@ -23,6 +23,8 @@ export function useWebSocket() {
     updateAgentStatus,
     addActivity,
     appendWorkspaceLog,
+    appendAgentOutput,
+    clearAgentOutput,
   } = useSessionStore();
 
   const connect = useCallback(() => {
@@ -94,6 +96,10 @@ export function useWebSocket() {
         case "agent_status": {
           const { agentId, status } = msg.payload;
           updateAgentStatus(msg.sessionId, agentId, status);
+          // Clear streaming output when agent finishes
+          if (status === "idle" || status === "error") {
+            clearAgentOutput(msg.sessionId);
+          }
           break;
         }
 
@@ -113,6 +119,12 @@ export function useWebSocket() {
             ...activity,
             sessionId: msg.sessionId || activity.sessionId,
           });
+          break;
+        }
+
+        case "agent_output": {
+          const { agentId, content, contentType } = msg.payload;
+          appendAgentOutput(msg.sessionId, { agentId, content, contentType });
           break;
         }
 
@@ -142,7 +154,7 @@ export function useWebSocket() {
         }
       }
     },
-    [addMessage, updateAgentStatus, setThinkingAgent, clearThinkingAgent, addActivity, appendWorkspaceLog],
+    [addMessage, updateAgentStatus, setThinkingAgent, clearThinkingAgent, addActivity, appendWorkspaceLog, appendAgentOutput, clearAgentOutput],
   );
 
   // Connect on mount

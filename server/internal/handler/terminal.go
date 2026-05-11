@@ -38,9 +38,10 @@ func (h *Handler) HandleTerminalWebSocket(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Get or create the terminal session
+	// Get or create the terminal session.
+	// Use background context for the SSH command — it must outlive the HTTP request.
 	termSession, err := h.terminals.GetOrCreate(sessionID.String(), func() *exec.Cmd {
-		return h.workspaces.SSHCommand(r.Context(), session.Name)
+		return h.workspaces.SSHCommand(context.Background(), session.Name)
 	})
 	if err != nil {
 		slog.Error("failed to create terminal session", "sessionID", sessionID, "error", err)

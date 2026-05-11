@@ -45,11 +45,10 @@ func main() {
 	srv := server.New(pool, cfg)
 
 	httpServer := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.Port),
-		Handler:      srv.Router(),
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:              fmt.Sprintf(":%d", cfg.Port),
+		Handler:           srv.Router(),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	go func() {

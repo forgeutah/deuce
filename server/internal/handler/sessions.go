@@ -29,15 +29,16 @@ type sessionResponse struct {
 }
 
 type agentResult struct {
-	ID          uuid.UUID `json:"id"`
-	Name        string    `json:"name"`
-	Role        string    `json:"role"`
-	Color       string    `json:"color"`
-	ColorMuted  string    `json:"colorMuted"`
-	Status      string    `json:"status"`
-	Provider    string    `json:"provider"`
-	Model       string    `json:"model"`
-	Description string    `json:"description"`
+	ID           uuid.UUID `json:"id"`
+	Name         string    `json:"name"`
+	Role         string    `json:"role"`
+	Color        string    `json:"color"`
+	ColorMuted   string    `json:"colorMuted"`
+	Status       string    `json:"status"`
+	Provider     string    `json:"provider"`
+	Model        string    `json:"model"`
+	Description  string    `json:"description"`
+	SystemPrompt string    `json:"systemPrompt"`
 }
 
 func (h *Handler) buildSessionResponse(r *http.Request, s db.Session, userID uuid.UUID) (sessionResponse, error) {
@@ -62,15 +63,16 @@ func (h *Handler) buildSessionResponse(r *http.Request, s db.Session, userID uui
 	agentResults := make([]agentResult, 0, len(agents))
 	for _, a := range agents {
 		agentResults = append(agentResults, agentResult{
-			ID:          a.ID,
-			Name:        a.Name,
-			Role:        a.Role,
-			Color:       a.Color,
-			ColorMuted:  a.ColorMuted,
-			Status:      a.AgentStatus,
-			Provider:    a.Provider,
-			Model:       a.Model,
-			Description: a.Description,
+			ID:           a.ID,
+			Name:         a.Name,
+			Role:         a.Role,
+			Color:        a.Color,
+			ColorMuted:   a.ColorMuted,
+			Status:       a.AgentStatus,
+			Provider:     a.Provider,
+			Model:        a.Model,
+			Description:  a.Description,
+			SystemPrompt: a.SystemPrompt,
 		})
 	}
 
@@ -345,6 +347,11 @@ func (h *Handler) startWorkspace(sessionID uuid.UUID, workspaceID, repoURL strin
 		slog.Error("workspace creation failed", "sessionID", sessionID, "error", err)
 		newStatus = "failed"
 	} else {
+		// Install Claude Code after workspace creation succeeds
+		if installErr := h.workspaces.InstallTools(ctx, workspaceID, logFn); installErr != nil {
+			slog.Warn("claude code installation failed", "sessionID", sessionID, "error", installErr)
+			// Non-fatal — workspace is still usable
+		}
 		newStatus = "ready"
 	}
 

@@ -1,4 +1,11 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(bash /Users/clintberry/.claude/plugins/cache/every-marketplace/compound-engineering/3.8.0/skills/ce-setup/scripts/check-health --version 3.8.0)",
+      "Read(//Users/clintberry/.claude/plugins/cache/every-marketplace/compound-engineering/3.8.0/skills/ce-strategy/references/**)",
+      "WebFetch(domain:maggieappleton.com)"
+    ]
+  },
   "enabledPlugins": {
     "frontend-design@claude-plugins-official": true
   }

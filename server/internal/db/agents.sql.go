@@ -11,8 +11,54 @@ import (
 	"github.com/google/uuid"
 )
 
+const createAgent = `-- name: CreateAgent :one
+INSERT INTO agents (name, role, color, color_muted, provider, model, description, system_prompt)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, name, role, color, color_muted, provider, model, description, system_prompt, deleted_at, created_at, updated_at
+`
+
+type CreateAgentParams struct {
+	Name         string `json:"name"`
+	Role         string `json:"role"`
+	Color        string `json:"color"`
+	ColorMuted   string `json:"color_muted"`
+	Provider     string `json:"provider"`
+	Model        string `json:"model"`
+	Description  string `json:"description"`
+	SystemPrompt string `json:"system_prompt"`
+}
+
+func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, createAgent,
+		arg.Name,
+		arg.Role,
+		arg.Color,
+		arg.ColorMuted,
+		arg.Provider,
+		arg.Model,
+		arg.Description,
+		arg.SystemPrompt,
+	)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Role,
+		&i.Color,
+		&i.ColorMuted,
+		&i.Provider,
+		&i.Model,
+		&i.Description,
+		&i.SystemPrompt,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getAgent = `-- name: GetAgent :one
-SELECT id, name, role, color, color_muted, provider, model, description FROM agents WHERE id = $1
+SELECT id, name, role, color, color_muted, provider, model, description, system_prompt, deleted_at, created_at, updated_at FROM agents WHERE id = $1
 `
 
 func (q *Queries) GetAgent(ctx context.Context, id uuid.UUID) (Agent, error) {
@@ -27,12 +73,32 @@ func (q *Queries) GetAgent(ctx context.Context, id uuid.UUID) (Agent, error) {
 		&i.Provider,
 		&i.Model,
 		&i.Description,
+		&i.SystemPrompt,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
+const getClaudeSessionID = `-- name: GetClaudeSessionID :one
+SELECT claude_session_id FROM session_agents WHERE session_id = $1 AND agent_id = $2
+`
+
+type GetClaudeSessionIDParams struct {
+	SessionID uuid.UUID `json:"session_id"`
+	AgentID   uuid.UUID `json:"agent_id"`
+}
+
+func (q *Queries) GetClaudeSessionID(ctx context.Context, arg GetClaudeSessionIDParams) (string, error) {
+	row := q.db.QueryRow(ctx, getClaudeSessionID, arg.SessionID, arg.AgentID)
+	var claude_session_id string
+	err := row.Scan(&claude_session_id)
+	return claude_session_id, err
+}
+
 const listAgents = `-- name: ListAgents :many
-SELECT id, name, role, color, color_muted, provider, model, description FROM agents ORDER BY name
+SELECT id, name, role, color, color_muted, provider, model, description, system_prompt, deleted_at, created_at, updated_at FROM agents WHERE deleted_at IS NULL ORDER BY name
 `
 
 func (q *Queries) ListAgents(ctx context.Context) ([]Agent, error) {
@@ -53,6 +119,10 @@ func (q *Queries) ListAgents(ctx context.Context) ([]Agent, error) {
 			&i.Provider,
 			&i.Model,
 			&i.Description,
+			&i.SystemPrompt,
+			&i.DeletedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -62,4 +132,88 @@ func (q *Queries) ListAgents(ctx context.Context) ([]Agent, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const resetStaleAgentStatuses = `-- name: ResetStaleAgentStatuses :exec
+UPDATE session_agents SET status = 'idle' WHERE status = 'working'
+`
+
+func (q *Queries) ResetStaleAgentStatuses(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, resetStaleAgentStatuses)
+	return err
+}
+
+const softDeleteAgent = `-- name: SoftDeleteAgent :exec
+UPDATE agents SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) SoftDeleteAgent(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, softDeleteAgent, id)
+	return err
+}
+
+const updateAgent = `-- name: UpdateAgent :one
+UPDATE agents
+SET name = $2,
+    role = $3,
+    provider = $4,
+    model = $5,
+    description = $6,
+    system_prompt = $7,
+    updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL
+RETURNING id, name, role, color, color_muted, provider, model, description, system_prompt, deleted_at, created_at, updated_at
+`
+
+type UpdateAgentParams struct {
+	ID           uuid.UUID `json:"id"`
+	Name         string    `json:"name"`
+	Role         string    `json:"role"`
+	Provider     string    `json:"provider"`
+	Model        string    `json:"model"`
+	Description  string    `json:"description"`
+	SystemPrompt string    `json:"system_prompt"`
+}
+
+func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, updateAgent,
+		arg.ID,
+		arg.Name,
+		arg.Role,
+		arg.Provider,
+		arg.Model,
+		arg.Description,
+		arg.SystemPrompt,
+	)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Role,
+		&i.Color,
+		&i.ColorMuted,
+		&i.Provider,
+		&i.Model,
+		&i.Description,
+		&i.SystemPrompt,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateClaudeSessionID = `-- name: UpdateClaudeSessionID :exec
+UPDATE session_agents SET claude_session_id = $3 WHERE session_id = $1 AND agent_id = $2
+`
+
+type UpdateClaudeSessionIDParams struct {
+	SessionID       uuid.UUID `json:"session_id"`
+	AgentID         uuid.UUID `json:"agent_id"`
+	ClaudeSessionID string    `json:"claude_session_id"`
+}
+
+func (q *Queries) UpdateClaudeSessionID(ctx context.Context, arg UpdateClaudeSessionIDParams) error {
+	_, err := q.db.Exec(ctx, updateClaudeSessionID, arg.SessionID, arg.AgentID, arg.ClaudeSessionID)
+	return err
 }

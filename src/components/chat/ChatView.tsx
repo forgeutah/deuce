@@ -1,27 +1,82 @@
 import { useState, useRef, useEffect } from "react";
-import { SendHorizontal, Bot } from "lucide-react";
+import { SendHorizontal, Bot, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useSessionStore } from "@/stores/session-store";
 import type { Message, User } from "@/types";
 
-function TypingIndicator({ agentName, agentColor }: { agentName: string; agentColor: string }) {
+function TypingIndicator({
+  agentName,
+  agentColor,
+  sessionId,
+  streamingOutput,
+}: {
+  agentName: string;
+  agentColor: string;
+  sessionId: string;
+  streamingOutput: { content: string; contentType: string }[];
+}) {
+  const streamEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    streamEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [streamingOutput.length]);
+
+  const handleStop = async () => {
+    try {
+      await api.stopAgent(sessionId);
+    } catch (err) {
+      console.error("Failed to stop agent:", err);
+    }
+  };
+
   return (
-    <div className="flex items-center gap-2 px-4 py-2 animate-fade-in-up">
-      <div
-        className="flex h-7 w-7 items-center justify-center rounded text-xs font-semibold text-foreground-on-emphasis shrink-0"
-        style={{ backgroundColor: agentColor }}
-      >
-        {agentName[0]}
+    <div className="px-4 py-2 animate-fade-in-up">
+      <div className="flex items-center gap-2">
+        <div
+          className="flex h-7 w-7 items-center justify-center rounded text-xs font-semibold text-foreground-on-emphasis shrink-0"
+          style={{ backgroundColor: agentColor }}
+        >
+          {agentName[0]}
+        </div>
+        <span className="text-sm text-foreground-muted">{agentName} is working</span>
+        <div className="flex gap-1">
+          <span className="h-1.5 w-1.5 rounded-full bg-foreground-muted animate-typing-dot" style={{ animationDelay: "0s" }} />
+          <span className="h-1.5 w-1.5 rounded-full bg-foreground-muted animate-typing-dot" style={{ animationDelay: "0.2s" }} />
+          <span className="h-1.5 w-1.5 rounded-full bg-foreground-muted animate-typing-dot" style={{ animationDelay: "0.4s" }} />
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={handleStop}
+          className="ml-auto h-6 w-6 text-danger hover:text-danger hover:bg-danger/10"
+          title="Stop agent"
+        >
+          <Square className="h-3 w-3 fill-current" />
+        </Button>
       </div>
-      <span className="text-sm text-foreground-muted">{agentName} is thinking</span>
-      <div className="flex gap-1">
-        <span className="h-1.5 w-1.5 rounded-full bg-foreground-muted animate-typing-dot" style={{ animationDelay: "0s" }} />
-        <span className="h-1.5 w-1.5 rounded-full bg-foreground-muted animate-typing-dot" style={{ animationDelay: "0.2s" }} />
-        <span className="h-1.5 w-1.5 rounded-full bg-foreground-muted animate-typing-dot" style={{ animationDelay: "0.4s" }} />
-      </div>
+
+      {/* Streaming output */}
+      {streamingOutput.length > 0 && (
+        <div className="mt-2 ml-9 max-h-32 overflow-y-auto rounded-md border border-border-muted bg-background-subtle p-2">
+          {streamingOutput.map((item, i) => (
+            <span
+              key={i}
+              className={cn(
+                "text-xs",
+                item.contentType === "tool_use"
+                  ? "text-accent font-medium"
+                  : "text-foreground-muted",
+              )}
+            >
+              {item.contentType === "tool_use" ? `[${item.content}] ` : item.content}
+            </span>
+          ))}
+          <div ref={streamEndRef} />
+        </div>
+      )}
     </div>
   );
 }
@@ -118,10 +173,11 @@ function MessageBubble({
 }
 
 export function ChatView() {
-  const { activeSessionId, sessions, messages, thinkingAgents, addMessage } =
+  const { activeSessionId, sessions, messages, thinkingAgents, agentOutput, addMessage } =
     useSessionStore();
   const [input, setInput] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const session = sessions.find((s) => s.id === activeSessionId);
@@ -131,16 +187,33 @@ export function ChatView() {
   const thinking = activeSessionId
     ? (thinkingAgents[activeSessionId] ?? [])
     : [];
+  const streamOutput = activeSessionId
+    ? (agentOutput[activeSessionId] ?? [])
+    : [];
 
   const allParticipants = session
     ? [...session.agents, ...session.members]
     : [];
 
+  // Track whether user is near the bottom of the scroll area
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const threshold = 100;
+    isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+  };
+
+  // Auto-scroll only when user is near bottom, or on session switch
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (isNearBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [sessionMessages.length, thinking.length]);
+
+  // Always scroll to bottom on session switch
+  useEffect(() => {
+    isNearBottomRef.current = true;
+    bottomRef.current?.scrollIntoView();
+  }, [activeSessionId]);
 
   const handleSend = async () => {
     if (!input.trim() || !activeSessionId || !session) return;
@@ -184,7 +257,7 @@ export function ChatView() {
   return (
     <div className="flex h-full flex-col">
       {/* Messages */}
-      <ScrollArea className="flex-1" ref={scrollRef}>
+      <div className="flex-1 overflow-y-auto" onScroll={handleScroll}>
         <div className="flex flex-col gap-1 py-4">
           {sessionMessages.length === 0 && (
             <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -234,20 +307,25 @@ export function ChatView() {
             );
           })}
 
-          {/* Typing indicators */}
+          {/* Typing indicators with streaming output */}
           {thinking.map((agentId) => {
             const agent = session?.agents.find((a) => a.id === agentId);
             if (!agent) return null;
+            const agentStream = streamOutput.filter((o) => o.agentId === agentId);
             return (
               <TypingIndicator
                 key={agentId}
                 agentName={agent.name}
                 agentColor={agent.color}
+                sessionId={activeSessionId!}
+                streamingOutput={agentStream}
               />
             );
           })}
+
+          <div ref={bottomRef} />
         </div>
-      </ScrollArea>
+      </div>
 
       {/* Input */}
       <div className="border-t border-border-muted p-3">

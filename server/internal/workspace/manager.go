@@ -152,3 +152,79 @@ func (m *Manager) Exists(ctx context.Context, workspaceID string) bool {
 func (m *Manager) SSHCommand(ctx context.Context, workspaceID string) *exec.Cmd {
 	return exec.CommandContext(ctx, m.bin, "ssh", workspaceID)
 }
+
+// ExecInWorkspace returns an unstarted *exec.Cmd that runs a command inside
+// the DevPod workspace via `devpod ssh --command "..."`.
+// Unlike SSHCommand, this is non-interactive and leaves stdin free for piping.
+// Use envVars to pass environment variables into the container via --set-env.
+func (m *Manager) ExecInWorkspace(ctx context.Context, workspaceID, command string, envVars ...string) *exec.Cmd {
+	args := []string{"ssh", workspaceID, "--command", command}
+	for _, env := range envVars {
+		args = append(args, "--set-env", env)
+	}
+	return exec.CommandContext(ctx, m.bin, args...)
+}
+
+// InstallTools installs Claude Code inside the DevPod workspace.
+// Output is streamed line-by-line to logFn (if non-nil).
+func (m *Manager) InstallTools(ctx context.Context, workspaceID string, logFn LogFunc) error {
+	if logFn != nil {
+		logFn("Checking for Claude Code installation...")
+	}
+
+	// Check if claude is already installed
+	checkCmd := m.ExecInWorkspace(ctx, workspaceID, "claude --version")
+	if output, err := checkCmd.CombinedOutput(); err == nil {
+		version := strings.TrimSpace(string(output))
+		slog.Info("claude code already installed", "workspace", workspaceID, "version", version)
+		if logFn != nil {
+			logFn(fmt.Sprintf("Claude Code already installed: %s", version))
+		}
+		return nil
+	}
+
+	// Install Claude Code
+	if logFn != nil {
+		logFn("Installing Claude Code...")
+	}
+	slog.Info("installing claude code in workspace", "workspace", workspaceID)
+
+	installCmd := m.ExecInWorkspace(ctx, workspaceID, "npm install -g @anthropic-ai/claude-code")
+	stdout, err := installCmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("stdout pipe: %w", err)
+	}
+	installCmd.Stderr = installCmd.Stdout
+
+	if err := installCmd.Start(); err != nil {
+		if logFn != nil {
+			logFn("WARNING: Failed to install Claude Code (npm/node may not be available)")
+		}
+		slog.Warn("failed to start claude code install", "workspace", workspaceID, "error", err)
+		return nil // Non-fatal — workspace is still usable, just without agent support
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		slog.Debug("claude install output", "workspace", workspaceID, "line", line)
+		if logFn != nil {
+			logFn(line)
+		}
+	}
+
+	if err := installCmd.Wait(); err != nil {
+		if logFn != nil {
+			logFn("WARNING: Claude Code installation failed — agents will not be available")
+		}
+		slog.Warn("claude code install failed", "workspace", workspaceID, "error", err)
+		return nil // Non-fatal
+	}
+
+	if logFn != nil {
+		logFn("Claude Code installed successfully")
+	}
+	slog.Info("claude code installed successfully", "workspace", workspaceID)
+	return nil
+}

@@ -27,6 +27,41 @@ export const api = {
 
   listAgents: () => request<any[]>("/agents"),
 
+  createAgent: (body: {
+    name: string;
+    role: string;
+    provider: string;
+    model: string;
+    description: string;
+    systemPrompt: string;
+  }) =>
+    request<any>("/agents", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  updateAgent: (
+    id: string,
+    body: {
+      name: string;
+      role: string;
+      provider: string;
+      model: string;
+      description: string;
+      systemPrompt: string;
+    },
+  ) =>
+    request<any>(`/agents/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  deleteAgent: (id: string) =>
+    request<void>(`/agents/${id}`, { method: "DELETE" }),
+
+  stopAgent: (sessionId: string) =>
+    request<void>(`/sessions/${sessionId}/agents/stop`, { method: "POST" }),
+
   listSessions: () => request<any[]>("/sessions"),
 
   getSession: (id: string) => request<any>(`/sessions/${id}`),

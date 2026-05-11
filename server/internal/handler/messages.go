@@ -4,15 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"math/rand"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	agentpkg "github.com/forgeutah/deuce/server/internal/agent"
 	db "github.com/forgeutah/deuce/server/internal/db"
 	"github.com/forgeutah/deuce/server/internal/ws"
 )
@@ -168,138 +169,288 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	// Find the sender's WS client to exclude — for now broadcast to all (sender checks client-side)
 	h.hub.BroadcastToSession(sessionID.String(), wsMsg, nil)
 
-	// Process agent mentions
-	if len(req.Mentions) > 0 {
-		go h.processAgentMentions(sessionID, req.Mentions)
+	// Handle /stop command
+	if strings.TrimSpace(req.Content) == "/stop" || strings.HasSuffix(strings.TrimSpace(req.Content), " stop") {
+		if h.agentQueue != nil {
+			h.agentQueue.Cancel(sessionID.String())
+		}
+		writeJSON(w, http.StatusCreated, resp)
+		return
+	}
+
+	// Process agent mentions via the execution queue
+	if len(req.Mentions) > 0 && h.agentQueue != nil && h.executor != nil {
+		// Check workspace status first
+		session, err := h.queries.GetSession(r.Context(), sessionID)
+		if err == nil {
+			switch session.WorkspaceStatus {
+			case "starting":
+				h.postSystemMessage(sessionID, "Workspace is still starting — your agent request will run when it's ready.")
+			case "failed", "suspended":
+				h.postSystemMessage(sessionID, "Workspace is not available. Please restart the workspace before using agents.")
+			case "ready":
+				for _, mention := range req.Mentions {
+					agentID, err := uuid.Parse(mention)
+					if err != nil {
+						continue
+					}
+					ag, err := h.queries.GetAgent(r.Context(), agentID)
+					if err != nil {
+						continue
+					}
+
+					task := agentpkg.Task{
+						SessionID: sessionID.String(),
+						AgentID:   agentID.String(),
+						AgentName: ag.Name,
+						Prompt:    req.Content,
+						Callback:  func(t agentpkg.Task) { h.executeAgent(t, session.Name) },
+					}
+
+					if err := h.agentQueue.Enqueue(task); err != nil {
+						h.postSystemMessage(sessionID, "Agent queue is full. Please wait for current work to complete.")
+					}
+				}
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusCreated, resp)
 }
 
-func (h *Handler) processAgentMentions(sessionID uuid.UUID, mentions []string) {
-	ctx := context.Background()
-	for _, mention := range mentions {
-		agentID, err := uuid.Parse(mention)
-		if err != nil {
-			continue
-		}
-
-		// Get agent info
-		agent, err := h.queries.GetAgent(ctx, agentID)
-		if err != nil {
-			continue
-		}
-
-		// Set agent to working
-		_ = h.queries.UpdateSessionAgentStatus(ctx, db.UpdateSessionAgentStatusParams{
-			SessionID: sessionID,
-			AgentID:   agentID,
-			Status:    "working",
-		})
-
-		statusMsg, _ := ws.NewServerMessage(ws.TypeAgentStatus, sessionID.String(), map[string]any{
-			"agentId": agentID.String(),
-			"status":  "working",
-		})
-		h.hub.BroadcastToSession(sessionID.String(), statusMsg, nil)
-
-		// Send typing indicator
-		typingMsg, _ := ws.NewServerMessage(ws.TypeTypingIndicator, sessionID.String(), map[string]any{
-			"agentId": agentID.String(),
-			"active":  true,
-		})
-		h.hub.BroadcastToSession(sessionID.String(), typingMsg, nil)
-
-		// Simulate delay
-		delay := time.Duration(1500+rand.Intn(2000)) * time.Millisecond
-		time.Sleep(delay)
-
-		// Generate canned response
-		content, expandable := getAgentResponse(agent.Role)
-
-		var ec []byte
-		if expandable != nil {
-			ec, _ = json.Marshal(expandable)
-		}
-
-		agentMsg, err := h.queries.CreateMessage(ctx, db.CreateMessageParams{
-			SessionID:         sessionID,
-			AuthorID:          agentID,
-			AuthorType:        "agent",
-			Content:           content,
-			ExpandableContent: ec,
-			Mentions:          []string{},
-			Status:            "sent",
-		})
-
-		if err != nil {
-			slog.Error("failed to create agent message", "error", err)
-			continue
-		}
-
-		_ = h.queries.UpdateSessionLastActivity(ctx, sessionID)
-
-		// Stop typing
-		stopTyping, _ := ws.NewServerMessage(ws.TypeTypingIndicator, sessionID.String(), map[string]any{
-			"agentId": agentID.String(),
-			"active":  false,
-		})
-		h.hub.BroadcastToSession(sessionID.String(), stopTyping, nil)
-
-		// Broadcast agent message to ALL clients
-		agentWsMsg, _ := ws.NewServerMessage(ws.TypeNewMessage, sessionID.String(), toMessageResponse(agentMsg))
-		h.hub.BroadcastToSession(sessionID.String(), agentWsMsg, nil)
-
-		// Set agent back to idle
-		_ = h.queries.UpdateSessionAgentStatus(nil, db.UpdateSessionAgentStatusParams{
-			SessionID: sessionID,
-			AgentID:   agentID,
-			Status:    "idle",
-		})
-
-		idleMsg, _ := ws.NewServerMessage(ws.TypeAgentStatus, sessionID.String(), map[string]any{
-			"agentId": agentID.String(),
-			"status":  "idle",
-		})
-		h.hub.BroadcastToSession(sessionID.String(), idleMsg, nil)
-
-		// Create activity
-		activityDesc := agent.Name + " completed a task"
-		agentUUID := pgtype.UUID{Bytes: agentID, Valid: true}
-		_, _ = h.queries.CreateActivity(ctx, db.CreateActivityParams{
-			SessionID:   sessionID,
-			Type:        "agent-action",
-			Description: activityDesc,
-			AgentID:     agentUUID,
-		})
+// StopAgent handles POST /api/sessions/{id}/agents/stop
+func (h *Handler) StopAgent(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionID")
+	if h.agentQueue != nil {
+		h.agentQueue.Cancel(sessionID)
 	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
-func getAgentResponse(role string) (string, []map[string]string) {
-	switch role {
-	case "coder":
-		return "I've updated the implementation. The changes include proper error handling and input validation.",
-			[]map[string]string{{
-				"type":    "diff",
-				"title":   "changes",
-				"summary": "auth.go (+12 -3)",
-				"content": "@@ -42,8 +42,19 @@ func Validate(token string) error {\n     return ErrInvalidFormat\n   }\n\n+  // Check token expiration\n+  claims, err := ParseClaims(token)\n+  if err != nil {\n+    return fmt.Errorf(\"parse claims: %w\", err)\n+  }\n+\n+  if claims.ExpiresAt.Before(time.Now()) {\n+    return ErrTokenExpired\n+  }\n+\n   return nil\n }",
-			}}
-	case "reviewer":
-		return "I've reviewed the changes. The code looks clean, but I have a few suggestions for improvement.", nil
-	case "planner":
-		return "Here's the implementation plan broken down into phases. Each phase has clear deliverables and success criteria.", nil
-	case "tester":
-		return "All tests are passing. I've added new test cases covering the edge cases we discussed.",
-			[]map[string]string{{
-				"type":    "test-results",
-				"title":   "test results",
-				"summary": "4/4 passing",
-				"content": "=== RUN   TestValidate\n--- PASS: TestValidate (0.00s)\n=== RUN   TestValidateExpired\n--- PASS: TestValidateExpired (0.00s)\n=== RUN   TestValidateInvalid\n--- PASS: TestValidateInvalid (0.00s)\n=== RUN   TestValidateEmpty\n--- PASS: TestValidateEmpty (0.00s)\nPASS\nok  \tforge-api/auth\t0.003s",
-			}}
-	case "designer":
-		return "I've analyzed the UI and have some suggestions for improving the user experience.", nil
-	default:
-		return "Task completed successfully.", nil
+func (h *Handler) postSystemMessage(sessionID uuid.UUID, content string) {
+	msg, err := h.queries.CreateMessage(context.Background(), db.CreateMessageParams{
+		SessionID:         sessionID,
+		AuthorID:          uuid.Nil,
+		AuthorType:        "agent",
+		Content:           content,
+		ExpandableContent: nil,
+		Mentions:          []string{},
+		Status:            "sent",
+	})
+	if err != nil {
+		slog.Error("failed to post system message", "error", err)
+		return
 	}
+	wsMsg, _ := ws.NewServerMessage(ws.TypeNewMessage, sessionID.String(), toMessageResponse(msg))
+	h.hub.BroadcastToSession(sessionID.String(), wsMsg, nil)
+}
+
+func (h *Handler) executeAgent(task agentpkg.Task, workspaceName string) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sessionID, _ := uuid.Parse(task.SessionID)
+	agentID, _ := uuid.Parse(task.AgentID)
+
+	// Store cancel function for stop button
+	h.agentQueue.SetCancel(task.SessionID, cancel)
+	defer h.agentQueue.ClearCancel(task.SessionID)
+
+	// Set agent to working
+	_ = h.queries.UpdateSessionAgentStatus(ctx, db.UpdateSessionAgentStatusParams{
+		SessionID: sessionID,
+		AgentID:   agentID,
+		Status:    "working",
+	})
+	statusMsg, _ := ws.NewServerMessage(ws.TypeAgentStatus, sessionID.String(), map[string]any{
+		"agentId": task.AgentID,
+		"status":  "working",
+	})
+	h.hub.BroadcastToSession(sessionID.String(), statusMsg, nil)
+
+	// Send typing indicator
+	typingMsg, _ := ws.NewServerMessage(ws.TypeTypingIndicator, sessionID.String(), map[string]any{
+		"agentId": task.AgentID,
+		"active":  true,
+	})
+	h.hub.BroadcastToSession(sessionID.String(), typingMsg, nil)
+
+	// Get agent info for system prompt
+	ag, err := h.queries.GetAgent(ctx, agentID)
+	if err != nil {
+		slog.Error("failed to get agent", "error", err)
+		h.finishAgent(sessionID, agentID, task.AgentID, "Failed to load agent configuration.", true)
+		return
+	}
+
+	// Get Claude session ID for continuity
+	claudeSessionID := ""
+	if csid, err := h.queries.GetClaudeSessionID(ctx, db.GetClaudeSessionIDParams{
+		SessionID: sessionID,
+		AgentID:   agentID,
+	}); err == nil {
+		claudeSessionID = csid
+	}
+
+	// Build chat history context
+	chatHistory := h.buildChatHistory(ctx, sessionID, claudeSessionID != "")
+
+	// Streaming callback — broadcast agent output via WebSocket
+	streamFn := func(event agentpkg.StreamEvent) {
+		outMsg, _ := ws.NewServerMessage(ws.TypeAgentOutput, sessionID.String(), map[string]any{
+			"agentId":     task.AgentID,
+			"content":     event.Content,
+			"contentType": event.Type,
+		})
+		h.hub.BroadcastToSession(sessionID.String(), outMsg, nil)
+	}
+
+	// Execute
+	result, execErr := h.executor.Execute(ctx, agentpkg.ExecuteParams{
+		WorkspaceID:     workspaceName,
+		AgentName:       ag.Name,
+		SystemPrompt:    ag.SystemPrompt,
+		UserMessage:     task.Prompt,
+		ChatHistory:     chatHistory,
+		ClaudeSessionID: claudeSessionID,
+		Model:           ag.Model,
+	}, streamFn)
+
+	if execErr != nil {
+		errMsg := "Agent encountered an error: " + execErr.Error()
+		if result != nil && result.Error == "cancelled" {
+			errMsg = "Cancelled by user."
+		} else if result != nil && result.Error == "timeout" {
+			errMsg = "Agent execution timed out."
+		}
+		h.finishAgent(sessionID, agentID, task.AgentID, errMsg, true)
+		return
+	}
+
+	// Store Claude session ID for continuity
+	if result.ClaudeSessionID != "" {
+		_ = h.queries.UpdateClaudeSessionID(ctx, db.UpdateClaudeSessionIDParams{
+			SessionID:       sessionID,
+			AgentID:         agentID,
+			ClaudeSessionID: result.ClaudeSessionID,
+		})
+	}
+
+	// Create the agent message
+	var ec []byte
+	if len(result.ExpandableContent) > 0 {
+		ec, _ = json.Marshal(result.ExpandableContent)
+	}
+
+	content := result.Summary
+	if content == "" {
+		content = "Task completed."
+	}
+
+	h.finishAgent(sessionID, agentID, task.AgentID, content, false, ec)
+}
+
+func (h *Handler) finishAgent(sessionID, agentID uuid.UUID, agentIDStr, content string, isError bool, expandableContent ...[]byte) {
+	ctx := context.Background()
+
+	// Stop typing
+	stopTyping, _ := ws.NewServerMessage(ws.TypeTypingIndicator, sessionID.String(), map[string]any{
+		"agentId": agentIDStr,
+		"active":  false,
+	})
+	h.hub.BroadcastToSession(sessionID.String(), stopTyping, nil)
+
+	// Create message
+	var ec []byte
+	if len(expandableContent) > 0 {
+		ec = expandableContent[0]
+	}
+
+	agentMsg, err := h.queries.CreateMessage(ctx, db.CreateMessageParams{
+		SessionID:         sessionID,
+		AuthorID:          agentID,
+		AuthorType:        "agent",
+		Content:           content,
+		ExpandableContent: ec,
+		Mentions:          []string{},
+		Status:            "sent",
+	})
+	if err != nil {
+		slog.Error("failed to create agent message", "error", err)
+	} else {
+		_ = h.queries.UpdateSessionLastActivity(ctx, sessionID)
+		agentWsMsg, _ := ws.NewServerMessage(ws.TypeNewMessage, sessionID.String(), toMessageResponse(agentMsg))
+		h.hub.BroadcastToSession(sessionID.String(), agentWsMsg, nil)
+	}
+
+	// Set status
+	finalStatus := "idle"
+	if isError {
+		finalStatus = "error"
+		// Reset to idle after a delay
+		go func() {
+			time.Sleep(10 * time.Second)
+			_ = h.queries.UpdateSessionAgentStatus(context.Background(), db.UpdateSessionAgentStatusParams{
+				SessionID: sessionID,
+				AgentID:   agentID,
+				Status:    "idle",
+			})
+			idleMsg, _ := ws.NewServerMessage(ws.TypeAgentStatus, sessionID.String(), map[string]any{
+				"agentId": agentIDStr,
+				"status":  "idle",
+			})
+			h.hub.BroadcastToSession(sessionID.String(), idleMsg, nil)
+		}()
+	}
+
+	_ = h.queries.UpdateSessionAgentStatus(ctx, db.UpdateSessionAgentStatusParams{
+		SessionID: sessionID,
+		AgentID:   agentID,
+		Status:    finalStatus,
+	})
+
+	statusMsg, _ := ws.NewServerMessage(ws.TypeAgentStatus, sessionID.String(), map[string]any{
+		"agentId": agentIDStr,
+		"status":  finalStatus,
+	})
+	h.hub.BroadcastToSession(sessionID.String(), statusMsg, nil)
+
+	// Create activity
+	agentUUID := pgtype.UUID{Bytes: agentID, Valid: true}
+	desc := "completed a task"
+	if isError {
+		desc = "encountered an error"
+	}
+	_, _ = h.queries.CreateActivity(ctx, db.CreateActivityParams{
+		SessionID:   sessionID,
+		Type:        "agent-action",
+		Description: desc,
+		AgentID:     agentUUID,
+	})
+}
+
+func (h *Handler) buildChatHistory(ctx context.Context, sessionID uuid.UUID, hasResume bool) string {
+	msgs, err := h.queries.ListMessages(ctx, db.ListMessagesParams{
+		SessionID: sessionID,
+		Limit:     20,
+	})
+	if err != nil || len(msgs) == 0 {
+		return ""
+	}
+
+	// If resuming, only include messages since the last agent response
+	if hasResume {
+		msgs = msgs[:min(5, len(msgs))]
+	}
+
+	var parts []string
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		prefix := "[Human]"
+		if m.AuthorType == "agent" {
+			prefix = "[Agent]"
+		}
+		parts = append(parts, prefix+" "+m.Content)
+	}
+	return strings.Join(parts, "\n")
 }

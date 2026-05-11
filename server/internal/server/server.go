@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/forgeutah/deuce/server/internal/agent"
 	"github.com/forgeutah/deuce/server/internal/auth"
 	"github.com/forgeutah/deuce/server/internal/config"
 	db "github.com/forgeutah/deuce/server/internal/db"
@@ -62,7 +63,17 @@ func (s *Server) Router() http.Handler {
 	}
 
 	tm := terminal.NewManager()
-	h := handler.New(s.queries, s.pool, s.hub, s.cfg.GitHubToken, wm, tm)
+
+	// Create agent executor and queue
+	exec := agent.NewExecutor(wm, s.cfg.AnthropicAPIKey)
+	aq := agent.NewQueue()
+
+	// Startup recovery: reset stale agent statuses from prior server crash
+	if err := s.queries.ResetStaleAgentStatuses(context.Background()); err != nil {
+		slog.Warn("failed to reset stale agent statuses", "error", err)
+	}
+
+	h := handler.New(s.queries, s.pool, s.hub, s.cfg.GitHubToken, wm, tm, exec, aq)
 
 	go s.hub.Run()
 
@@ -71,6 +82,9 @@ func (s *Server) Router() http.Handler {
 		r.Get("/teams", h.ListTeams)
 		r.Get("/projects", h.ListProjects)
 		r.Get("/agents", h.ListAgents)
+		r.Post("/agents", h.CreateAgent)
+		r.Put("/agents/{agentID}", h.UpdateAgent)
+		r.Delete("/agents/{agentID}", h.DeleteAgent)
 		r.Get("/github/orgs", h.ListGitHubOrgs)
 		r.Get("/github/repos", h.ListGitHubRepos)
 
@@ -84,6 +98,7 @@ func (s *Server) Router() http.Handler {
 				r.Post("/messages", h.SendMessage)
 				r.Get("/activities", h.ListActivities)
 				r.Put("/agents", h.UpdateSessionAgents)
+				r.Post("/agents/stop", h.StopAgent)
 			})
 		})
 	})
