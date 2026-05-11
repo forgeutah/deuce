@@ -14,7 +14,7 @@ Implementation is no longer the bottleneck — alignment is. Today, AI coding ag
 
 Deuce's bet: bring the agents *into the team* and the team into one shared room. See [STRATEGY.md](STRATEGY.md) for the full strategy.
 
-Inspired by Maggie Appleton's [Zero Alignment](https://maggieappleton.com/zero-alignment) and GitHub's ACE research prototype.
+Heavily inspired by Maggie Appleton's [Zero Alignment](https://maggieappleton.com/zero-alignment) and GitHub's ACE research prototype.
 
 ---
 
