@@ -40,7 +40,25 @@ Each **session** is like a Slack channel for one piece of work:
 - A GitHub personal access token (for repo discovery)
 - An Anthropic API key (for real agent execution)
 
-### Run it
+### Open in a Dev Container (recommended)
+
+If you have Docker Desktop and VS Code with the **Dev Containers** extension, the fastest way in is:
+
+1. Open the repo in VS Code.
+2. Run **Dev Containers: Reopen in Container**.
+
+The container ships Go, Node, the DevPod CLI, and the Go tools (`goose`, `sqlc`, `air`) pre-installed and pinned, copies `server/.env.example` to `server/.env` if it doesn't exist, runs migrations on every start, and exposes ports 5173, 8080, and 5432. Set `ANTHROPIC_API_KEY` and `GITHUB_TOKEN` on the host shell before launching VS Code and they'll forward into the container.
+
+Then, in two terminals inside the container:
+
+```bash
+cd server && make dev    # backend on :8080
+npm run dev              # frontend on :5173
+```
+
+> The devcontainer mounts the host Docker socket so the in-container DevPod CLI can spawn workspace containers on the host. GitHub Codespaces blocks this mount, so Codespaces support is best-effort — use the manual flow below in Codespaces.
+
+### Run it manually
 
 ```bash
 # 1. Start Postgres
@@ -51,6 +69,7 @@ cd server && make migrate && cd ..
 
 # 3. Configure the backend
 cp server/.env.example server/.env  # fill in GITHUB_TOKEN and ANTHROPIC_API_KEY
+                                     # (the devcontainer does this for you)
 
 # 4. Start the Go backend (hot reload via air)
 cd server && make dev

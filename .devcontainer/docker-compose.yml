@@ -1,0 +1,20 @@
+# Devcontainer compose override.
+# Merged with the root docker-compose.yml so the dev service can reach the
+# `postgres` service on the same compose network (hostname: postgres).
+#
+# Paths in this file are resolved relative to the FIRST compose file in the
+# merge order (the root docker-compose.yml), so they are written as if
+# the working directory is the repo root.
+services:
+  dev:
+    build:
+      context: ./.devcontainer
+      dockerfile: Dockerfile
+    volumes:
+      - .:/workspaces/deuce:cached
+      # docker-outside-of-docker: share the host Docker daemon so the in-container
+      # DevPod CLI can spawn workspace containers on the host.
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: sleep infinity
+    depends_on:
+      - postgres
