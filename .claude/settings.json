@@ -1,21 +1,17 @@
 {
   "permissions": {
     "allow": [
-      "Bash(bash /Users/clintberry/.claude/plugins/cache/every-marketplace/compound-engineering/3.8.0/skills/ce-setup/scripts/check-health --version 3.8.0)",
-      "Read(//Users/clintberry/.claude/plugins/cache/every-marketplace/compound-engineering/3.8.0/skills/ce-strategy/references/**)",
       "WebFetch(domain:maggieappleton.com)",
-      "Read(//Users/clintberry/.claude/plugins/cache/every-marketplace/compound-engineering/3.8.0/skills/ce-plan/references/**)",
-      "Read(//Users/clintberry/.claude/plugins/cache/every-marketplace/compound-engineering/3.8.0/skills/ce-doc-review/references/**)",
-      "Bash(ls ~/.claude/agents/compound-engineering/ 2>/dev/null | grep -i \"doc\\\\|review\\\\|coherence\\\\|feasibility\\\\|design-lens\\\\|adversarial\" | head -20)",
-      "Read(//Users/clintberry/.claude/agents/**)",
-      "Bash(find ~/.claude -type f \\\\\\( -name \"ce-coherence-reviewer*\" -o -name \"ce-feasibility-reviewer*\" -o -name \"ce-design-lens-reviewer*\" -o -name \"ce-adversarial-document-reviewer*\" \\\\\\) 2>/dev/null | head -20)",
-      "Read(//Users/clintberry/.claude/**)",
-      "Bash(grep -E \"\\\\.sql$\")",
       "Bash(git checkout *)",
       "Bash(make generate *)",
       "Bash(git stash *)",
       "Bash(git check-ignore *)",
-      "Bash(goose -dir internal/db/migrations postgres \"postgres://deuce:deuce@localhost:5432/deuce?sslmode=disable\" status)"
+      "Bash(goose -dir internal/db/migrations postgres \"postgres://deuce:deuce@localhost:5432/deuce?sslmode=disable\" status)",
+      "Bash(git symbolic-ref *)",
+      "Bash(git fetch *)",
+      "Bash(git pull *)",
+      "Bash(gh release *)",
+      "Bash(git push *)"
     ]
   },
   "enabledPlugins": {
