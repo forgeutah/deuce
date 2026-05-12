@@ -68,6 +68,7 @@ export const api = {
 
   createSession: (body: {
     name: string;
+    description?: string;
     projectId: string;
     repoUrl?: string;
     agentIds: string[];
@@ -84,6 +85,7 @@ export const api = {
       status?: string;
       planContent?: string;
       workspaceStatus?: string;
+      description?: string;
     },
   ) =>
     request<any>(`/sessions/${id}`, {
