@@ -47,20 +47,27 @@ export function CenterPanel() {
     <div className="flex h-full flex-col bg-background">
       {/* Session header + status */}
       {activeSession && (
-        <div className="flex items-center gap-2 border-b border-border-muted px-4 py-2">
-          <span className="text-sm font-semibold text-foreground-emphasis">
-            # {activeSession.name}
-          </span>
-          {activeSession.status !== "active" && (
-            <span
-              className={cn(
-                "rounded-full px-2 py-0.5 text-[10px] font-medium",
-                activeSession.status === "paused"
-                  ? "bg-warning-muted text-warning"
-                  : "bg-neutral-6 text-foreground-muted",
-              )}
-            >
-              {activeSession.status === "paused" ? "Paused" : "Archived"}
+        <div className="flex flex-col gap-0.5 border-b border-border-muted px-4 py-2">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-foreground-emphasis">
+              # {activeSession.name}
+            </span>
+            {activeSession.status !== "active" && (
+              <span
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                  activeSession.status === "paused"
+                    ? "bg-warning-muted text-warning"
+                    : "bg-neutral-6 text-foreground-muted",
+                )}
+              >
+                {activeSession.status === "paused" ? "Paused" : "Archived"}
+              </span>
+            )}
+          </div>
+          {activeSession.description && (
+            <span className="truncate text-xs text-foreground-muted">
+              {activeSession.description}
             </span>
           )}
         </div>
