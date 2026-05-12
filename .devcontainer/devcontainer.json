@@ -20,15 +20,15 @@
     "ghcr.io/devcontainers/features/node:1": {
       "version": "20"
     },
-    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
       "moby": false,
       "installDockerComposeSwitch": true
     }
   },
 
-  "forwardPorts": [5173, 8080, 5432],
+  "forwardPorts": [4000, 8080, 5432],
   "portsAttributes": {
-    "5173": { "label": "Vite (frontend)" },
+    "4000": { "label": "Vite (frontend)" },
     "8080": { "label": "Backend (Go)" },
     "5432": { "label": "Postgres" }
   },
@@ -36,8 +36,6 @@
   "containerEnv": {
     "DATABASE_URL": "postgres://deuce:deuce@postgres:5432/deuce?sslmode=disable",
     "DEUCE_USER_ID": "10000000-0000-0000-0000-000000000001",
-    "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
-    "GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}",
     "DEVPOD_PROVIDER": "docker"
   },
 

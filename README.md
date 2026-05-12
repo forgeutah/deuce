@@ -47,13 +47,13 @@ If you have Docker Desktop and VS Code with the **Dev Containers** extension, th
 1. Open the repo in VS Code.
 2. Run **Dev Containers: Reopen in Container**.
 
-The container ships Go, Node, the DevPod CLI, and the Go tools (`goose`, `sqlc`, `air`) pre-installed and pinned, copies `server/.env.example` to `server/.env` if it doesn't exist, runs migrations on every start, and exposes ports 5173, 8080, and 5432. Set `ANTHROPIC_API_KEY` and `GITHUB_TOKEN` on the host shell before launching VS Code and they'll forward into the container.
+The container ships Go, Node, the DevPod CLI, and the Go tools (`goose`, `sqlc`, `air`) pre-installed and pinned, copies `server/.env.example` to `server/.env` if it doesn't exist, runs migrations on every start, and exposes ports 4000, 8080, and 5432. Set `ANTHROPIC_API_KEY` and `GITHUB_TOKEN` on the host shell before launching VS Code and they'll forward into the container.
 
 Then, in two terminals inside the container:
 
 ```bash
 cd server && make dev    # backend on :8080
-npm run dev              # frontend on :5173
+npm run dev              # frontend on :4000
 ```
 
 > The devcontainer mounts the host Docker socket so the in-container DevPod CLI can spawn workspace containers on the host. GitHub Codespaces blocks this mount, so Codespaces support is best-effort — use the manual flow below in Codespaces.
@@ -79,7 +79,7 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:5173>.
+Open <http://localhost:4000>.
 
 See [CLAUDE.md](CLAUDE.md) for the full developer guide (commands, conventions, adding endpoints/migrations).
 

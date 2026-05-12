@@ -12,9 +12,10 @@ services:
       dockerfile: Dockerfile
     volumes:
       - .:/workspaces/deuce:cached
-      # docker-outside-of-docker: share the host Docker daemon so the in-container
-      # DevPod CLI can spawn workspace containers on the host.
-      - /var/run/docker.sock:/var/run/docker.sock
+    # docker-in-docker: run a Docker daemon inside this container so the DevPod
+    # CLI can clone workspaces into the container's filesystem and mount those
+    # paths into child containers without host/container path mismatches.
+    privileged: true
     command: sleep infinity
     depends_on:
       - postgres

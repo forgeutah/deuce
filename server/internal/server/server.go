@@ -43,7 +43,7 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RealIP)
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:5173", "http://localhost:8080"},
+		AllowedOrigins:   []string{"http://localhost:4000", "http://localhost:8080"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Content-Type", "X-User-ID"},
 		ExposedHeaders:   []string{"Link"},
