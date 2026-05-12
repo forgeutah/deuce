@@ -46,19 +46,25 @@ func (q *Queries) AddSessionMember(ctx context.Context, arg AddSessionMemberPara
 }
 
 const createSession = `-- name: CreateSession :one
-INSERT INTO sessions (name, project_id, repo_url, status, workspace_status, plan_content)
-VALUES ($1, $2, $3, 'active', 'starting', '')
-RETURNING id, name, project_id, status, workspace_status, plan_content, created_at, last_activity_at, repo_url
+INSERT INTO sessions (name, description, project_id, repo_url, status, workspace_status, plan_content)
+VALUES ($1, $2, $3, $4, 'active', 'starting', '')
+RETURNING id, name, project_id, status, workspace_status, plan_content, created_at, last_activity_at, repo_url, description
 `
 
 type CreateSessionParams struct {
-	Name      string    `json:"name"`
-	ProjectID uuid.UUID `json:"project_id"`
-	RepoUrl   string    `json:"repo_url"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	ProjectID   uuid.UUID `json:"project_id"`
+	RepoUrl     string    `json:"repo_url"`
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
-	row := q.db.QueryRow(ctx, createSession, arg.Name, arg.ProjectID, arg.RepoUrl)
+	row := q.db.QueryRow(ctx, createSession,
+		arg.Name,
+		arg.Description,
+		arg.ProjectID,
+		arg.RepoUrl,
+	)
 	var i Session
 	err := row.Scan(
 		&i.ID,
@@ -70,12 +76,13 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.CreatedAt,
 		&i.LastActivityAt,
 		&i.RepoUrl,
+		&i.Description,
 	)
 	return i, err
 }
 
 const getSession = `-- name: GetSession :one
-SELECT id, name, project_id, status, workspace_status, plan_content, created_at, last_activity_at, repo_url FROM sessions WHERE id = $1
+SELECT id, name, project_id, status, workspace_status, plan_content, created_at, last_activity_at, repo_url, description FROM sessions WHERE id = $1
 `
 
 func (q *Queries) GetSession(ctx context.Context, id uuid.UUID) (Session, error) {
@@ -91,6 +98,7 @@ func (q *Queries) GetSession(ctx context.Context, id uuid.UUID) (Session, error)
 		&i.CreatedAt,
 		&i.LastActivityAt,
 		&i.RepoUrl,
+		&i.Description,
 	)
 	return i, err
 }
@@ -206,7 +214,7 @@ func (q *Queries) ListSessionMembers(ctx context.Context, sessionID uuid.UUID) (
 }
 
 const listSessionsForUser = `-- name: ListSessionsForUser :many
-SELECT s.id, s.name, s.project_id, s.status, s.workspace_status, s.plan_content, s.created_at, s.last_activity_at, s.repo_url FROM sessions s
+SELECT s.id, s.name, s.project_id, s.status, s.workspace_status, s.plan_content, s.created_at, s.last_activity_at, s.repo_url, s.description FROM sessions s
 JOIN session_members sm ON s.id = sm.session_id
 WHERE sm.user_id = $1
 ORDER BY s.last_activity_at DESC
@@ -231,6 +239,7 @@ func (q *Queries) ListSessionsForUser(ctx context.Context, userID uuid.UUID) ([]
 			&i.CreatedAt,
 			&i.LastActivityAt,
 			&i.RepoUrl,
+			&i.Description,
 		); err != nil {
 			return nil, err
 		}
@@ -282,6 +291,33 @@ func (q *Queries) UpdateSessionAgentStatus(ctx context.Context, arg UpdateSessio
 	return err
 }
 
+const updateSessionDescription = `-- name: UpdateSessionDescription :one
+UPDATE sessions SET description = $2 WHERE id = $1 RETURNING id, name, project_id, status, workspace_status, plan_content, created_at, last_activity_at, repo_url, description
+`
+
+type UpdateSessionDescriptionParams struct {
+	ID          uuid.UUID `json:"id"`
+	Description string    `json:"description"`
+}
+
+func (q *Queries) UpdateSessionDescription(ctx context.Context, arg UpdateSessionDescriptionParams) (Session, error) {
+	row := q.db.QueryRow(ctx, updateSessionDescription, arg.ID, arg.Description)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.ProjectID,
+		&i.Status,
+		&i.WorkspaceStatus,
+		&i.PlanContent,
+		&i.CreatedAt,
+		&i.LastActivityAt,
+		&i.RepoUrl,
+		&i.Description,
+	)
+	return i, err
+}
+
 const updateSessionLastActivity = `-- name: UpdateSessionLastActivity :exec
 UPDATE sessions SET last_activity_at = now() WHERE id = $1
 `
@@ -292,7 +328,7 @@ func (q *Queries) UpdateSessionLastActivity(ctx context.Context, id uuid.UUID) e
 }
 
 const updateSessionPlan = `-- name: UpdateSessionPlan :one
-UPDATE sessions SET plan_content = $2 WHERE id = $1 RETURNING id, name, project_id, status, workspace_status, plan_content, created_at, last_activity_at, repo_url
+UPDATE sessions SET plan_content = $2 WHERE id = $1 RETURNING id, name, project_id, status, workspace_status, plan_content, created_at, last_activity_at, repo_url, description
 `
 
 type UpdateSessionPlanParams struct {
@@ -313,12 +349,13 @@ func (q *Queries) UpdateSessionPlan(ctx context.Context, arg UpdateSessionPlanPa
 		&i.CreatedAt,
 		&i.LastActivityAt,
 		&i.RepoUrl,
+		&i.Description,
 	)
 	return i, err
 }
 
 const updateSessionStatus = `-- name: UpdateSessionStatus :one
-UPDATE sessions SET status = $2 WHERE id = $1 RETURNING id, name, project_id, status, workspace_status, plan_content, created_at, last_activity_at, repo_url
+UPDATE sessions SET status = $2 WHERE id = $1 RETURNING id, name, project_id, status, workspace_status, plan_content, created_at, last_activity_at, repo_url, description
 `
 
 type UpdateSessionStatusParams struct {
@@ -339,12 +376,13 @@ func (q *Queries) UpdateSessionStatus(ctx context.Context, arg UpdateSessionStat
 		&i.CreatedAt,
 		&i.LastActivityAt,
 		&i.RepoUrl,
+		&i.Description,
 	)
 	return i, err
 }
 
 const updateSessionWorkspaceStatus = `-- name: UpdateSessionWorkspaceStatus :one
-UPDATE sessions SET workspace_status = $2 WHERE id = $1 RETURNING id, name, project_id, status, workspace_status, plan_content, created_at, last_activity_at, repo_url
+UPDATE sessions SET workspace_status = $2 WHERE id = $1 RETURNING id, name, project_id, status, workspace_status, plan_content, created_at, last_activity_at, repo_url, description
 `
 
 type UpdateSessionWorkspaceStatusParams struct {
@@ -365,6 +403,7 @@ func (q *Queries) UpdateSessionWorkspaceStatus(ctx context.Context, arg UpdateSe
 		&i.CreatedAt,
 		&i.LastActivityAt,
 		&i.RepoUrl,
+		&i.Description,
 	)
 	return i, err
 }

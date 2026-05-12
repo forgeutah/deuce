@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Hash,
+  Pencil,
   Plus,
   Search,
   Settings,
@@ -18,10 +19,13 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
 import { useSessionStore } from "@/stores/session-store";
 import { CreateSessionDialog } from "@/components/session/CreateSessionDialog";
 import { AgentSettingsDialog } from "@/components/settings/AgentSettingsDialog";
 import type { Session, Project } from "@/types";
+
+const MAX_DESCRIPTION_LENGTH = 200;
 
 function SessionCard({
   session,
@@ -32,6 +36,63 @@ function SessionCard({
   isActive: boolean;
   onClick: () => void;
 }) {
+  const updateSessionDescription = useSessionStore(
+    (s) => s.updateSessionDescription,
+  );
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(session.description);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editing]);
+
+  useEffect(() => {
+    if (!editing) {
+      setDraft(session.description);
+    }
+  }, [session.description, editing]);
+
+  const startEdit = (e: React.MouseEvent | React.KeyboardEvent) => {
+    e.stopPropagation();
+    setDraft(session.description);
+    setEditing(true);
+  };
+
+  const cancelEdit = () => {
+    setDraft(session.description);
+    setEditing(false);
+  };
+
+  const commitEdit = async () => {
+    if (!editing) return;
+    const next = draft.trim();
+    setEditing(false);
+    if (next === session.description) return;
+    updateSessionDescription(session.id, next);
+    try {
+      await api.updateSession(session.id, { description: next });
+    } catch {
+      updateSessionDescription(session.id, session.description);
+    }
+  };
+
+  const handleActivate = () => {
+    if (editing) return;
+    onClick();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (editing) return;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onClick();
+    }
+  };
+
   const statusDot = {
     ready: "bg-success",
     starting: "bg-warning animate-pulse-dot",
@@ -39,11 +100,19 @@ function SessionCard({
     suspended: "bg-neutral-7",
   }[session.workspaceStatus];
 
+  const descriptionColor = isActive
+    ? "text-foreground-muted"
+    : "text-foreground-subtle";
+
   return (
-    <button
-      onClick={onClick}
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label={session.name}
+      onClick={handleActivate}
+      onKeyDown={handleKeyDown}
       className={cn(
-        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+        "group flex w-full cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
         isActive
           ? "bg-background-emphasis border-l-2 border-accent text-foreground-emphasis"
           : "text-foreground hover:bg-background-hover border-l-2 border-transparent",
@@ -51,15 +120,60 @@ function SessionCard({
         session.status === "archived" && "opacity-40",
       )}
     >
-      <Hash className="h-4 w-4 shrink-0 text-foreground-subtle" />
-      <span className="truncate font-medium">{session.name}</span>
-      <span className={cn("ml-auto h-2 w-2 shrink-0 rounded-full", statusDot)} />
-      {session.unreadCount > 0 && (
-        <span className="ml-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-medium text-foreground-on-emphasis">
-          {session.unreadCount}
-        </span>
-      )}
-    </button>
+      <Hash className="mt-0.5 h-4 w-4 shrink-0 text-foreground-subtle" />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex items-center gap-1">
+          <span className="truncate font-medium">{session.name}</span>
+          {!editing && (
+            <button
+              type="button"
+              onClick={startEdit}
+              aria-label={`Edit description for ${session.name}`}
+              className="shrink-0 rounded p-0.5 text-foreground-subtle opacity-0 transition-opacity hover:text-foreground-muted focus:opacity-100 group-hover:opacity-100"
+              tabIndex={-1}
+            >
+              <Pencil className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+        {editing ? (
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void commitEdit();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                cancelEdit();
+              }
+            }}
+            onBlur={() => void commitEdit()}
+            maxLength={MAX_DESCRIPTION_LENGTH}
+            placeholder="What's this session for?"
+            className="mt-0.5 w-full rounded border border-border-muted bg-background-input px-1.5 py-0.5 text-xs text-foreground placeholder:text-foreground-subtle focus:border-accent focus:outline-none"
+          />
+        ) : (
+          session.description && (
+            <span className={cn("truncate text-xs", descriptionColor)}>
+              {session.description}
+            </span>
+          )
+        )}
+      </div>
+      <div className="mt-1.5 flex shrink-0 items-center gap-1">
+        <span className={cn("h-2 w-2 shrink-0 rounded-full", statusDot)} />
+        {session.unreadCount > 0 && (
+          <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-medium text-foreground-on-emphasis">
+            {session.unreadCount}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 

@@ -164,6 +164,7 @@ export const sessions: Session[] = [
   {
     id: "sess-1",
     name: "auth-module",
+    description: "JWT validation and refresh-token flow for the v2 API",
     projectId: "proj-1",
     status: "active",
     agents: [getAgent("agent-coder"), getAgent("agent-reviewer"), getAgent("agent-tester")],
@@ -194,6 +195,7 @@ export const sessions: Session[] = [
   {
     id: "sess-2",
     name: "api-rate-limiting",
+    description: "Token-bucket rate limiter via Redis, per-endpoint config",
     projectId: "proj-1",
     status: "active",
     agents: [getAgent("agent-coder"), getAgent("agent-planner")],
@@ -218,6 +220,7 @@ export const sessions: Session[] = [
   {
     id: "sess-3",
     name: "homepage-redesign",
+    description: "Marketing homepage refresh with the new hero animation",
     projectId: "proj-2",
     status: "active",
     agents: [getAgent("agent-coder"), getAgent("agent-designer")],
@@ -231,6 +234,7 @@ export const sessions: Session[] = [
   {
     id: "sess-4",
     name: "ci-pipeline",
+    description: "",
     projectId: "proj-1",
     status: "paused",
     agents: [getAgent("agent-coder")],
@@ -244,6 +248,7 @@ export const sessions: Session[] = [
   {
     id: "sess-5",
     name: "onboarding-flow",
+    description: "New-user onboarding wizard — paused while we finalize copy",
     projectId: "proj-2",
     status: "archived",
     agents: [getAgent("agent-coder"), getAgent("agent-planner")],
@@ -257,6 +262,7 @@ export const sessions: Session[] = [
   {
     id: "sess-6",
     name: "dashboard-charts",
+    description: "Recharts integration for the customer analytics dashboard",
     projectId: "proj-3",
     status: "active",
     agents: [getAgent("agent-coder"), getAgent("agent-reviewer"), getAgent("agent-tester")],

@@ -49,6 +49,8 @@ function isValidSlug(slug: string): boolean {
   return /^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(slug) || /^[a-z0-9]$/.test(slug);
 }
 
+const MAX_DESCRIPTION_LENGTH = 200;
+
 export function CreateSessionDialog({
   open,
   onOpenChange,
@@ -57,6 +59,7 @@ export function CreateSessionDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
 
   // GitHub orgs
   const [orgs, setOrgs] = useState<GitHubOrg[]>([]);
@@ -161,6 +164,7 @@ export function CreateSessionDialog({
 
       const session = await api.createSession({
         name: slug,
+        description: description.trim(),
         projectId,
         repoUrl: selectedRepo.cloneUrl,
         agentIds: Array.from(selectedAgentIds),
@@ -180,6 +184,7 @@ export function CreateSessionDialog({
 
   const resetForm = () => {
     setName("");
+    setDescription("");
     setSelectedOrg(null);
     setSelectedRepo(null);
     setRepoSearch("");
@@ -221,6 +226,20 @@ export function CreateSessionDialog({
                 </span>
               </div>
             )}
+          </div>
+
+          {/* Description */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-foreground-muted">
+              Description <span className="text-foreground-subtle">(optional)</span>
+            </label>
+            <Input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What's this session for?"
+              maxLength={MAX_DESCRIPTION_LENGTH}
+              className="bg-background-input border-border-muted text-foreground"
+            />
           </div>
 
           {/* Org Selector */}

@@ -26,6 +26,7 @@ export interface Project {
 export interface Session {
   id: string;
   name: string;
+  description: string;
   projectId: string;
   status: SessionStatus;
   agents: Agent[];
