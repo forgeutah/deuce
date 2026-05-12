@@ -44,6 +44,7 @@ interface SessionState {
   ) => void;
   addActivity: (activity: ActivityItem) => void;
   updateSessionPlan: (sessionId: string, content: string) => void;
+  updateSessionDescription: (sessionId: string, description: string) => void;
   appendWorkspaceLog: (sessionId: string, line: string) => void;
   appendAgentOutput: (sessionId: string, output: { agentId: string; content: string; contentType: string }) => void;
   clearAgentOutput: (sessionId: string) => void;
@@ -193,6 +194,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set((state) => ({
       sessions: state.sessions.map((s) =>
         s.id === sessionId ? { ...s, planContent: content } : s,
+      ),
+    })),
+
+  updateSessionDescription: (sessionId, description) =>
+    set((state) => ({
+      sessions: state.sessions.map((s) =>
+        s.id === sessionId ? { ...s, description } : s,
       ),
     })),
 
