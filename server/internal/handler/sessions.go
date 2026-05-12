@@ -14,17 +14,20 @@ import (
 	"github.com/forgeutah/deuce/server/internal/ws"
 )
 
+const maxSessionDescriptionLength = 200
+
 type sessionResponse struct {
-	ID              uuid.UUID     `json:"id"`
-	Name            string        `json:"name"`
-	ProjectID       uuid.UUID     `json:"projectId"`
-	Status          string        `json:"status"`
-	WorkspaceStatus string        `json:"workspaceStatus"`
-	PlanContent     string        `json:"planContent"`
-	CreatedAt       time.Time     `json:"createdAt"`
-	LastActivityAt  time.Time     `json:"lastActivityAt"`
-	UnreadCount     int           `json:"unreadCount"`
-	Agents          []agentResult `json:"agents"`
+	ID              uuid.UUID      `json:"id"`
+	Name            string         `json:"name"`
+	Description     string         `json:"description"`
+	ProjectID       uuid.UUID      `json:"projectId"`
+	Status          string         `json:"status"`
+	WorkspaceStatus string         `json:"workspaceStatus"`
+	PlanContent     string         `json:"planContent"`
+	CreatedAt       time.Time      `json:"createdAt"`
+	LastActivityAt  time.Time      `json:"lastActivityAt"`
+	UnreadCount     int            `json:"unreadCount"`
+	Agents          []agentResult  `json:"agents"`
 	Members         []memberResult `json:"members"`
 }
 
@@ -90,6 +93,7 @@ func (h *Handler) buildSessionResponse(r *http.Request, s db.Session, userID uui
 	return sessionResponse{
 		ID:              s.ID,
 		Name:            s.Name,
+		Description:     s.Description,
 		ProjectID:       s.ProjectID,
 		Status:          s.Status,
 		WorkspaceStatus: s.WorkspaceStatus,
@@ -157,11 +161,12 @@ func (h *Handler) GetSession(w http.ResponseWriter, r *http.Request) {
 }
 
 type createSessionRequest struct {
-	Name      string   `json:"name"`
-	ProjectID string   `json:"projectId"`
-	RepoURL   string   `json:"repoUrl"`
-	AgentIDs  []string `json:"agentIds"`
-	MemberIDs []string `json:"memberIds"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	ProjectID   string   `json:"projectId"`
+	RepoURL     string   `json:"repoUrl"`
+	AgentIDs    []string `json:"agentIds"`
+	MemberIDs   []string `json:"memberIds"`
 }
 
 func (h *Handler) CreateSession(w http.ResponseWriter, r *http.Request) {
@@ -182,6 +187,11 @@ func (h *Handler) CreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(req.Description) > maxSessionDescriptionLength {
+		writeError(w, http.StatusBadRequest, "DESCRIPTION_TOO_LONG", "description exceeds maximum length")
+		return
+	}
+
 	projectID, err := uuid.Parse(req.ProjectID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_PROJECT_ID", "invalid project ID")
@@ -189,9 +199,10 @@ func (h *Handler) CreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	session, err := h.queries.CreateSession(r.Context(), db.CreateSessionParams{
-		Name:      req.Name,
-		ProjectID: projectID,
-		RepoUrl:   req.RepoURL,
+		Name:        req.Name,
+		Description: req.Description,
+		ProjectID:   projectID,
+		RepoUrl:     req.RepoURL,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to create session")
@@ -252,6 +263,7 @@ type updateSessionRequest struct {
 	Status          *string `json:"status"`
 	PlanContent     *string `json:"planContent"`
 	WorkspaceStatus *string `json:"workspaceStatus"`
+	Description     *string `json:"description"`
 }
 
 func (h *Handler) UpdateSession(w http.ResponseWriter, r *http.Request) {
@@ -270,6 +282,11 @@ func (h *Handler) UpdateSession(w http.ResponseWriter, r *http.Request) {
 	var req updateSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
+		return
+	}
+
+	if req.Description != nil && len(*req.Description) > maxSessionDescriptionLength {
+		writeError(w, http.StatusBadRequest, "DESCRIPTION_TOO_LONG", "description exceeds maximum length")
 		return
 	}
 
@@ -303,6 +320,17 @@ func (h *Handler) UpdateSession(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to update workspace status")
+			return
+		}
+	}
+
+	if req.Description != nil {
+		session, err = h.queries.UpdateSessionDescription(r.Context(), db.UpdateSessionDescriptionParams{
+			ID:          sessionID,
+			Description: *req.Description,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to update description")
 			return
 		}
 	}
