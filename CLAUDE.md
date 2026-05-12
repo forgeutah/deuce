@@ -11,7 +11,7 @@ Deuce is an open source shared workspace for AI-assisted development. Sessions a
 ### Frontend (React + Vite, runs from repo root)
 
 ```bash
-npm run dev          # Dev server on :5173 (proxies /api and /ws to :8080)
+npm run dev          # Dev server on :4000 (proxies /api and /ws to :8080)
 npm run build        # Production build to dist/
 npm run lint         # ESLint
 npx tsc --noEmit     # TypeScript type check (no test suite yet)

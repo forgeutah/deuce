@@ -51,7 +51,7 @@ func (h *Handler) HandleTerminalWebSocket(w http.ResponseWriter, r *http.Request
 
 	// Accept WebSocket connection
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		OriginPatterns: []string{"localhost:5173", "localhost:8080"},
+		OriginPatterns: []string{"localhost:4000", "localhost:8080"},
 	})
 	if err != nil {
 		slog.Error("terminal websocket accept error", "error", err)

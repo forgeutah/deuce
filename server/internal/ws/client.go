@@ -127,7 +127,7 @@ func marshalJSON(v any) ([]byte, error) {
 // ServeWS upgrades an HTTP connection to WebSocket and starts the client
 func ServeWS(hub *Hub, w http.ResponseWriter, r *http.Request, userID string) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		OriginPatterns: []string{"localhost:5173", "localhost:8080"},
+		OriginPatterns: []string{"localhost:4000", "localhost:8080"},
 	})
 	if err != nil {
 		slog.Error("websocket accept error", "error", err)
