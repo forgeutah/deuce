@@ -89,3 +89,7 @@ GITHUB_TOKEN=          # GitHub PAT for repo listing (optional)
 DEVPOD_BIN=devpod      # DevPod binary path
 DEVPOD_PROVIDER=       # DevPod provider (empty = default)
 ```
+
+## Documented Solutions
+
+`docs/solutions/` — documented solutions to past problems (bugs, best practices, architectural patterns), organized by category (`architecture-patterns/`, `performance-issues/`, etc.) with YAML frontmatter (`module`, `tags`, `problem_type`). Relevant when implementing or debugging in documented areas.
