@@ -1,6 +1,11 @@
+import type { FileNode, FileContentResponse } from "@/types";
+
 const BASE = "/api";
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  options?: RequestInit & { signal?: AbortSignal },
+): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: {
       "Content-Type": "application/json",
@@ -134,4 +139,17 @@ export const api = {
         defaultBranch: string;
       }[]
     >(`/github/repos?owner=${encodeURIComponent(owner)}`),
+
+  listFiles: (sessionId: string) =>
+    request<FileNode[]>(`/sessions/${sessionId}/files`),
+
+  getFileContent: (
+    sessionId: string,
+    path: string,
+    signal?: AbortSignal,
+  ) =>
+    request<FileContentResponse>(
+      `/sessions/${sessionId}/files/content?path=${encodeURIComponent(path)}`,
+      { signal },
+    ),
 };

@@ -9,6 +9,27 @@ interface ServerMessage {
   payload: any;
 }
 
+// Per-session trailing-edge debounce for files refreshes triggered by
+// activity_update. Module-scoped so it survives hook re-renders.
+const filesRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const FILES_REFRESH_DEBOUNCE_MS = 500;
+
+function scheduleFilesRefresh(sessionId: string) {
+  const existing = filesRefreshTimers.get(sessionId);
+  if (existing) clearTimeout(existing);
+  const timer = setTimeout(() => {
+    filesRefreshTimers.delete(sessionId);
+    // refreshFiles now re-throws on failure so the refresh button can show
+    // an error — but the WS-driven call doesn't await it. Catch here to
+    // suppress the unhandled-rejection.
+    useSessionStore
+      .getState()
+      .refreshFiles(sessionId)
+      .catch(() => {});
+  }, FILES_REFRESH_DEBOUNCE_MS);
+  filesRefreshTimers.set(sessionId, timer);
+}
+
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -115,10 +136,15 @@ export function useWebSocket() {
 
         case "activity_update": {
           const activity = msg.payload as ActivityItem;
+          const sessionId = msg.sessionId || activity.sessionId;
           addActivity({
             ...activity,
-            sessionId: msg.sessionId || activity.sessionId,
+            sessionId,
           });
+          // Debounced refresh — every activity may have touched files. The
+          // backend's per-session walk lock collapses any overlap if the
+          // debounce window misses.
+          scheduleFilesRefresh(sessionId);
           break;
         }
 
