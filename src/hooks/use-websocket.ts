@@ -19,7 +19,13 @@ function scheduleFilesRefresh(sessionId: string) {
   if (existing) clearTimeout(existing);
   const timer = setTimeout(() => {
     filesRefreshTimers.delete(sessionId);
-    useSessionStore.getState().refreshFiles(sessionId);
+    // refreshFiles now re-throws on failure so the refresh button can show
+    // an error — but the WS-driven call doesn't await it. Catch here to
+    // suppress the unhandled-rejection.
+    useSessionStore
+      .getState()
+      .refreshFiles(sessionId)
+      .catch(() => {});
   }, FILES_REFRESH_DEBOUNCE_MS);
   filesRefreshTimers.set(sessionId, timer);
 }

@@ -120,6 +120,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const existing = filesRefreshInFlight.get(sessionId);
     if (existing) return existing;
 
+    // Don't swallow the error — callers (refresh button, WS debounce) want
+    // to surface failures distinctly. We still log because the WS path
+    // doesn't await and would otherwise produce a silent unhandled rejection.
     const promise = api
       .listFiles(sessionId)
       .then((files) => {
@@ -127,6 +130,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       })
       .catch((err) => {
         console.error("[files] refresh failed", err);
+        throw err;
       })
       .finally(() => {
         filesRefreshInFlight.delete(sessionId);
