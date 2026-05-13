@@ -13,7 +13,22 @@
       "Bash(gh release *)",
       "Bash(git push *)",
       "Bash(netstat -tlnp)",
-      "Bash(docker compose *)"
+      "Bash(docker compose *)",
+      "Bash(mkdir -p /tmp/compound-engineering/ce-ideate/3f9a2b1c && echo /tmp/compound-engineering/ce-ideate/3f9a2b1c)",
+      "WebSearch",
+      "WebFetch(domain:devpod.sh)",
+      "WebFetch(domain:code.visualstudio.com)",
+      "WebFetch(domain:coder.com)",
+      "Bash(npx eslint *)",
+      "Bash(npx tsc *)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'feat\\(files\\): wire FilesView UI with git status colors and content viewer *)",
+      "Bash(go build *)",
+      "Bash(go vet *)",
+      "Read(//home/vscode/.claude/plugins/cache/compound-engineering-plugin/compound-engineering/3.8.1/skills/ce-brainstorm/references/**)"
+    ],
+    "additionalDirectories": [
+      "/tmp/compound-engineering/ce-ideate"
     ]
   },
   "enabledPlugins": {

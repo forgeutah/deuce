@@ -122,7 +122,7 @@ export function CenterPanel() {
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-hidden">
+      <div className="relative flex-1 overflow-hidden">
         {showLogs ? (
           <LogsView />
         ) : (
@@ -130,9 +130,12 @@ export function CenterPanel() {
             {activeTab === "chat" && <ChatView />}
             {activeTab === "plan" && <PlanView />}
             {activeTab === "files" && <FilesView key={activeSessionId} />}
-            {activeTab === "terminal" && <TerminalView />}
           </>
         )}
+        {/* Terminal stays mounted to preserve the PTY connection across tab switches. */}
+        <div className={cn("absolute inset-0", (showLogs || activeTab !== "terminal") && "hidden")}>
+          <TerminalView />
+        </div>
       </div>
     </div>
   );
