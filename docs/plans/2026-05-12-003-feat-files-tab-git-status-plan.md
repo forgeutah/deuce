@@ -1,7 +1,7 @@
 ---
 title: Files tab with git status
 type: feat
-status: active
+status: completed
 date: 2026-05-12
 origin: docs/brainstorms/2026-05-12-files-tab-git-status-requirements.md
 ---
