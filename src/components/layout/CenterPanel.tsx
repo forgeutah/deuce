@@ -129,7 +129,7 @@ export function CenterPanel() {
           <>
             {activeTab === "chat" && <ChatView />}
             {activeTab === "plan" && <PlanView />}
-            {activeTab === "files" && <FilesView />}
+            {activeTab === "files" && <FilesView key={activeSessionId} />}
             {activeTab === "terminal" && <TerminalView />}
           </>
         )}
