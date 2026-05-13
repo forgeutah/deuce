@@ -78,6 +78,8 @@ export interface User {
   status: UserStatus;
 }
 
+export type GitStatus = "M" | "U" | "A" | "D";
+
 export interface FileNode {
   id: string;
   name: string;
@@ -87,6 +89,16 @@ export interface FileNode {
   content?: string;
   language?: string;
   modifiedBy?: string;
+  gitStatus?: GitStatus;
+  isRepoRoot?: boolean;
+}
+
+export interface FileContentResponse {
+  path: string;
+  content: string;
+  isBinary: boolean;
+  truncated: boolean;
+  size: number;
 }
 
 export interface ActivityItem {

@@ -31,6 +31,7 @@ interface SessionState {
 
   // Actions
   setActiveSession: (sessionId: string) => void;
+  refreshFiles: (sessionId: string) => Promise<void>;
   setActiveTab: (sessionId: string, tab: TabType) => void;
   setSearchQuery: (query: string) => void;
   clearUnread: (sessionId: string) => void;
@@ -63,6 +64,11 @@ interface SessionState {
   setActivities: (sessionId: string, activities: ActivityItem[]) => void;
   setFileTrees: (sessionId: string, files: FileNode[]) => void;
 }
+
+// Per-session in-flight tracker for files refreshes. Lives outside the store
+// so promises don't end up in reactive state; the dedupe just collapses
+// overlapping fetches into a single network call.
+const filesRefreshInFlight = new Map<string, Promise<void>>();
 
 export const useSessionStore = create<SessionState>((set, get) => ({
   teams: [],
@@ -100,6 +106,34 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         get().setActivities(sessionId, activities);
       }).catch(console.error);
     }
+    // Load files only when the workspace is ready — otherwise the backend
+    // returns 409 and the call is pure waste.
+    if (!state.fileTrees[sessionId]) {
+      const session = state.sessions.find((s) => s.id === sessionId);
+      if (session?.workspaceStatus === "ready") {
+        get().refreshFiles(sessionId);
+      }
+    }
+  },
+
+  refreshFiles: (sessionId) => {
+    const existing = filesRefreshInFlight.get(sessionId);
+    if (existing) return existing;
+
+    const promise = api
+      .listFiles(sessionId)
+      .then((files) => {
+        get().setFileTrees(sessionId, files);
+      })
+      .catch((err) => {
+        console.error("[files] refresh failed", err);
+      })
+      .finally(() => {
+        filesRefreshInFlight.delete(sessionId);
+      });
+
+    filesRefreshInFlight.set(sessionId, promise);
+    return promise;
   },
 
   setActiveTab: (sessionId, tab) =>
