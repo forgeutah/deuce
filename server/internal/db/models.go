@@ -48,6 +48,20 @@ type Message struct {
 	CreatedAt         time.Time `json:"created_at"`
 }
 
+type Patch struct {
+	ID                 uuid.UUID   `json:"id"`
+	SessionID          uuid.UUID   `json:"session_id"`
+	ProducingMessageID pgtype.UUID `json:"producing_message_id"`
+	ParentPatchID      pgtype.UUID `json:"parent_patch_id"`
+	OriginType         string      `json:"origin_type"`
+	WorkspaceSha       string      `json:"workspace_sha"`
+	CommittedSha       pgtype.Text `json:"committed_sha"`
+	Hunks              []byte      `json:"hunks"`
+	FileCount          int32       `json:"file_count"`
+	HunkCount          int32       `json:"hunk_count"`
+	CreatedAt          time.Time   `json:"created_at"`
+}
+
 type Project struct {
 	ID      uuid.UUID `json:"id"`
 	Name    string    `json:"name"`
