@@ -27,6 +27,7 @@ type patchSummary struct {
 	CommittedSha       *string    `json:"committedSha"`
 	FileCount          int32      `json:"fileCount"`
 	HunkCount          int32      `json:"hunkCount"`
+	FailedMidTurn      bool       `json:"failedMidTurn"`
 	CreatedAt          time.Time  `json:"createdAt"`
 }
 
@@ -65,6 +66,7 @@ func toPatchSummary(p db.Patch) patchSummary {
 		CommittedSha:       committedSha,
 		FileCount:          p.FileCount,
 		HunkCount:          p.HunkCount,
+		FailedMidTurn:      p.FailedMidTurn,
 		CreatedAt:          p.CreatedAt,
 	}
 }

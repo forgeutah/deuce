@@ -18,7 +18,8 @@ INSERT INTO patches (
     committed_sha,
     hunks,
     file_count,
-    hunk_count
+    hunk_count,
+    failed_mid_turn
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING *;

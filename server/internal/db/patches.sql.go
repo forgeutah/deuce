@@ -22,10 +22,11 @@ INSERT INTO patches (
     committed_sha,
     hunks,
     file_count,
-    hunk_count
+    hunk_count,
+    failed_mid_turn
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, session_id, producing_message_id, parent_patch_id, origin_type, workspace_sha, committed_sha, hunks, file_count, hunk_count, created_at
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING id, session_id, producing_message_id, parent_patch_id, origin_type, workspace_sha, committed_sha, hunks, file_count, hunk_count, created_at, failed_mid_turn
 `
 
 type CreatePatchParams struct {
@@ -38,6 +39,7 @@ type CreatePatchParams struct {
 	Hunks              []byte      `json:"hunks"`
 	FileCount          int32       `json:"file_count"`
 	HunkCount          int32       `json:"hunk_count"`
+	FailedMidTurn      bool        `json:"failed_mid_turn"`
 }
 
 func (q *Queries) CreatePatch(ctx context.Context, arg CreatePatchParams) (Patch, error) {
@@ -51,6 +53,7 @@ func (q *Queries) CreatePatch(ctx context.Context, arg CreatePatchParams) (Patch
 		arg.Hunks,
 		arg.FileCount,
 		arg.HunkCount,
+		arg.FailedMidTurn,
 	)
 	var i Patch
 	err := row.Scan(
@@ -65,12 +68,13 @@ func (q *Queries) CreatePatch(ctx context.Context, arg CreatePatchParams) (Patch
 		&i.FileCount,
 		&i.HunkCount,
 		&i.CreatedAt,
+		&i.FailedMidTurn,
 	)
 	return i, err
 }
 
 const getPatchBySessionAndID = `-- name: GetPatchBySessionAndID :one
-SELECT id, session_id, producing_message_id, parent_patch_id, origin_type, workspace_sha, committed_sha, hunks, file_count, hunk_count, created_at FROM patches
+SELECT id, session_id, producing_message_id, parent_patch_id, origin_type, workspace_sha, committed_sha, hunks, file_count, hunk_count, created_at, failed_mid_turn FROM patches
 WHERE session_id = $1 AND id = $2
 `
 
@@ -94,12 +98,13 @@ func (q *Queries) GetPatchBySessionAndID(ctx context.Context, arg GetPatchBySess
 		&i.FileCount,
 		&i.HunkCount,
 		&i.CreatedAt,
+		&i.FailedMidTurn,
 	)
 	return i, err
 }
 
 const listPatchesBySession = `-- name: ListPatchesBySession :many
-SELECT id, session_id, producing_message_id, parent_patch_id, origin_type, workspace_sha, committed_sha, hunks, file_count, hunk_count, created_at FROM patches
+SELECT id, session_id, producing_message_id, parent_patch_id, origin_type, workspace_sha, committed_sha, hunks, file_count, hunk_count, created_at, failed_mid_turn FROM patches
 WHERE session_id = $1
 ORDER BY created_at DESC
 LIMIT $2
@@ -131,6 +136,7 @@ func (q *Queries) ListPatchesBySession(ctx context.Context, arg ListPatchesBySes
 			&i.FileCount,
 			&i.HunkCount,
 			&i.CreatedAt,
+			&i.FailedMidTurn,
 		); err != nil {
 			return nil, err
 		}

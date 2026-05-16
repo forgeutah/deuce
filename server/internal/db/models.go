@@ -60,6 +60,7 @@ type Patch struct {
 	FileCount          int32       `json:"file_count"`
 	HunkCount          int32       `json:"hunk_count"`
 	CreatedAt          time.Time   `json:"created_at"`
+	FailedMidTurn      bool        `json:"failed_mid_turn"`
 }
 
 type Project struct {
