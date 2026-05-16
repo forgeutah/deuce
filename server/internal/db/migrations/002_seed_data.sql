@@ -75,16 +75,18 @@ INSERT INTO session_agents (session_id, agent_id) VALUES
     ('40000000-0000-0000-0000-000000000006', '00000000-0000-0000-0000-000000000004');
 
 -- Sample messages for auth-module session
-INSERT INTO messages (session_id, author_id, author_type, content, created_at) VALUES
-    ('40000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'human', 'Let''s start working on the auth module. We need JWT validation with token expiration checking.', now() - interval '4 hours'),
-    ('40000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', 'human', 'Agreed. I''ve updated the plan with acceptance criteria. @Planner can you break this down?', now() - interval '3 hours 30 minutes'),
-    ('40000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'agent', 'I''ve set up the auth middleware and user model. The base structure is ready for JWT integration.', now() - interval '3 hours'),
-    ('40000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'human', '@Coder now add token expiration checking to the Validate function', now() - interval '2 hours'),
-    ('40000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'agent', 'I''ve updated the Validate function with token expiration checking. The implementation parses JWT claims and checks the expiry timestamp.', now() - interval '1 hour 30 minutes'),
-    ('40000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'human', '@Tester can you write tests for the new expiration logic?', now() - interval '1 hour'),
-    ('40000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000004', 'agent', 'Tests are written and passing. I''ve covered valid tokens, expired tokens, invalid format, and empty input.', now() - interval '45 minutes'),
-    ('40000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', 'human', '@Reviewer can you review all the auth changes?', now() - interval '20 minutes'),
-    ('40000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', 'agent', E'Code looks good overall. Two suggestions:\n\n1. Consider using `errors.Is()` for error comparison in middleware\n2. Add context to the JWT parsing errors for better debugging\n\nThe token expiration logic is correctly implemented. Tests cover the main cases well.', now() - interval '10 minutes');
+-- Agent messages get explicit IDs (60... prefix) so seed patches in 008 can
+-- anchor producing_message_id to them deterministically.
+INSERT INTO messages (id, session_id, author_id, author_type, content, created_at) VALUES
+    ('60000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'human', 'Let''s start working on the auth module. We need JWT validation with token expiration checking.', now() - interval '4 hours'),
+    ('60000000-0000-0000-0000-000000000002', '40000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', 'human', 'Agreed. I''ve updated the plan with acceptance criteria. @Planner can you break this down?', now() - interval '3 hours 30 minutes'),
+    ('60000000-0000-0000-0000-000000000003', '40000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'agent', 'I''ve set up the auth middleware and user model. The base structure is ready for JWT integration.', now() - interval '3 hours'),
+    ('60000000-0000-0000-0000-000000000004', '40000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'human', '@Coder now add token expiration checking to the Validate function', now() - interval '2 hours'),
+    ('60000000-0000-0000-0000-000000000005', '40000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'agent', 'I''ve updated the Validate function with token expiration checking. The implementation parses JWT claims and checks the expiry timestamp.', now() - interval '1 hour 30 minutes'),
+    ('60000000-0000-0000-0000-000000000006', '40000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'human', '@Tester can you write tests for the new expiration logic?', now() - interval '1 hour'),
+    ('60000000-0000-0000-0000-000000000007', '40000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000004', 'agent', 'Tests are written and passing. I''ve covered valid tokens, expired tokens, invalid format, and empty input.', now() - interval '45 minutes'),
+    ('60000000-0000-0000-0000-000000000008', '40000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000002', 'human', '@Reviewer can you review all the auth changes?', now() - interval '20 minutes'),
+    ('60000000-0000-0000-0000-000000000009', '40000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', 'agent', E'Code looks good overall. Two suggestions:\n\n1. Consider using `errors.Is()` for error comparison in middleware\n2. Add context to the JWT parsing errors for better debugging\n\nThe token expiration logic is correctly implemented. Tests cover the main cases well.', now() - interval '10 minutes');
 
 -- Sample messages for api-rate-limiting session
 INSERT INTO messages (session_id, author_id, author_type, content, created_at) VALUES
