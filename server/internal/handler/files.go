@@ -19,6 +19,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"github.com/forgeutah/deuce/server/internal/workspacepath"
 )
 
 // File status codes returned to the frontend. Porcelain v1 has more states;
@@ -84,13 +86,11 @@ type fileContentResponse struct {
 	Size      int64  `json:"size"`
 }
 
+// workspaceContentPath is a thin alias for workspacepath.Resolve, kept so the
+// existing call sites read naturally. New code should call workspacepath.Resolve
+// directly.
 func workspaceContentPath(workspaceName string) string {
-	base := os.Getenv("DEVPOD_AGENT_CONTENT_DIR")
-	if base == "" {
-		home, _ := os.UserHomeDir()
-		base = filepath.Join(home, ".devpod", "agent", "contexts", "default", "workspaces")
-	}
-	return filepath.Join(base, workspaceName, "content")
+	return workspacepath.Resolve(workspaceName)
 }
 
 func acquireWalkLock(sessionID uuid.UUID) (bool, func()) {
