@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useSessionStore } from "@/stores/session-store";
-import type { Message, User } from "@/types";
+import type { Agent, Message, User } from "@/types";
+import { PatchMarker } from "@/components/chat/PatchMarker";
 
 function TypingIndicator({
   agentName,
@@ -173,7 +174,7 @@ function MessageBubble({
 }
 
 export function ChatView() {
-  const { activeSessionId, sessions, messages, thinkingAgents, agentOutput, addMessage } =
+  const { activeSessionId, sessions, messages, patches, thinkingAgents, agentOutput, addMessage } =
     useSessionStore();
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -184,6 +185,21 @@ export function ChatView() {
   const sessionMessages = activeSessionId
     ? (messages[activeSessionId] ?? [])
     : [];
+  const sessionPatches = activeSessionId
+    ? (patches[activeSessionId] ?? [])
+    : [];
+  // Index patches by producing_message_id so each message can render its
+  // patches inline. v0 producers always set this, so orphan patches (null
+  // producingMessageId) are not rendered — see plan U8 and SG4 finding.
+  // Multiple patches per message are stacked in createdAt order.
+  const patchesByMessage = sessionPatches.reduce<Record<string, typeof sessionPatches>>(
+    (acc, p) => {
+      if (!p.producingMessageId) return acc;
+      (acc[p.producingMessageId] ??= []).push(p);
+      return acc;
+    },
+    {},
+  );
   const thinking = activeSessionId
     ? (thinkingAgents[activeSessionId] ?? [])
     : [];
@@ -297,13 +313,27 @@ export function ChatView() {
                     (p) => "email" in p && p.id === msg.authorId,
                   ) ?? session?.members.find((m) => m.id === msg.authorId);
 
+            const messagePatches = patchesByMessage[msg.id] ?? [];
+
             return (
-              <MessageBubble
-                key={msg.id}
-                message={msg}
-                author={author}
-                showHeader={showHeader}
-              />
+              <div key={msg.id}>
+                <MessageBubble
+                  message={msg}
+                  author={author}
+                  showHeader={showHeader}
+                />
+                {messagePatches.map((patch) => (
+                  <PatchMarker
+                    key={patch.id}
+                    patch={patch}
+                    producingAgent={
+                      msg.authorType === "agent"
+                        ? (author as Agent | undefined)
+                        : undefined
+                    }
+                  />
+                ))}
+              </div>
             );
           })}
 
