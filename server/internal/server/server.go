@@ -99,6 +99,8 @@ func (s *Server) Router() http.Handler {
 				r.Get("/activities", h.ListActivities)
 				r.Get("/files", h.ListFiles)
 				r.Get("/files/content", h.GetFileContent)
+				r.Get("/patches", h.ListPatches)
+				r.Get("/patches/{patchID}", h.GetPatch)
 				r.Put("/agents", h.UpdateSessionAgents)
 				r.Post("/agents/stop", h.StopAgent)
 			})
