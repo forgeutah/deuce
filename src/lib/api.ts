@@ -1,4 +1,4 @@
-import type { FileNode, FileContentResponse } from "@/types";
+import type { FileNode, FileContentResponse, Patch } from "@/types";
 
 const BASE = "/api";
 
@@ -152,4 +152,10 @@ export const api = {
       `/sessions/${sessionId}/files/content?path=${encodeURIComponent(path)}`,
       { signal },
     ),
+
+  listPatches: (sessionId: string, limit = 50) =>
+    request<Patch[]>(`/sessions/${sessionId}/patches?limit=${limit}`),
+
+  getPatch: (sessionId: string, patchId: string) =>
+    request<Patch>(`/sessions/${sessionId}/patches/${patchId}`),
 };

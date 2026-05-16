@@ -9,6 +9,7 @@ import type {
   ActivityItem,
   TabType,
   FileNode,
+  Patch,
 } from "@/types";
 
 interface SessionState {
@@ -18,6 +19,7 @@ interface SessionState {
   sessions: Session[];
   messages: Record<string, Message[]>;
   activities: Record<string, ActivityItem[]>;
+  patches: Record<string, Patch[]>;
   fileTrees: Record<string, FileNode[]>;
   thinkingAgents: Record<string, string[]>;
   workspaceLogs: Record<string, string[]>;
@@ -44,6 +46,7 @@ interface SessionState {
     status: Agent["status"],
   ) => void;
   addActivity: (activity: ActivityItem) => void;
+  addPatch: (patch: Patch) => void;
   updateSessionPlan: (sessionId: string, content: string) => void;
   updateSessionDescription: (sessionId: string, description: string) => void;
   appendWorkspaceLog: (sessionId: string, line: string) => void;
@@ -62,6 +65,7 @@ interface SessionState {
   setSessions: (sessions: Session[]) => void;
   setMessages: (sessionId: string, messages: Message[]) => void;
   setActivities: (sessionId: string, activities: ActivityItem[]) => void;
+  setPatches: (sessionId: string, patches: Patch[]) => void;
   setFileTrees: (sessionId: string, files: FileNode[]) => void;
 }
 
@@ -76,6 +80,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   sessions: [],
   messages: {},
   activities: {},
+  patches: {},
   fileTrees: {},
   thinkingAgents: {},
   workspaceLogs: {},
@@ -104,6 +109,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (!state.activities[sessionId]) {
       api.listActivities(sessionId).then((activities) => {
         get().setActivities(sessionId, activities);
+      }).catch(console.error);
+    }
+    if (!state.patches[sessionId]) {
+      api.listPatches(sessionId).then((patches) => {
+        get().setPatches(sessionId, patches);
       }).catch(console.error);
     }
     // Load files only when the workspace is ready — otherwise the backend
@@ -228,6 +238,21 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       };
     }),
 
+  // Patches arrive via both REST (lazy load on setActiveSession) and WS
+  // (patch_created broadcast). Dedup by id matches the addMessage pattern
+  // so the REST/WS race collapses cleanly into one entry.
+  addPatch: (patch) =>
+    set((state) => {
+      const current = state.patches[patch.sessionId] ?? [];
+      if (current.some((p) => p.id === patch.id)) return state;
+      return {
+        patches: {
+          ...state.patches,
+          [patch.sessionId]: [patch, ...current],
+        },
+      };
+    }),
+
   updateSessionPlan: (sessionId, content) =>
     set((state) => ({
       sessions: state.sessions.map((s) =>
@@ -293,6 +318,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   setActivities: (sessionId, activities) =>
     set((state) => ({
       activities: { ...state.activities, [sessionId]: activities },
+    })),
+  setPatches: (sessionId, patches) =>
+    set((state) => ({
+      patches: { ...state.patches, [sessionId]: patches },
     })),
   setFileTrees: (sessionId, files) =>
     set((state) => ({

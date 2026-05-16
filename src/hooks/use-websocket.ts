@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useSessionStore } from "@/stores/session-store";
-import type { Message, ActivityItem } from "@/types";
+import type { Message, ActivityItem, Patch } from "@/types";
 import { api } from "@/lib/api";
 
 interface ServerMessage {
@@ -43,6 +43,7 @@ export function useWebSocket() {
     clearThinkingAgent,
     updateAgentStatus,
     addActivity,
+    addPatch,
     appendWorkspaceLog,
     appendAgentOutput,
     clearAgentOutput,
@@ -144,6 +145,21 @@ export function useWebSocket() {
           // Debounced refresh — every activity may have touched files. The
           // backend's per-session walk lock collapses any overlap if the
           // debounce window misses.
+          scheduleFilesRefresh(sessionId);
+          break;
+        }
+
+        case "patch_created": {
+          // Slim payload — hunks fetched on demand via GET /patches/{id}
+          // when a consumer (Changes view, future hunk-thread UI) needs them.
+          const patch = msg.payload as Patch;
+          const sessionId = msg.sessionId || patch.sessionId;
+          addPatch({
+            ...patch,
+            sessionId,
+          });
+          // A new patch implies file changes — refresh the file tree so the
+          // git status column reflects the new state.
           scheduleFilesRefresh(sessionId);
           break;
         }

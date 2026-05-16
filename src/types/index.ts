@@ -110,3 +110,38 @@ export interface ActivityItem {
   agentId?: string;
   metadata?: Record<string, string>;
 }
+
+export type PatchOrigin = "agent" | "human" | "system";
+
+// PatchHunk mirrors workspacegit.Hunk on the backend.
+export interface PatchHunk {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: string[];
+}
+
+export interface PatchFile {
+  path: string;
+  hunks: PatchHunk[];
+}
+
+// Patch is the wire shape returned by the patches REST endpoints and
+// broadcast over WebSocket as patch_created. The slim shape (no hunks) is
+// what arrives on the broadcast and from the list endpoint; the full shape
+// (with hunks populated) comes from GET /api/sessions/{id}/patches/{patchId}.
+export interface Patch {
+  id: string;
+  sessionId: string;
+  producingMessageId: string | null;
+  parentPatchId: string | null;
+  originType: PatchOrigin;
+  workspaceSha: string;
+  committedSha: string | null;
+  fileCount: number;
+  hunkCount: number;
+  failedMidTurn: boolean;
+  createdAt: string;
+  hunks?: PatchFile[];
+}
