@@ -15,6 +15,7 @@ import (
 
 	agentpkg "github.com/forgeutah/deuce/server/internal/agent"
 	db "github.com/forgeutah/deuce/server/internal/db"
+	"github.com/forgeutah/deuce/server/internal/workspacegit"
 	"github.com/forgeutah/deuce/server/internal/ws"
 )
 
@@ -305,6 +306,15 @@ func (h *Handler) executeAgent(task agentpkg.Task, workspaceName string) {
 		h.hub.BroadcastToSession(sessionID.String(), outMsg, nil)
 	}
 
+	// Capture workspace HEAD before the agent runs so the diff at turn end
+	// is anchored to a stable SHA. Failure here doesn't block the turn —
+	// the agent still runs; patch emission is skipped if we couldn't capture.
+	workspaceShaStart, shaErr := workspacegit.CaptureHead(ctx, workspaceName)
+	if shaErr != nil {
+		slog.Warn("failed to capture workspace HEAD; patch will not be emitted for this turn", "error", shaErr, "workspace", workspaceName)
+		workspaceShaStart = ""
+	}
+
 	// Execute
 	result, execErr := h.executor.Execute(ctx, agentpkg.ExecuteParams{
 		WorkspaceID:     workspaceName,
@@ -323,7 +333,13 @@ func (h *Handler) executeAgent(task agentpkg.Task, workspaceName string) {
 		} else if result != nil && result.Error == "timeout" {
 			errMsg = "Agent execution timed out."
 		}
-		h.finishAgent(sessionID, agentID, task.AgentID, errMsg, true)
+		producingMsg := h.finishAgent(sessionID, agentID, task.AgentID, errMsg, true)
+		// Per A1: emit a patch for any non-empty diff even on failure, flagged
+		// failed_mid_turn so the audit log shows the agent's partial work
+		// without misattributing it to the next successful turn.
+		if producingMsg != nil && workspaceShaStart != "" {
+			h.emitPatchForTurn(sessionID, workspaceName, workspaceShaStart, producingMsg.ID, true)
+		}
 		return
 	}
 
@@ -347,10 +363,73 @@ func (h *Handler) executeAgent(task agentpkg.Task, workspaceName string) {
 		content = "Task completed."
 	}
 
-	h.finishAgent(sessionID, agentID, task.AgentID, content, false, ec)
+	producingMsg := h.finishAgent(sessionID, agentID, task.AgentID, content, false, ec)
+	if producingMsg != nil && workspaceShaStart != "" {
+		h.emitPatchForTurn(sessionID, workspaceName, workspaceShaStart, producingMsg.ID, false)
+	}
 }
 
-func (h *Handler) finishAgent(sessionID, agentID uuid.UUID, agentIDStr, content string, isError bool, expandableContent ...[]byte) {
+// emitPatchForTurn computes the diff between workspaceShaStart and the current
+// working tree, and if non-empty, persists a patches row and broadcasts a
+// patch_created event with the slim wire shape. This is the v0 producer
+// contract — the same contract any future producer (autonomous agents,
+// human FS-watch, system-origin paths) plugs into.
+//
+// Failure modes are deliberately swallowed (logged, not propagated): patch
+// emission is best-effort relative to the agent reply that has already been
+// persisted and broadcast. Missing markers surface as a server log line; the
+// agent reply itself is unaffected.
+func (h *Handler) emitPatchForTurn(sessionID uuid.UUID, workspaceName, workspaceShaStart string, producingMessageID uuid.UUID, failedMidTurn bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	files, fileCount, hunkCount, err := workspacegit.DiffSince(ctx, workspaceName, workspaceShaStart)
+	if err != nil {
+		slog.Warn("patch emission: diff computation failed", "error", err, "workspace", workspaceName)
+		return
+	}
+	if fileCount == 0 {
+		// Per R6: empty change sets do not produce a patch.
+		return
+	}
+
+	hunksJSON, err := json.Marshal(files)
+	if err != nil {
+		slog.Error("patch emission: marshal hunks", "error", err)
+		return
+	}
+
+	patch, err := h.queries.CreatePatch(ctx, db.CreatePatchParams{
+		SessionID:          sessionID,
+		ProducingMessageID: pgtype.UUID{Bytes: producingMessageID, Valid: true},
+		ParentPatchID:      pgtype.UUID{}, // always null in v0; see plan KTD #2 + intent-only-edits brainstorm
+		OriginType:         "agent",
+		WorkspaceSha:       workspaceShaStart,
+		CommittedSha:       pgtype.Text{}, // null until promoted; see plan R4
+		Hunks:              hunksJSON,
+		FileCount:          int32(fileCount),
+		HunkCount:          int32(hunkCount),
+		FailedMidTurn:      failedMidTurn,
+	})
+	if err != nil {
+		slog.Error("patch emission: create patch row", "error", err)
+		return
+	}
+
+	wsMsg, err := ws.NewServerMessage(ws.TypePatchCreated, sessionID.String(), toPatchSummary(patch))
+	if err != nil {
+		slog.Error("patch emission: marshal broadcast", "error", err)
+		return
+	}
+	h.hub.BroadcastToSession(sessionID.String(), wsMsg, nil)
+}
+
+// finishAgent persists the agent's reply message, broadcasts it, updates the
+// agent's status, and writes an activity row. Returns the persisted message
+// when creation succeeded so callers (executeAgent) can use the message ID
+// as producing_message_id when emitting a patch. Returns nil on persistence
+// failure.
+func (h *Handler) finishAgent(sessionID, agentID uuid.UUID, agentIDStr, content string, isError bool, expandableContent ...[]byte) *db.Message {
 	ctx := context.Background()
 
 	// Stop typing
@@ -366,6 +445,7 @@ func (h *Handler) finishAgent(sessionID, agentID uuid.UUID, agentIDStr, content 
 		ec = expandableContent[0]
 	}
 
+	var createdMsg *db.Message
 	agentMsg, err := h.queries.CreateMessage(ctx, db.CreateMessageParams{
 		SessionID:         sessionID,
 		AuthorID:          agentID,
@@ -378,6 +458,7 @@ func (h *Handler) finishAgent(sessionID, agentID uuid.UUID, agentIDStr, content 
 	if err != nil {
 		slog.Error("failed to create agent message", "error", err)
 	} else {
+		createdMsg = &agentMsg
 		_ = h.queries.UpdateSessionLastActivity(ctx, sessionID)
 		agentWsMsg, _ := ws.NewServerMessage(ws.TypeNewMessage, sessionID.String(), toMessageResponse(agentMsg))
 		h.hub.BroadcastToSession(sessionID.String(), agentWsMsg, nil)
@@ -427,6 +508,8 @@ func (h *Handler) finishAgent(sessionID, agentID uuid.UUID, agentIDStr, content 
 		Description: desc,
 		AgentID:     agentUUID,
 	})
+
+	return createdMsg
 }
 
 func (h *Handler) buildChatHistory(ctx context.Context, sessionID uuid.UUID, hasResume bool) string {
