@@ -24,9 +24,10 @@ type Handler struct {
 	terminals   *terminal.Manager
 	executor    *agent.Executor
 	agentQueue  *agent.Queue
+	wsOrigins   []string
 }
 
-func New(queries *db.Queries, pool *pgxpool.Pool, hub *ws.Hub, githubToken string, wm *workspace.Manager, tm *terminal.Manager, exec *agent.Executor, aq *agent.Queue) *Handler {
+func New(queries *db.Queries, pool *pgxpool.Pool, hub *ws.Hub, githubToken string, wm *workspace.Manager, tm *terminal.Manager, exec *agent.Executor, aq *agent.Queue, wsOrigins []string) *Handler {
 	return &Handler{
 		queries:     queries,
 		pool:        pool,
@@ -36,6 +37,7 @@ func New(queries *db.Queries, pool *pgxpool.Pool, hub *ws.Hub, githubToken strin
 		terminals:   tm,
 		executor:    exec,
 		agentQueue:  aq,
+		wsOrigins:   wsOrigins,
 	}
 }
 

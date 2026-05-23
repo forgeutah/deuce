@@ -1,4 +1,4 @@
-.PHONY: dev build migrate migrate-down generate tidy
+.PHONY: dev build test migrate migrate-down migrate-status generate tidy
 
 DATABASE_URL ?= postgres://deuce:deuce@localhost:5432/deuce?sslmode=disable
 
@@ -7,6 +7,9 @@ dev:
 
 build:
 	go build -o bin/deuce .
+
+test:
+	go test ./...
 
 tidy:
 	go mod tidy

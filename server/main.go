@@ -44,15 +44,30 @@ func main() {
 
 	srv := server.New(pool, cfg)
 
+	addr := fmt.Sprintf(":%d", cfg.Port)
 	httpServer := &http.Server{
-		Addr:              fmt.Sprintf(":%d", cfg.Port),
+		Addr:              addr,
 		Handler:           srv.Router(),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
+	// Plan U2 / Key Technical Decisions: dev mode trusts client-supplied
+	// X-User-ID and is safe only on a loopback bind. Bare ":<port>" binds
+	// every interface (effectively 0.0.0.0), which is unsafe on a shared
+	// host. This is a WARN not a fatal because container network
+	// namespacing legitimately uses 0.0.0.0 — operators may know what
+	// they're doing — but the warning makes the foot-gun visible.
+	if cfg.AuthMode == config.AuthModeDev {
+		slog.Warn("dev mode active — server trusts client-supplied X-User-ID; safe only on a loopback bind",
+			"auth_mode", cfg.AuthMode,
+			"addr", addr,
+			"hint", "set DEUCE_AUTH_MODE=forge-proxy for any non-loopback deployment",
+		)
+	}
+
 	go func() {
-		slog.Info("server starting", "port", cfg.Port)
+		slog.Info("server starting", "port", cfg.Port, "auth_mode", cfg.AuthMode)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server error", "error", err)
 			os.Exit(1)
