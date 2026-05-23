@@ -12,7 +12,7 @@ import (
 )
 
 const listTeamMembers = `-- name: ListTeamMembers :many
-SELECT u.id, u.name, u.email, u.avatar, u.status, u.created_at FROM users u
+SELECT u.id, u.name, u.email, u.avatar, u.status, u.created_at, u.forge_user_id, u.forge_first_seen_at FROM users u
 JOIN team_members tm ON u.id = tm.user_id
 WHERE tm.team_id = $1
 ORDER BY u.name
@@ -34,6 +34,8 @@ func (q *Queries) ListTeamMembers(ctx context.Context, teamID uuid.UUID) ([]User
 			&i.Avatar,
 			&i.Status,
 			&i.CreatedAt,
+			&i.ForgeUserID,
+			&i.ForgeFirstSeenAt,
 		); err != nil {
 			return nil, err
 		}

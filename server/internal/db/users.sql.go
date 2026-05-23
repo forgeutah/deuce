@@ -9,10 +9,46 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createUserByForgeID = `-- name: CreateUserByForgeID :one
+INSERT INTO users (forge_user_id, name, email, avatar, status, forge_first_seen_at)
+VALUES ($1, $2, $3, $4, 'online', now())
+ON CONFLICT (forge_user_id) DO NOTHING
+RETURNING id, name, email, avatar, status, created_at, forge_user_id, forge_first_seen_at
+`
+
+type CreateUserByForgeIDParams struct {
+	ForgeUserID pgtype.Int8 `json:"forge_user_id"`
+	Name        string      `json:"name"`
+	Email       string      `json:"email"`
+	Avatar      string      `json:"avatar"`
+}
+
+func (q *Queries) CreateUserByForgeID(ctx context.Context, arg CreateUserByForgeIDParams) (User, error) {
+	row := q.db.QueryRow(ctx, createUserByForgeID,
+		arg.ForgeUserID,
+		arg.Name,
+		arg.Email,
+		arg.Avatar,
+	)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.Avatar,
+		&i.Status,
+		&i.CreatedAt,
+		&i.ForgeUserID,
+		&i.ForgeFirstSeenAt,
+	)
+	return i, err
+}
+
 const getUser = `-- name: GetUser :one
-SELECT id, name, email, avatar, status, created_at FROM users WHERE id = $1
+SELECT id, name, email, avatar, status, created_at, forge_user_id, forge_first_seen_at FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
@@ -25,12 +61,14 @@ func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.Avatar,
 		&i.Status,
 		&i.CreatedAt,
+		&i.ForgeUserID,
+		&i.ForgeFirstSeenAt,
 	)
 	return i, err
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, name, email, avatar, status, created_at FROM users ORDER BY name
+SELECT id, name, email, avatar, status, created_at, forge_user_id, forge_first_seen_at FROM users ORDER BY name
 `
 
 func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
@@ -49,6 +87,8 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 			&i.Avatar,
 			&i.Status,
 			&i.CreatedAt,
+			&i.ForgeUserID,
+			&i.ForgeFirstSeenAt,
 		); err != nil {
 			return nil, err
 		}
@@ -58,4 +98,24 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const lookupUserByForgeID = `-- name: LookupUserByForgeID :one
+SELECT id, name, email, avatar, status, created_at, forge_user_id, forge_first_seen_at FROM users WHERE forge_user_id = $1
+`
+
+func (q *Queries) LookupUserByForgeID(ctx context.Context, forgeUserID pgtype.Int8) (User, error) {
+	row := q.db.QueryRow(ctx, lookupUserByForgeID, forgeUserID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.Avatar,
+		&i.Status,
+		&i.CreatedAt,
+		&i.ForgeUserID,
+		&i.ForgeFirstSeenAt,
+	)
+	return i, err
 }
