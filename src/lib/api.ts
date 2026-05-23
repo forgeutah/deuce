@@ -1,6 +1,24 @@
-import type { FileNode, FileContentResponse } from "@/types";
+import type { FileNode, FileContentResponse, User } from "@/types";
 
 const BASE = "/api";
+
+/**
+ * ApiError carries the HTTP status and the server-supplied error code
+ * alongside the message. Callers can branch on `code` (e.g. NOT_AUTHORIZED)
+ * or `status` (e.g. 403) to render specific UI rather than reading the
+ * message string.
+ */
+export class ApiError extends Error {
+  status: number;
+  code: string;
+
+  constructor(message: string, status: number, code: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
 
 async function request<T>(
   path: string,
@@ -16,14 +34,17 @@ async function request<T>(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body?.error?.message ?? `Request failed: ${res.status}`);
+    const message =
+      body?.error?.message ?? `Request failed: ${res.status}`;
+    const code = body?.error?.code ?? "";
+    throw new ApiError(message, res.status, code);
   }
 
   return res.json();
 }
 
 export const api = {
-  getMe: () => request<any>("/me"),
+  getMe: () => request<User>("/me"),
 
   listTeams: () => request<any[]>("/teams"),
 

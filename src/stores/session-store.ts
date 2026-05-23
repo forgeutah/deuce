@@ -9,10 +9,12 @@ import type {
   ActivityItem,
   TabType,
   FileNode,
+  User,
 } from "@/types";
 
 interface SessionState {
   // Data
+  currentUser: User | null;
   teams: Team[];
   projects: Project[];
   sessions: Session[];
@@ -57,6 +59,7 @@ interface SessionState {
   ) => void;
 
   // Data setters
+  setCurrentUser: (user: User | null) => void;
   setTeams: (teams: Team[]) => void;
   setProjects: (projects: Project[]) => void;
   setSessions: (sessions: Session[]) => void;
@@ -71,6 +74,7 @@ interface SessionState {
 const filesRefreshInFlight = new Map<string, Promise<void>>();
 
 export const useSessionStore = create<SessionState>((set, get) => ({
+  currentUser: null,
   teams: [],
   projects: [],
   sessions: [],
@@ -283,6 +287,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       ),
     })),
 
+  setCurrentUser: (currentUser) => set({ currentUser }),
   setTeams: (teams) => set({ teams }),
   setProjects: (projects) => set({ projects }),
   setSessions: (sessions) => set({ sessions }),
