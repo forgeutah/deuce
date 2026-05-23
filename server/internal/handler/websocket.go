@@ -13,7 +13,7 @@ import (
 func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
 
-	ws.ServeWS(h.hub, w, r, userID)
+	ws.ServeWS(h.hub, w, r, userID, h.wsOrigins)
 }
 
 // SetupWSCallbacks configures the WebSocket client callbacks (called after client creation)

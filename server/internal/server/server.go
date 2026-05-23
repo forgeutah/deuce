@@ -43,15 +43,28 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RealIP)
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:4000", "http://localhost:8080"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Content-Type", "X-User-ID"},
+		AllowedOrigins: []string{"http://localhost:4000", "http://localhost:8080"},
+		AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders: []string{
+			"Accept", "Content-Type", "X-User-ID",
+			"X-Forge-Proxy-Secret", "X-Forge-Contract-Version", "X-Forge-User-Id",
+			"X-Forge-Email", "X-Forge-Name", "X-Forge-Avatar", "X-Forge-Roles",
+			"X-Forge-Slack-User-Id", "X-Forge-Slack-Team-Id",
+		},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
 
-	r.Use(auth.Middleware(s.cfg.UserID))
+	// X-Forge-Proxy-Secret must never appear in logs. chi's middleware.Logger
+	// records method/path/status/duration only — if anyone introduces a logging
+	// middleware that dumps headers, add explicit redaction for this header
+	// name and the rest of the X-Forge-* set.
+	if s.cfg.AuthMode == config.AuthModeForgeProxy {
+		r.Use(auth.ForgeProxyMiddleware(s.queries, s.cfg.ForgeProxySecret, s.cfg.ForgeRequiredRole, s.cfg.ForgeContractVersion))
+	} else {
+		r.Use(auth.Middleware(s.cfg.UserID))
+	}
 
 	wm := workspace.NewManager(s.cfg.DevPodBin, s.cfg.DevPodProvider)
 	if !wm.Available() {
@@ -73,7 +86,7 @@ func (s *Server) Router() http.Handler {
 		slog.Warn("failed to reset stale agent statuses", "error", err)
 	}
 
-	h := handler.New(s.queries, s.pool, s.hub, s.cfg.GitHubToken, wm, tm, exec, aq)
+	h := handler.New(s.queries, s.pool, s.hub, s.cfg.GitHubToken, wm, tm, exec, aq, s.cfg.WSAllowedOriginList())
 
 	go s.hub.Run()
 
