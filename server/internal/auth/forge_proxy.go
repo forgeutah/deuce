@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/forgeutah/deuce/server/internal/db"
@@ -27,11 +28,19 @@ const (
 	headerAvatar          = "X-Forge-Avatar"
 	headerRoles           = "X-Forge-Roles"
 
-	codeNotAuthenticated      = "NOT_AUTHENTICATED"
+	codeNotAuthenticated       = "NOT_AUTHENTICATED"
 	codeInvalidContractVersion = "INVALID_CONTRACT_VERSION"
 	codeInvalidHeaders         = "INVALID_HEADERS"
 	codeNotAuthorized          = "NOT_AUTHORIZED"
 	codeDBError                = "DB_ERROR"
+	codeEmailConflict          = "EMAIL_CONFLICT"
+
+	// pgUniqueViolation is the Postgres SQLSTATE for a UNIQUE constraint
+	// failure. We distinguish the users_email_key collision from a generic
+	// DB error so the operator can reconcile the conflicting row instead
+	// of staring at an opaque 500.
+	pgUniqueViolation = "23505"
+	usersEmailKey     = "users_email_key"
 
 	maxHeaderLogLen = 256
 )
@@ -93,10 +102,18 @@ func ForgeProxyMiddleware(store ForgeUserStore, secret, requiredRole string, con
 			}
 
 			// 4. Role check — CSV split, trim, equality (not substring).
-			rolesHeader, ok := singleHeader(r, headerRoles)
-			if !ok {
-				// Missing header is treated as no roles -> not authorized.
-				rolesHeader = ""
+			// Distinguish missing (0 values) from duplicate (>1 values): a missing
+			// roles header is "the user has no roles" -> 403 NOT_AUTHORIZED; a
+			// duplicate roles header is header smuggling -> 400 INVALID_HEADERS,
+			// matching the rejection policy applied to email/name.
+			rolesValues := r.Header.Values(headerRoles)
+			if len(rolesValues) > 1 {
+				writeAuthError(w, http.StatusBadRequest, codeInvalidHeaders, "duplicate roles header")
+				return
+			}
+			rolesHeader := ""
+			if len(rolesValues) == 1 {
+				rolesHeader = rolesValues[0]
 			}
 			if !roleListContains(rolesHeader, requiredRole) {
 				email := singleHeaderOr(r, headerEmail, "")
@@ -154,6 +171,23 @@ func ForgeProxyMiddleware(store ForgeUserStore, secret, requiredRole string, con
 						return
 					}
 				default:
+					// Distinguish a users_email_key collision (legitimate forge
+					// user whose Slack-verified email already lives on a
+					// different row — typically a leftover seed user in
+					// production, or a former dev user) from a generic DB
+					// error. The opaque 500 is unactionable; a 409 with a
+					// dedicated code gives the operator a hook to reconcile.
+					var pgErr *pgconn.PgError
+					if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == usersEmailKey {
+						slog.Warn("auth.forge_proxy: email collision on first provision",
+							"forge_user_id", forgeID,
+							"email", sanitizeForLog(email),
+							"constraint", pgErr.ConstraintName,
+						)
+						writeAuthError(w, http.StatusConflict, codeEmailConflict,
+							"this email is already associated with a different account; contact your system administrator")
+						return
+					}
 					slog.Error("auth.forge_proxy: create failed", "forge_user_id", forgeID, "error", err)
 					writeAuthError(w, http.StatusInternalServerError, codeDBError, "internal error")
 					return

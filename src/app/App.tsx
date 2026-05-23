@@ -22,16 +22,32 @@ export function App() {
   }, []);
 
   async function loadData() {
+    const store = useSessionStore.getState();
+
+    // /api/me runs in its own try/catch so a 403 here — meaning "this user
+    // is not allowed in Deuce at all" — triggers the dedicated
+    // NotAuthorizedView. 403s from any other endpoint (e.g. a future
+    // per-session permission gate) flow through generic error handling and
+    // must NOT take over the whole shell.
+    let me: Awaited<ReturnType<typeof api.getMe>>;
     try {
-      const store = useSessionStore.getState();
+      me = await api.getMe();
+    } catch (err: unknown) {
+      console.error("Failed to load /api/me:", err);
+      if (err instanceof ApiError && err.code === "NOT_AUTHORIZED") {
+        setNotAuthorized(true);
+        setLoading(false);
+        return;
+      }
+      const message =
+        err instanceof Error ? err.message : "Failed to connect to server";
+      setError(message);
+      setLoading(false);
+      return;
+    }
+    store.setCurrentUser(me);
 
-      // /api/me is called first because a 403 here means "this user is not
-      // allowed in Deuce at all" — render the dedicated NotAuthorized view
-      // instead of the generic error retry. Other endpoints' 403s flow
-      // through standard error handling.
-      const me = await api.getMe();
-      store.setCurrentUser(me);
-
+    try {
       const [teams, projects, sessions] = await Promise.all([
         api.listTeams(),
         api.listProjects(),
@@ -59,14 +75,11 @@ export function App() {
       }
 
       setLoading(false);
-    } catch (err: any) {
-      console.error("Failed to load data:", err);
-      if (err instanceof ApiError && (err.code === "NOT_AUTHORIZED" || err.status === 403)) {
-        setNotAuthorized(true);
-        setLoading(false);
-        return;
-      }
-      setError(err.message ?? "Failed to connect to server");
+    } catch (err: unknown) {
+      console.error("Failed to load app data:", err);
+      const message =
+        err instanceof Error ? err.message : "Failed to load app data";
+      setError(message);
       setLoading(false);
     }
   }

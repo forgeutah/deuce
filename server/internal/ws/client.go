@@ -126,8 +126,11 @@ func marshalJSON(v any) ([]byte, error) {
 
 // ServeWS upgrades an HTTP connection to WebSocket and starts the client.
 // originPatterns is the allow-list checked against the request's Origin header
-// (e.g., {"localhost:4000", "deuce.example.com"}). Empty means "deny all" —
-// callers should refuse to start the server without at least one entry.
+// (e.g., {"localhost:4000", "deuce.example.com"}). An empty slice still allows
+// same-origin and non-browser upgrades through coder/websocket; only
+// cross-origin browser upgrades are denied. Callers that want a real
+// allow-list must configure at least one pattern — config.Validate refuses
+// to start the server in forge-proxy mode with an empty list.
 func ServeWS(hub *Hub, w http.ResponseWriter, r *http.Request, userID string, originPatterns []string) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		OriginPatterns: originPatterns,

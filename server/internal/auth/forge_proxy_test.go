@@ -22,6 +22,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/forgeutah/deuce/server/internal/db"
@@ -277,6 +278,20 @@ func TestRole_AbsentFromCSV(t *testing.T) {
 	assertNotAuthed(t, rec, next, http.StatusForbidden, "NOT_AUTHORIZED")
 }
 
+func TestRole_DuplicateHeader(t *testing.T) {
+	// Duplicate non-secret headers are header smuggling and must return
+	// 400 INVALID_HEADERS, matching the rejection policy for duplicate
+	// email and name. Missing roles header is a separate case (403).
+	store := &fakeStore{}
+	h := validHeaders()
+	h.Add("X-Forge-Roles", "admin")
+	rec, next := invoke(t, store, "topsecret", "member", 1, h)
+	assertNotAuthed(t, rec, next, http.StatusBadRequest, "INVALID_HEADERS")
+	if store.lookupCalls.Load() != 0 {
+		t.Fatalf("DB must not be touched on duplicate roles header")
+	}
+}
+
 func TestRole_SubstringDoesNotMatch(t *testing.T) {
 	// "membership" must not satisfy required role "member"
 	store := &fakeStore{}
@@ -449,7 +464,14 @@ func TestAdmit_ProfileNotRefreshedOnSecondRequest(t *testing.T) {
 
 // --- Race + DB error paths ---
 
-func TestRace_LoserPath_RelookupSucceeds(t *testing.T) {
+// TestRace_LoserPath_CreateReturnsNoRows exercises the SEQUENTIAL retry path
+// of the ON CONFLICT DO NOTHING race-loser branch — the retry block that
+// fires when CreateUserByForgeID returns pgx.ErrNoRows because another
+// transaction won the unique-index race. Goroutine-level concurrency is not
+// modeled here; this is a unit test against a fake store. End-to-end race
+// behavior against real Postgres is exercised by `go test -race` and the
+// manual smoke checks documented in U3 verification.
+func TestRace_LoserPath_CreateReturnsNoRows(t *testing.T) {
 	// First lookup: no row. Create: returns ErrNoRows (lost ON CONFLICT race).
 	// Second lookup: winner's row is now visible.
 	winner := makeUser(42, "Alice", "alice@example.com", "https://example.com/a.png")
@@ -480,6 +502,28 @@ func TestRace_RelookupFails_500(t *testing.T) {
 	}
 	rec, next := invoke(t, store, "topsecret", "member", 1, validHeaders())
 	assertNotAuthed(t, rec, next, http.StatusInternalServerError, "DB_ERROR")
+}
+
+func TestCreate_EmailUniqueCollision_Returns409EmailConflict(t *testing.T) {
+	// A legitimate forge user whose Slack-verified email already lives on a
+	// different row (typical case: a leftover seed user in production)
+	// should NOT see an opaque 500. The middleware detects the pgx
+	// users_email_key constraint violation and returns a dedicated 409
+	// EMAIL_CONFLICT so the operator can reconcile the conflict.
+	pgErr := &pgconn.PgError{
+		Code:           "23505",
+		ConstraintName: "users_email_key",
+		Message:        `duplicate key value violates unique constraint "users_email_key"`,
+	}
+	store := &fakeStore{
+		lookupErrors: []error{pgx.ErrNoRows},
+		createErrors: []error{pgErr},
+	}
+	rec, next := invoke(t, store, "topsecret", "member", 1, validHeaders())
+	assertNotAuthed(t, rec, next, http.StatusConflict, "EMAIL_CONFLICT")
+	if strings.Contains(rec.Body.String(), "duplicate key") {
+		t.Fatalf("raw pg error leaked into response body: %s", rec.Body.String())
+	}
 }
 
 func TestCreate_OtherError_500_NoLeakInBody(t *testing.T) {
