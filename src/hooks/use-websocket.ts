@@ -30,10 +30,22 @@ function scheduleFilesRefresh(sessionId: string) {
   filesRefreshTimers.set(sessionId, timer);
 }
 
+// Cap consecutive reconnect attempts. Without this, a user whose role is
+// revoked mid-session (or whose secret rotates without their tab being
+// reloaded) generates a perpetual reconnect storm against a server that will
+// keep rejecting the upgrade with 403. Browsers do not expose the HTTP
+// status of a failed WebSocket upgrade to JS, so we cannot distinguish a
+// transient network blip from an auth-permanent rejection — capping the
+// attempt count covers both cases gracefully. The user can recover by
+// reloading the tab, which re-runs the boot flow and surfaces the
+// NotAuthorizedView if applicable.
+const MAX_RECONNECT_ATTEMPTS = 20;
+
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
   const reconnectDelay = useRef(1000);
+  const reconnectAttempts = useRef(0);
   const activeSessionRef = useRef<string | null>(null);
 
   const {
@@ -55,6 +67,7 @@ export function useWebSocket() {
     ws.onopen = () => {
       console.log("[ws] connected");
       reconnectDelay.current = 1000;
+      reconnectAttempts.current = 0;
 
       // Re-join active session
       if (activeSessionRef.current) {
@@ -77,9 +90,16 @@ export function useWebSocket() {
     };
 
     ws.onclose = () => {
-      console.log("[ws] disconnected, reconnecting...");
       wsRef.current = null;
+      if (reconnectAttempts.current >= MAX_RECONNECT_ATTEMPTS) {
+        console.warn(
+          `[ws] disconnected, max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached — giving up. Reload the page to retry.`,
+        );
+        return;
+      }
+      console.log("[ws] disconnected, reconnecting...");
       reconnectTimer.current = setTimeout(() => {
+        reconnectAttempts.current += 1;
         reconnectDelay.current = Math.min(reconnectDelay.current * 2, 30000);
         connect();
       }, reconnectDelay.current);

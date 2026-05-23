@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppShell } from "@/components/layout/AppShell";
+import { NotAuthorizedView } from "@/components/auth/NotAuthorizedView";
 import { useSessionStore } from "@/stores/session-store";
 import { useWebSocket } from "@/hooks/use-websocket";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { Loader2 } from "lucide-react";
 
 function AppContent() {
@@ -14,6 +15,7 @@ function AppContent() {
 export function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notAuthorized, setNotAuthorized] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -22,6 +24,13 @@ export function App() {
   async function loadData() {
     try {
       const store = useSessionStore.getState();
+
+      // /api/me is called first because a 403 here means "this user is not
+      // allowed in Deuce at all" — render the dedicated NotAuthorized view
+      // instead of the generic error retry. Other endpoints' 403s flow
+      // through standard error handling.
+      const me = await api.getMe();
+      store.setCurrentUser(me);
 
       const [teams, projects, sessions] = await Promise.all([
         api.listTeams(),
@@ -52,9 +61,25 @@ export function App() {
       setLoading(false);
     } catch (err: any) {
       console.error("Failed to load data:", err);
+      if (err instanceof ApiError && (err.code === "NOT_AUTHORIZED" || err.status === 403)) {
+        setNotAuthorized(true);
+        setLoading(false);
+        return;
+      }
       setError(err.message ?? "Failed to connect to server");
       setLoading(false);
     }
+  }
+
+  function retry() {
+    setError(null);
+    setNotAuthorized(false);
+    setLoading(true);
+    loadData();
+  }
+
+  if (notAuthorized) {
+    return <NotAuthorizedView onRetry={retry} />;
   }
 
   if (loading) {
@@ -73,15 +98,11 @@ export function App() {
       <div className="dark flex h-screen w-screen items-center justify-center bg-background text-foreground">
         <div className="flex flex-col items-center gap-3 text-center">
           <p className="text-sm text-danger">{error}</p>
-          <p className="text-xs text-foreground-subtle">
+          <p className="text-xs text-foreground-muted">
             Make sure the Go server is running on :8080
           </p>
           <button
-            onClick={() => {
-              setError(null);
-              setLoading(true);
-              loadData();
-            }}
+            onClick={retry}
             className="mt-2 rounded-md bg-accent-emphasis px-4 py-1.5 text-sm text-foreground-on-emphasis hover:bg-accent"
           >
             Retry
