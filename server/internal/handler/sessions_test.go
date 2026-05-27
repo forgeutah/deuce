@@ -165,35 +165,29 @@ func TestGetSessionVSCodeURI_HappyPath(t *testing.T) {
 		t.Fatalf("decode body %q: %v", rec.Body.String(), err)
 	}
 
-	// Must parse cleanly as a URL with scheme vscode.
-	u, err := url.Parse(body.URI)
-	if err != nil {
-		t.Fatalf("url.Parse(%q): %v", body.URI, err)
+	// VS Code's URI scheme is vscode://vscode-remote/ssh-remote+<user>@<host>:<port>/<path>.
+	// From Go's url.Parse perspective the user/host/port live INSIDE the path
+	// component because "vscode-remote" is the parsed Host. Assert against
+	// the literal URI rather than re-parsing its inner authority.
+	if !strings.HasPrefix(body.URI, "vscode://vscode-remote/ssh-remote+") {
+		t.Errorf("URI prefix: want vscode://vscode-remote/ssh-remote+, got %q", body.URI)
 	}
-	if u.Scheme != "vscode" {
-		t.Errorf("scheme: want vscode, got %q (uri=%q)", u.Scheme, body.URI)
-	}
-
-	// The dc-<sid> username carries the session UUID.
 	wantUser := "dc-" + f.sessionID.String()
-	if u.User.Username() != wantUser {
-		t.Errorf("user: want %q, got %q (uri=%q)", wantUser, u.User.Username(), body.URI)
+	if !strings.Contains(body.URI, wantUser+"@") {
+		t.Errorf("user: want %q in URI, got %q", wantUser, body.URI)
 	}
-
-	// Default SSH port (2222) when sshListenAddr is unset.
-	if u.Port() != strconv.Itoa(defaultSSHPort) {
-		t.Errorf("port: want %d, got %q (uri=%q)", defaultSSHPort, u.Port(), body.URI)
+	if !strings.Contains(body.URI, ":"+strconv.Itoa(defaultSSHPort)+"/") {
+		t.Errorf("port: want :%d in URI, got %q", defaultSSHPort, body.URI)
 	}
-
-	// Workspace path uses session.Name (the workspace-ID invariant).
 	wantPath := "/workspaces/" + f.session.Name
-	if u.Path != wantPath {
-		t.Errorf("path: want %q, got %q (uri=%q)", wantPath, u.Path, body.URI)
+	if !strings.HasSuffix(body.URI, wantPath) {
+		t.Errorf("path: want suffix %q, got %q", wantPath, body.URI)
 	}
 
-	// Host comes from r.Host (httptest default is "example.com").
-	if u.Hostname() == "" {
-		t.Errorf("hostname empty (uri=%q)", body.URI)
+	// Smoke-check that the URI string is at least parseable (no embedded
+	// nulls, no spaces, etc.).
+	if _, err := url.Parse(body.URI); err != nil {
+		t.Errorf("url.Parse(%q): %v", body.URI, err)
 	}
 }
 
@@ -283,15 +277,13 @@ func TestGetSessionVSCodeURI_PublicHostnameOverride(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	u, err := url.Parse(body.URI)
-	if err != nil {
-		t.Fatalf("url.Parse(%q): %v", body.URI, err)
+	// The host:port lives in the URI's path component (see HappyPath test
+	// for the parsing-quirk explanation).
+	if !strings.Contains(body.URI, "@deuce.example.com:2222/") {
+		t.Errorf("URI should embed @deuce.example.com:2222/, got %q", body.URI)
 	}
-	if u.Hostname() != "deuce.example.com" {
-		t.Errorf("hostname: want deuce.example.com, got %q (uri=%q)", u.Hostname(), body.URI)
-	}
-	if u.Port() != "2222" {
-		t.Errorf("port: want 2222, got %q (uri=%q)", u.Port(), body.URI)
+	if _, err := url.Parse(body.URI); err != nil {
+		t.Errorf("url.Parse(%q): %v", body.URI, err)
 	}
 }
 
@@ -316,12 +308,11 @@ func TestGetSessionVSCodeURI_PublicHostnameFallback(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	u, err := url.Parse(body.URI)
-	if err != nil {
-		t.Fatalf("url.Parse: %v", err)
+	if !strings.Contains(body.URI, "@from-host-header.test:") {
+		t.Errorf("URI should embed @from-host-header.test:, got %q", body.URI)
 	}
-	if u.Hostname() != "from-host-header.test" {
-		t.Errorf("hostname: want from-host-header.test, got %q (uri=%q)", u.Hostname(), body.URI)
+	if _, err := url.Parse(body.URI); err != nil {
+		t.Errorf("url.Parse: %v", err)
 	}
 }
 
