@@ -1,7 +1,7 @@
 ---
 title: "feat: Unified Proxy Auth Mode (Tailscale Serve + forge-proxy)"
 type: feat
-status: active
+status: completed
 date: 2026-05-26
 ---
 

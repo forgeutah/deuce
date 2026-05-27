@@ -89,21 +89,92 @@ GITHUB_TOKEN=          # GitHub PAT for repo listing (optional)
 DEVPOD_BIN=devpod      # DevPod binary path
 DEVPOD_PROVIDER=       # DevPod provider (empty = default)
 
-# Auth mode (default "dev"; set to "forge-proxy" when running behind forge-proxy)
+# Auth mode (default "dev"; set to "proxy" when running behind a header-trust
+# reverse proxy like forge-proxy or Tailscale Serve). The literal value
+# "forge-proxy" is rejected with a migration hint — use "proxy" with the
+# DEUCE_PROXY_HEADER_* env vars below.
 DEUCE_AUTH_MODE=dev
-FORGE_PROXY_SECRET=          # Required in forge-proxy mode (>= 32 random bytes recommended)
-FORGE_REQUIRED_ROLE=         # Required in forge-proxy mode (single role; user must have it)
-FORGE_CONTRACT_VERSION=1     # Pinned to 1; bump only after explicit code review
+
+# Required in proxy mode — no defaults. Header names match what the
+# configured reverse proxy actually emits.
+DEUCE_PROXY_HEADER_EMAIL=
+DEUCE_PROXY_HEADER_NAME=
+
+# Optional in proxy mode — left empty when the proxy does not emit them.
+DEUCE_PROXY_HEADER_AVATAR=
+
+# Optional shared-secret check. Both vars must be set together or both empty.
+# Used by forge-proxy; Tailscale Serve does not need it (tailnet boundary).
+DEUCE_PROXY_HEADER_SECRET=
+DEUCE_PROXY_SECRET=                # >= 32 random bytes recommended
+
+# Optional contract-version pin. Both vars must be set together or both empty.
+DEUCE_PROXY_HEADER_CONTRACT_VERSION=
+DEUCE_PROXY_CONTRACT_VERSION=      # integer; check fires only when header set
+
+# Optional required-role gate. All three vars set or all three empty.
+# Format: "csv" (forge-proxy roles header) or "json-object" (Tailscale
+# Tailscale-App-Capabilities header; required role matches a top-level key).
+DEUCE_PROXY_HEADER_ROLES=
+DEUCE_PROXY_ROLES_FORMAT=          # "csv" | "json-object"
+DEUCE_PROXY_REQUIRED_ROLE=
+
 DEUCE_WS_ALLOWED_ORIGINS=localhost:4000,localhost:8080  # CSV; rejects wildcard '*'
 ```
 
-### Hosted deployment checklist (forge-proxy mode)
+### Hosted deployment checklist (proxy mode)
 
-1. **Bind to a non-public interface.** Deuce trusts the shared secret only; without it, anyone reaching the server can mint requests as any forge user. Bind to loopback or a private overlay network with forge-proxy as the sole ingress.
-2. **`FORGE_PROXY_SECRET` ≥ 32 random bytes** (e.g. `openssl rand -hex 32`). Rotation is a brief 401 window in v1 — coordinate with forge-proxy.
-3. **`DEUCE_WS_ALLOWED_ORIGINS`** lists the public hostname(s) of the forge-proxy frontend. Never `*`.
-4. **`DEUCE_AUTH_MODE=forge-proxy`** is set explicitly in the env file — never rely on the default.
-5. **Logs:** `X-Forge-Proxy-Secret` is never logged by the middleware. If you introduce a logging middleware that dumps headers, add explicit redaction.
+1. **Bind to a non-public interface.** Deuce trusts the configured headers as identity; without the secret or role check, anyone reaching the server can mint requests as any user. Bind to loopback or a private overlay network with the configured proxy (forge-proxy, `tailscale serve`) as the sole ingress.
+2. **`DEUCE_PROXY_SECRET` ≥ 32 random bytes** when the secret check is enabled (e.g. `openssl rand -hex 32`). Rotation is a brief 401 window — coordinate with the proxy.
+3. **`DEUCE_WS_ALLOWED_ORIGINS`** lists the public hostname(s) of the proxy frontend. Never `*`. The same list also drives CORS `AllowedOrigins` (with `http://` and `https://` schemes synthesized when bare hostnames are given).
+4. **`DEUCE_AUTH_MODE=proxy`** is set explicitly in the env file — never rely on the default. The legacy `forge-proxy` value is rejected at startup.
+5. **Header configuration matches the proxy.** Smoke-test by curling the deuce server directly (bypassing the proxy) and confirming it rejects with 401 — proves the secret check (if configured) gates access.
+6. **Logs:** the configured `DEUCE_PROXY_HEADER_SECRET` value is never logged by the middleware. If you introduce a logging middleware that dumps headers, add explicit redaction for that header and the rest of the configured `DEUCE_PROXY_HEADER_*` set.
+7. **Tailscale Serve only.** Funnel and tagged-device traffic arrive without the identity headers; the middleware rejects them as 401.
+
+**forge-proxy env block:**
+
+```
+DEUCE_AUTH_MODE=proxy
+DEUCE_PROXY_HEADER_EMAIL=X-Forge-Email
+DEUCE_PROXY_HEADER_NAME=X-Forge-Name
+DEUCE_PROXY_HEADER_AVATAR=X-Forge-Avatar
+DEUCE_PROXY_HEADER_SECRET=X-Forge-Proxy-Secret
+DEUCE_PROXY_SECRET=<openssl rand -hex 32>
+DEUCE_PROXY_HEADER_CONTRACT_VERSION=X-Forge-Contract-Version
+DEUCE_PROXY_CONTRACT_VERSION=1
+DEUCE_PROXY_HEADER_ROLES=X-Forge-Roles
+DEUCE_PROXY_ROLES_FORMAT=csv
+DEUCE_PROXY_REQUIRED_ROLE=member
+DEUCE_WS_ALLOWED_ORIGINS=deuce.example.com
+```
+
+**Tailscale Serve env block:**
+
+```
+DEUCE_AUTH_MODE=proxy
+DEUCE_PROXY_HEADER_EMAIL=Tailscale-User-Login
+DEUCE_PROXY_HEADER_NAME=Tailscale-User-Name
+DEUCE_PROXY_HEADER_AVATAR=Tailscale-User-Profile-Pic
+DEUCE_PROXY_HEADER_ROLES=Tailscale-App-Capabilities
+DEUCE_PROXY_ROLES_FORMAT=json-object
+DEUCE_PROXY_REQUIRED_ROLE=example.com/cap/deuce/access
+DEUCE_WS_ALLOWED_ORIGINS=deuce.example.com
+# (no secret, no contract version — tailnet + loopback bind is the trust boundary)
+```
+
+**exe.dev "Login with exe" env block** (see <https://exe.dev/docs/login-with-exe>):
+
+```
+DEUCE_AUTH_MODE=proxy
+DEUCE_PROXY_HEADER_EMAIL=X-ExeDev-Email
+DEUCE_WS_ALLOWED_ORIGINS=vmname.exe.xyz
+# (no secret, no roles — exe.dev's HTTP proxy is the trust boundary; the
+#  app implements its own authorization, e.g. an upstream nginx email
+#  allow-list. exe.dev does not pass a name header, so DEUCE_PROXY_HEADER_NAME
+#  is left unset — new users land on the welcome screen and pick their own
+#  display name on first sign-in.)
+```
 
 ## Documented Solutions
 

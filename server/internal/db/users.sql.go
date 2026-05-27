@@ -9,30 +9,23 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const createUserByForgeID = `-- name: CreateUserByForgeID :one
-INSERT INTO users (forge_user_id, name, email, avatar, status, forge_first_seen_at)
-VALUES ($1, $2, $3, $4, 'online', now())
-ON CONFLICT (forge_user_id) DO NOTHING
-RETURNING id, name, email, avatar, status, created_at, forge_user_id, forge_first_seen_at
+const createUserByEmail = `-- name: CreateUserByEmail :one
+INSERT INTO users (email, name, avatar, status)
+VALUES ($1, $2, $3, 'online')
+ON CONFLICT (email) DO NOTHING
+RETURNING id, name, email, avatar, status, created_at
 `
 
-type CreateUserByForgeIDParams struct {
-	ForgeUserID pgtype.Int8 `json:"forge_user_id"`
-	Name        string      `json:"name"`
-	Email       string      `json:"email"`
-	Avatar      string      `json:"avatar"`
+type CreateUserByEmailParams struct {
+	Email  string `json:"email"`
+	Name   string `json:"name"`
+	Avatar string `json:"avatar"`
 }
 
-func (q *Queries) CreateUserByForgeID(ctx context.Context, arg CreateUserByForgeIDParams) (User, error) {
-	row := q.db.QueryRow(ctx, createUserByForgeID,
-		arg.ForgeUserID,
-		arg.Name,
-		arg.Email,
-		arg.Avatar,
-	)
+func (q *Queries) CreateUserByEmail(ctx context.Context, arg CreateUserByEmailParams) (User, error) {
+	row := q.db.QueryRow(ctx, createUserByEmail, arg.Email, arg.Name, arg.Avatar)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -41,14 +34,12 @@ func (q *Queries) CreateUserByForgeID(ctx context.Context, arg CreateUserByForge
 		&i.Avatar,
 		&i.Status,
 		&i.CreatedAt,
-		&i.ForgeUserID,
-		&i.ForgeFirstSeenAt,
 	)
 	return i, err
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, name, email, avatar, status, created_at, forge_user_id, forge_first_seen_at FROM users WHERE id = $1
+SELECT id, name, email, avatar, status, created_at FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
@@ -61,14 +52,12 @@ func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.Avatar,
 		&i.Status,
 		&i.CreatedAt,
-		&i.ForgeUserID,
-		&i.ForgeFirstSeenAt,
 	)
 	return i, err
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, name, email, avatar, status, created_at, forge_user_id, forge_first_seen_at FROM users ORDER BY name
+SELECT id, name, email, avatar, status, created_at FROM users ORDER BY name
 `
 
 func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
@@ -87,8 +76,6 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 			&i.Avatar,
 			&i.Status,
 			&i.CreatedAt,
-			&i.ForgeUserID,
-			&i.ForgeFirstSeenAt,
 		); err != nil {
 			return nil, err
 		}
@@ -100,12 +87,12 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
-const lookupUserByForgeID = `-- name: LookupUserByForgeID :one
-SELECT id, name, email, avatar, status, created_at, forge_user_id, forge_first_seen_at FROM users WHERE forge_user_id = $1
+const lookupUserByEmail = `-- name: LookupUserByEmail :one
+SELECT id, name, email, avatar, status, created_at FROM users WHERE email = $1
 `
 
-func (q *Queries) LookupUserByForgeID(ctx context.Context, forgeUserID pgtype.Int8) (User, error) {
-	row := q.db.QueryRow(ctx, lookupUserByForgeID, forgeUserID)
+func (q *Queries) LookupUserByEmail(ctx context.Context, email string) (User, error) {
+	row := q.db.QueryRow(ctx, lookupUserByEmail, email)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -114,8 +101,29 @@ func (q *Queries) LookupUserByForgeID(ctx context.Context, forgeUserID pgtype.In
 		&i.Avatar,
 		&i.Status,
 		&i.CreatedAt,
-		&i.ForgeUserID,
-		&i.ForgeFirstSeenAt,
+	)
+	return i, err
+}
+
+const updateUserName = `-- name: UpdateUserName :one
+UPDATE users SET name = $2 WHERE id = $1 RETURNING id, name, email, avatar, status, created_at
+`
+
+type UpdateUserNameParams struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
+func (q *Queries) UpdateUserName(ctx context.Context, arg UpdateUserNameParams) (User, error) {
+	row := q.db.QueryRow(ctx, updateUserName, arg.ID, arg.Name)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.Avatar,
+		&i.Status,
+		&i.CreatedAt,
 	)
 	return i, err
 }

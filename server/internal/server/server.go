@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -49,25 +50,21 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RealIP)
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins: []string{"http://localhost:4000", "http://localhost:8080"},
-		AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders: []string{
-			"Accept", "Content-Type", "X-User-ID",
-			"X-Forge-Proxy-Secret", "X-Forge-Contract-Version", "X-Forge-User-Id",
-			"X-Forge-Email", "X-Forge-Name", "X-Forge-Avatar", "X-Forge-Roles",
-			"X-Forge-Slack-User-Id", "X-Forge-Slack-Team-Id",
-		},
+		AllowedOrigins:   corsAllowedOrigins(s.cfg),
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders:   corsAllowedHeaders(s.cfg),
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
 
-	// X-Forge-Proxy-Secret must never appear in logs. chi's middleware.Logger
-	// records method/path/status/duration only — if anyone introduces a logging
-	// middleware that dumps headers, add explicit redaction for this header
-	// name and the rest of the X-Forge-* set.
-	if s.cfg.AuthMode == config.AuthModeForgeProxy {
-		r.Use(auth.ForgeProxyMiddleware(s.queries, s.cfg.ForgeProxySecret, s.cfg.ForgeRequiredRole, s.cfg.ForgeContractVersion))
+	// The configured proxy-secret header (cfg.ProxyHeaderSecret) must never
+	// appear in logs. chi's middleware.Logger records method/path/status/
+	// duration only — if anyone introduces a logging middleware that dumps
+	// headers, add explicit redaction for cfg.ProxyHeaderSecret and the rest
+	// of the configured DEUCE_PROXY_HEADER_* set.
+	if s.cfg.AuthMode == config.AuthModeProxy {
+		r.Use(auth.ProxyMiddleware(s.queries, auth.ProxyConfigFromConfig(s.cfg)))
 	} else {
 		r.Use(auth.Middleware(s.cfg.UserID))
 	}
@@ -99,6 +96,7 @@ func (s *Server) Router() http.Handler {
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/version", handler.Version(s.version))
 		r.Get("/me", h.GetMe)
+		r.Patch("/me", h.UpdateMe)
 		r.Get("/teams", h.ListTeams)
 		r.Get("/projects", h.ListProjects)
 		r.Get("/agents", h.ListAgents)
@@ -135,4 +133,56 @@ func (s *Server) Router() http.Handler {
 	r.Handle("/*", web.Handler())
 
 	return r
+}
+
+// corsAllowedOrigins returns the CORS AllowedOrigins list. In dev mode it
+// admits the localhost Vite (4000) and Go (8080) origins so the SPA can hit
+// the API from either host. In proxy mode it reuses DEUCE_WS_ALLOWED_ORIGINS
+// — the same trust boundary that gates WebSocket upgrades — prefixed with
+// https:// since the hosted deployment runs behind TLS at the proxy.
+// Operators who need both http:// and https:// can list each explicitly in
+// the env var (each origin shipped verbatim, no scheme synthesis).
+func corsAllowedOrigins(cfg *config.Config) []string {
+	if cfg.AuthMode == config.AuthModeProxy {
+		raw := cfg.WSAllowedOriginList()
+		out := make([]string, 0, len(raw)*2)
+		for _, o := range raw {
+			if strings.Contains(o, "://") {
+				out = append(out, o)
+				continue
+			}
+			// Bare hostnames: synthesize https:// (production) and http://
+			// (dev/staging behind plain HTTP). The proxy decides which is
+			// actually reachable.
+			out = append(out, "https://"+o, "http://"+o)
+		}
+		return out
+	}
+	return []string{"http://localhost:4000", "http://localhost:8080"}
+}
+
+// corsAllowedHeaders computes the CORS AllowedHeaders list from the
+// configured proxy header names. The base set covers the standard request
+// headers plus X-User-ID (dev-mode pass-through). In proxy mode, each
+// non-empty DEUCE_PROXY_HEADER_* value joins the list so browser preflight
+// for those headers succeeds. The middleware ignores X-User-ID in proxy
+// mode regardless — CORS only governs what the browser is allowed to send.
+func corsAllowedHeaders(cfg *config.Config) []string {
+	out := []string{"Accept", "Content-Type", "X-User-ID"}
+	if cfg.AuthMode != config.AuthModeProxy {
+		return out
+	}
+	for _, h := range []string{
+		cfg.ProxyHeaderEmail,
+		cfg.ProxyHeaderName,
+		cfg.ProxyHeaderAvatar,
+		cfg.ProxyHeaderSecret,
+		cfg.ProxyHeaderContractVersion,
+		cfg.ProxyHeaderRoles,
+	} {
+		if h != "" {
+			out = append(out, h)
+		}
+	}
+	return out
 }

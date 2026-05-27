@@ -4,11 +4,14 @@ SELECT * FROM users WHERE id = $1;
 -- name: ListUsers :many
 SELECT * FROM users ORDER BY name;
 
--- name: LookupUserByForgeID :one
-SELECT * FROM users WHERE forge_user_id = $1;
+-- name: LookupUserByEmail :one
+SELECT * FROM users WHERE email = $1;
 
--- name: CreateUserByForgeID :one
-INSERT INTO users (forge_user_id, name, email, avatar, status, forge_first_seen_at)
-VALUES ($1, $2, $3, $4, 'online', now())
-ON CONFLICT (forge_user_id) DO NOTHING
+-- name: CreateUserByEmail :one
+INSERT INTO users (email, name, avatar, status)
+VALUES ($1, $2, $3, 'online')
+ON CONFLICT (email) DO NOTHING
 RETURNING *;
+
+-- name: UpdateUserName :one
+UPDATE users SET name = $2 WHERE id = $1 RETURNING *;

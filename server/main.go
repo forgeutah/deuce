@@ -85,8 +85,33 @@ func main() {
 		slog.Warn("dev mode active — server trusts client-supplied X-User-ID; safe only on a loopback bind",
 			"auth_mode", cfg.AuthMode,
 			"addr", addr,
-			"hint", "set DEUCE_AUTH_MODE=forge-proxy for any non-loopback deployment",
+			"hint", "set DEUCE_AUTH_MODE=proxy and configure DEUCE_PROXY_HEADER_* env vars for any non-loopback deployment",
 		)
+	}
+
+	// Proxy mode: surface every disabled optional check at startup so an
+	// operator who unintentionally removed an env var sees the regression
+	// before it bites. Each disabled check means "no application-layer
+	// gate; trust the network boundary fully." When all three are
+	// disabled, the boot log says so explicitly.
+	if cfg.AuthMode == config.AuthModeProxy {
+		var disabled []string
+		if !cfg.ProxySecretCheckEnabled() {
+			disabled = append(disabled, "shared-secret")
+		}
+		if !cfg.ProxyContractCheckEnabled() {
+			disabled = append(disabled, "contract-version")
+		}
+		if !cfg.ProxyRoleCheckEnabled() {
+			disabled = append(disabled, "required-role")
+		}
+		if len(disabled) > 0 {
+			slog.Warn("proxy mode active — application-layer checks disabled, admission depends entirely on network ingress",
+				"auth_mode", cfg.AuthMode,
+				"disabled_checks", disabled,
+				"hint", "ensure Deuce binds only on loopback or a private overlay network where the configured proxy is the sole ingress",
+			)
+		}
 	}
 
 	go func() {
