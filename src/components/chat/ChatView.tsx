@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useSessionStore } from "@/stores/session-store";
-import type { Message, User } from "@/types";
+import type { Agent, Message, User } from "@/types";
 
 function TypingIndicator({
   agentName,

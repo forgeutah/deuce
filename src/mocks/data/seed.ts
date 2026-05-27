@@ -62,6 +62,7 @@ export const agentPresets: Agent[] = [
     provider: "Anthropic",
     model: "Claude Sonnet 4",
     description: "Writes and modifies code",
+    systemPrompt: "You are a coder agent. Write and modify code to match the spec the team agrees on. Match existing patterns; ask before introducing new abstractions.",
   },
   {
     id: "agent-reviewer",
@@ -73,6 +74,7 @@ export const agentPresets: Agent[] = [
     provider: "Anthropic",
     model: "Claude Sonnet 4",
     description: "Reviews code changes",
+    systemPrompt: "You are a reviewer agent. Read diffs critically: correctness, edge cases, security, test coverage. Be direct; cite file:line.",
   },
   {
     id: "agent-planner",
@@ -84,6 +86,7 @@ export const agentPresets: Agent[] = [
     provider: "OpenAI",
     model: "GPT-4o",
     description: "Creates implementation plans",
+    systemPrompt: "You are a planner agent. Break work into ordered implementation units with file paths and test scenarios. Decisions over tasks; flag deferred items explicitly.",
   },
   {
     id: "agent-tester",
@@ -95,6 +98,7 @@ export const agentPresets: Agent[] = [
     provider: "Anthropic",
     model: "Claude Sonnet 4",
     description: "Writes and runs tests",
+    systemPrompt: "You are a tester agent. Write tests that exercise real interactions (callbacks, middleware, integration paths). Prefer integration over mocks for layer crossings.",
   },
   {
     id: "agent-designer",
@@ -106,6 +110,7 @@ export const agentPresets: Agent[] = [
     provider: "OpenAI",
     model: "GPT-4o",
     description: "UI/UX suggestions",
+    systemPrompt: "You are a designer agent. Suggest interface improvements grounded in the existing design system. Show concrete before/after snippets.",
   },
 ];
 

@@ -16,19 +16,18 @@ for (const key of Object.keys(localStorage)) {
 
 export function AppShell() {
   return (
-    <ResizablePanelGroup direction="horizontal" className="h-full">
+    <ResizablePanelGroup orientation="horizontal" className="h-full">
       <ResizablePanel
         defaultSize={20}
         minSize={15}
         className="bg-background-subtle"
-        order={1}
       >
         <SessionSidebar />
       </ResizablePanel>
 
       <ResizableHandle withHandle />
 
-      <ResizablePanel defaultSize={55} minSize={30} order={2}>
+      <ResizablePanel defaultSize={55} minSize={30}>
         <CenterPanel />
       </ResizablePanel>
 
@@ -38,7 +37,6 @@ export function AppShell() {
         defaultSize={25}
         minSize={15}
         className="bg-background-subtle"
-        order={3}
       >
         <SummaryPanel />
       </ResizablePanel>

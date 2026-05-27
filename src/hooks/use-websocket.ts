@@ -43,7 +43,7 @@ const MAX_RECONNECT_ATTEMPTS = 20;
 
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const reconnectDelay = useRef(1000);
   const reconnectAttempts = useRef(0);
   const activeSessionRef = useRef<string | null>(null);

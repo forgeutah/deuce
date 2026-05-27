@@ -1,8 +1,7 @@
-import { defineConfig, loadEnv } from "vite";
+import { defineConfig, loadEnv, type ProxyOptions } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
-import type { IncomingMessage } from "http";
 
 // Local-dev forge-proxy header injector. Opt-in via VITE_DEV_FORGE_HEADERS=1
 // so it never fires unless explicitly requested. When on, the Vite dev proxy
@@ -30,14 +29,9 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const forgeHeaders = buildForgeHeaders(env);
 
-  const configureProxy = forgeHeaders
-    ? (proxy: import("http-proxy").Server) => {
-        const stamp = (req: IncomingMessage) => {
-          for (const [k, v] of Object.entries(forgeHeaders)) {
-            req.headers[k.toLowerCase()] = v;
-          }
-        };
-        // HTTP requests: rewrite the upstream request's headers before send.
+  const configureProxy: ProxyOptions["configure"] = forgeHeaders
+    ? (proxy) => {
+        // HTTP requests: stamp the upstream request before it's sent.
         proxy.on("proxyReq", (proxyReq) => {
           for (const [k, v] of Object.entries(forgeHeaders)) {
             proxyReq.setHeader(k, v);
@@ -50,8 +44,6 @@ export default defineConfig(({ mode }) => {
             proxyReq.setHeader(k, v);
           }
         });
-        // Suppress unused-param lint without changing the hook signature.
-        void stamp;
       }
     : undefined;
 

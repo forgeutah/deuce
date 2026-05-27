@@ -11,7 +11,7 @@ type ViewMode = "split" | "editor" | "preview";
 export function PlanView() {
   const { activeSessionId, sessions, updateSessionPlan } = useSessionStore();
   const [viewMode, setViewMode] = useState<ViewMode>("split");
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const session = sessions.find((s) => s.id === activeSessionId);
   const content = session?.planContent ?? "";
