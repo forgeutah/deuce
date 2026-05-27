@@ -1,8 +1,9 @@
 ---
 title: "feat: Open in VS Code via embedded Go SSH proxy"
-status: active
+status: completed
 created: 2026-05-26
 deepened: 2026-05-26
+completed: 2026-05-27
 type: feat
 ---
 
