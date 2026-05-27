@@ -378,6 +378,13 @@ type vscodeURIResponse struct {
 // URI. The real access gate is the SSH proxy's public-key auth — only a
 // session-member's registered key will authenticate at SSH time.
 func (h *Handler) GetSessionVSCodeURI(w http.ResponseWriter, r *http.Request) {
+	// SSH listener availability check — short-circuit before the DB
+	// roundtrip so a downed SSH listener doesn't quietly slow the UI down.
+	if h.sshAvailable != nil && !h.sshAvailable() {
+		writeError(w, http.StatusServiceUnavailable, "SSH_UNAVAILABLE", "VS Code remote access is not available on this server")
+		return
+	}
+
 	sessionID, err := uuid.Parse(chi.URLParam(r, "sessionID"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_SESSION_ID", "invalid session ID")

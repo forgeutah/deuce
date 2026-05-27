@@ -27,12 +27,21 @@ type Handler struct {
 	wsOrigins      []string
 	publicHostname string
 	sshListenAddr  string
+
+	// sshAvailable reports whether the SSH proxy is accepting connections.
+	// Set by main.go after sshproxy.New + ListenAndServe succeed; flipped
+	// to false if the listener crashes or fails to start. The vscode-uri
+	// endpoint returns 503 SSH_UNAVAILABLE when this reports false.
+	// Nil means "always available" (legacy callers / tests that don't
+	// wire the predicate).
+	sshAvailable func() bool
 }
 
-// New constructs a Handler. publicHostname and sshListenAddr feed the
-// vscode:// URI builder in GetSessionVSCodeURI. Both are placeholders until
-// U11 wires real config values; for now callers pass empty strings and the
-// handler falls back to the request Host header / default port 2222.
+// New constructs a Handler. publicHostname is the externally-reachable
+// hostname for the vscode:// URI (empty falls back to the request Host
+// header in dev; required-in-proxy is enforced by config.Validate).
+// sshListenAddr is used to derive the URI port. sshAvailable lets main.go
+// flip the SSH state; nil means always-available (test default).
 func New(queries *db.Queries, pool *pgxpool.Pool, hub *ws.Hub, githubToken string, wm *workspace.Manager, tm *terminal.Manager, exec *agent.Executor, aq *agent.Queue, wsOrigins []string, publicHostname, sshListenAddr string) *Handler {
 	return &Handler{
 		queries:        queries,
@@ -47,6 +56,13 @@ func New(queries *db.Queries, pool *pgxpool.Pool, hub *ws.Hub, githubToken strin
 		publicHostname: publicHostname,
 		sshListenAddr:  sshListenAddr,
 	}
+}
+
+// SetSSHAvailable installs a predicate that the vscode-uri endpoint checks
+// before building a URI. main.go installs a closure that reflects the live
+// sshproxy state; tests may leave it unset (treated as always-available).
+func (h *Handler) SetSSHAvailable(predicate func() bool) {
+	h.sshAvailable = predicate
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

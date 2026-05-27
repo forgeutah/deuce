@@ -23,11 +23,12 @@ import (
 )
 
 type Server struct {
-	pool    *pgxpool.Pool
-	queries *db.Queries
-	cfg     *config.Config
-	hub     *ws.Hub
-	version string
+	pool         *pgxpool.Pool
+	queries      *db.Queries
+	cfg          *config.Config
+	hub          *ws.Hub
+	version      string
+	sshAvailable func() bool
 }
 
 // New constructs a Server. version is the build-injected version string
@@ -41,6 +42,14 @@ func New(pool *pgxpool.Pool, cfg *config.Config, version string) *Server {
 		hub:     ws.NewHub(),
 		version: version,
 	}
+}
+
+// SetSSHAvailable installs a predicate that the vscode-uri endpoint checks
+// before building a URI. main.go sets this after sshproxy startup so the
+// HTTP server reflects the live SSH state. Nil predicate = always available
+// (e.g., tests that don't care).
+func (s *Server) SetSSHAvailable(predicate func() bool) {
+	s.sshAvailable = predicate
 }
 
 func (s *Server) Router() http.Handler {
@@ -89,10 +98,13 @@ func (s *Server) Router() http.Handler {
 		slog.Warn("failed to reset stale agent statuses", "error", err)
 	}
 
-	// publicHostname and sshListenAddr are placeholders until U11 wires real
-	// config values (DEUCE_PUBLIC_HOSTNAME, DEUCE_SSH_LISTEN_ADDR). For now
-	// the URI builder falls back to r.Host and port 2222.
-	h := handler.New(s.queries, s.pool, s.hub, s.cfg.GitHubToken, wm, tm, exec, aq, s.cfg.WSAllowedOriginList(), "", "")
+	// PublicHostname / SSHListenAddr come from config (U11). The vscode-uri
+	// endpoint falls back to r.Host when PublicHostname is empty (dev mode);
+	// proxy mode requires it via config.Validate.
+	h := handler.New(s.queries, s.pool, s.hub, s.cfg.GitHubToken, wm, tm, exec, aq, s.cfg.WSAllowedOriginList(), s.cfg.PublicHostname, s.cfg.SSHListenAddr)
+	if s.sshAvailable != nil {
+		h.SetSSHAvailable(s.sshAvailable)
+	}
 
 	go s.hub.Run()
 

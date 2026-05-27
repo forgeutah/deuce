@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -17,6 +20,8 @@ import (
 	"github.com/forgeutah/deuce/server/internal/config"
 	"github.com/forgeutah/deuce/server/internal/db"
 	"github.com/forgeutah/deuce/server/internal/server"
+	"github.com/forgeutah/deuce/server/internal/sshproxy"
+	"github.com/forgeutah/deuce/server/internal/workspace"
 )
 
 // Version is set at build time via -ldflags="-X main.Version=<tag>". The
@@ -66,6 +71,50 @@ func main() {
 
 	slog.Info("deuce starting", "version", Version)
 	srv := server.New(pool, cfg, Version)
+
+	// SSH proxy startup. Empty SSHListenAddr disables the listener entirely
+	// (HTTP keeps serving; /api/sessions/:id/vscode-uri returns 503). Any
+	// startup failure (bad host key, port in use, permissive mode) is
+	// degraded — not fatal — because HTTP is the load-bearing surface.
+	var sshSrv *sshproxy.Server
+	var sshUp atomic.Bool
+	if cfg.SSHListenAddr == "" {
+		slog.Info("ssh listener disabled by config (DEUCE_SSH_LISTEN_ADDR is empty)")
+	} else {
+		hostKeyPath := cfg.SSHHostKeyPath
+		if hostKeyPath == "" {
+			home, herr := os.UserHomeDir()
+			if herr != nil {
+				slog.Error("ssh: cannot resolve user home dir", "error", herr)
+			} else {
+				hostKeyPath = filepath.Join(home, ".deuce", "ssh_host_ed25519_key")
+			}
+		}
+		sshCfg := sshproxy.Config{
+			ListenAddr:         cfg.SSHListenAddr,
+			HostKeyPath:        hostKeyPath,
+			ServerVersion:      "SSH-2.0-Deuce_" + Version,
+			HandshakeTimeout:   time.Duration(cfg.SSHHandshakeTimeoutSec) * time.Second,
+			MaxHandshakesPerIP: cfg.SSHMaxHandshakesPerIP,
+			MaxChannelsPerConn: cfg.SSHMaxChannelsPerConn,
+			GoroutineCap:       cfg.SSHGoroutineCap,
+		}
+		wm := workspace.NewManager(cfg.DevPodBin, cfg.DevPodProvider)
+		s, err := sshproxy.New(sshCfg, db.New(pool), wm)
+		if err != nil {
+			slog.Error("ssh proxy startup failed — HTTP continues without VS Code remote access", "error", err)
+		} else {
+			sshSrv = s
+			sshUp.Store(true)
+			go func() {
+				if listenErr := sshSrv.ListenAndServe(cfg.SSHListenAddr); listenErr != nil && !errors.Is(listenErr, net.ErrClosed) {
+					slog.Error("ssh listener exited unexpectedly — disabling vscode-uri endpoint", "error", listenErr)
+					sshUp.Store(false)
+				}
+			}()
+		}
+	}
+	srv.SetSSHAvailable(sshUp.Load)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	httpServer := &http.Server{
@@ -130,7 +179,18 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer shutdownCancel()
 
-	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+	// Shut down HTTP and SSH concurrently under the same 10s deadline. Both
+	// listeners share fate but neither blocks the other's drain.
+	httpDone := make(chan error, 1)
+	go func() { httpDone <- httpServer.Shutdown(shutdownCtx) }()
+
+	if sshSrv != nil {
+		if err := sshSrv.Shutdown(shutdownCtx); err != nil {
+			slog.Error("ssh shutdown error", "error", err)
+		}
+	}
+
+	if err := <-httpDone; err != nil {
 		slog.Error("server shutdown error", "error", err)
 	}
 }

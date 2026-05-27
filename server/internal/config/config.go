@@ -60,6 +60,24 @@ type Config struct {
 	ProxyRequiredRole          string `env:"DEUCE_PROXY_REQUIRED_ROLE" envDefault:""`
 
 	WSAllowedOrigins string `env:"DEUCE_WS_ALLOWED_ORIGINS" envDefault:"localhost:4000,localhost:8080"`
+
+	// SSH proxy. Empty SSHListenAddr disables the embedded SSH listener
+	// entirely; HTTP keeps serving and /api/sessions/:id/vscode-uri
+	// returns 503 SSH_UNAVAILABLE. The host key is generated on first
+	// boot if missing; persist the directory across deploys.
+	SSHListenAddr     string `env:"DEUCE_SSH_LISTEN_ADDR" envDefault:":2222"`
+	SSHHostKeyPath    string `env:"DEUCE_SSH_HOST_KEY_PATH" envDefault:""`
+	SSHHandshakeTimeoutSec int `env:"DEUCE_SSH_HANDSHAKE_TIMEOUT_SEC" envDefault:"10"`
+	SSHMaxHandshakesPerIP  int `env:"DEUCE_SSH_MAX_HANDSHAKES_PER_IP" envDefault:"8"`
+	SSHMaxChannelsPerConn  int `env:"DEUCE_SSH_MAX_CHANNELS_PER_CONN" envDefault:"8"`
+	SSHGoroutineCap        int `env:"DEUCE_SSH_GOROUTINE_CAP" envDefault:"4000"`
+
+	// PublicHostname is the externally-reachable hostname embedded in
+	// the vscode:// URI returned by /api/sessions/:id/vscode-uri.
+	// REQUIRED in proxy mode (Host-header spoofing would otherwise let
+	// an unsanitized reverse proxy inject a malicious destination).
+	// In dev mode, empty falls back to the request Host header.
+	PublicHostname string `env:"DEUCE_PUBLIC_HOSTNAME" envDefault:""`
 }
 
 // WSAllowedOriginList returns the configured allowed origins split and trimmed.
@@ -139,6 +157,14 @@ func (c *Config) validateProxyMode(origins []string) error {
 	}
 	if len(origins) == 0 {
 		problems = append(problems, "DEUCE_WS_ALLOWED_ORIGINS")
+	}
+
+	// PublicHostname required in proxy mode: the vscode:// URI builder
+	// would otherwise fall back to the request Host header, which a
+	// misconfigured reverse proxy could let an attacker inject. In dev
+	// mode the Host header is fine — there is no untrusted ingress.
+	if c.PublicHostname == "" && c.SSHListenAddr != "" {
+		problems = append(problems, "DEUCE_PUBLIC_HOSTNAME (required when DEUCE_AUTH_MODE=proxy and SSH proxy is enabled)")
 	}
 
 	// Optional-check pairs must be set symmetrically. Setting one without
