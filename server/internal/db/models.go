@@ -101,3 +101,13 @@ type User struct {
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+type UserSshKey struct {
+	ID          uuid.UUID          `json:"id"`
+	UserID      uuid.UUID          `json:"user_id"`
+	Label       string             `json:"label"`
+	PublicKey   string             `json:"public_key"`
+	Fingerprint string             `json:"fingerprint"`
+	CreatedAt   time.Time          `json:"created_at"`
+	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
+}
