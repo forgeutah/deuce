@@ -215,7 +215,8 @@ func (s *Server) releaseChannel(state *connState) {
 // docker exec child. The request stream determines the shape:
 //   - "shell" → PTY bash login
 //   - "exec"  → non-PTY sh -c (or PTY sh -c if pty-req was buffered)
-//   - "subsystem sftp" → handed off to U9 (currently rejected)
+//   - "subsystem sftp" → non-PTY `sftp-server -e` via docker exec -i
+//     (see sftp.go for the full rationale on why no PTY)
 //   - "subsystem <other>" → rejected
 //
 // Returns when the channel closes, the connection EOFs, or the child
@@ -277,8 +278,15 @@ func (s *Server) runSessionChannel(
 				return
 			}
 
-			env := filterEnv(envBuf)
-			cmd = buildExecCmd(chanCtx, s.dockerBin, container, command, mode, env)
+			if mode == execModeSFTP {
+				// SFTP doesn't honor client-supplied env vars and forwarding
+				// LANG/TERM to the docker CLI would strip its PATH. Use a
+				// dedicated builder that leaves cmd.Env nil (inherit parent).
+				cmd = buildSFTPCmd(chanCtx, s.dockerBin, container)
+			} else {
+				env := filterEnv(envBuf)
+				cmd = buildExecCmd(chanCtx, s.dockerBin, container, command, mode, env)
+			}
 
 			if mode == execModePTYShell || mode == execModePTYExec {
 				var ws *pty.Winsize
@@ -354,7 +362,11 @@ func (s *Server) runSessionChannel(
 			dockerExecActive.Add(1)
 			started = true
 
-			// stdout/stderr → ssh channel.
+			// stdout/stderr → ssh channel. For SFTP we route stderr to
+			// io.Discard instead: sftp-server's `-e` debug output would
+			// otherwise mix into the client's stderr stream, and some SFTP
+			// clients don't drain stderr promptly which would wedge the
+			// pump.
 			var pumpsDone sync.WaitGroup
 			pumpsDone.Add(2)
 			go func() {
@@ -363,7 +375,11 @@ func (s *Server) runSessionChannel(
 			}()
 			go func() {
 				defer pumpsDone.Done()
-				_, _ = io.Copy(ch.Stderr(), stderrPipe)
+				if mode == execModeSFTP {
+					_, _ = io.Copy(io.Discard, stderrPipe)
+				} else {
+					_, _ = io.Copy(ch.Stderr(), stderrPipe)
+				}
 			}()
 
 			// ssh channel → stdin. Independent goroutine; we ignore its
@@ -543,11 +559,29 @@ func (s *Server) handleSessionRequest(
 			req.Reply(false, nil)
 			return
 		}
-		// U9 will implement SFTP. For U8 we reject all subsystems
-		// (including sftp) so VS Code falls back to scp-via-exec for
-		// file operations.
-		slog.Debug("subsystem request rejected (U9 implements sftp)", "subsystem", p.Subsystem)
-		req.Reply(false, nil)
+		if p.Subsystem != "sftp" {
+			// Unknown subsystem (publickey-hostbound@, ascii, etc).
+			// Reject; the channel survives so the client can try exec.
+			slog.Debug("subsystem rejected: not sftp", "subsystem", p.Subsystem)
+			req.Reply(false, nil)
+			return
+		}
+		if *started {
+			req.Reply(false, nil)
+			return
+		}
+		// SFTP is binary framing — a PTY would corrupt it. Reject if the
+		// client also asked for a pty.
+		if *ptyReqOut != nil {
+			slog.Debug("sftp rejected: pty-req previously buffered on same channel")
+			req.Reply(false, nil)
+			return
+		}
+		// Reply first so the client knows the subsystem is accepted; then
+		// kick off the docker exec child. From here on the SSH channel
+		// byte stream is the SFTP wire protocol.
+		req.Reply(true, nil)
+		startProc(execModeSFTP, "")
 
 	case reqWindowChange:
 		var p windowChangePayload
