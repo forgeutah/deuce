@@ -38,6 +38,7 @@ type Server struct {
 
 	mu             sync.Mutex
 	listener       net.Listener
+	closing        bool // set under mu by Shutdown to gate wg.Add in the accept loop
 	inFlightPerIP  map[string]int
 
 	wg   sync.WaitGroup
@@ -113,7 +114,20 @@ func (s *Server) ListenAndServe(addr string) error {
 			continue
 		}
 
+		// Guard wg.Add against a concurrent Shutdown calling wg.Wait.
+		// Without this the race detector flags Add ↔ Wait under -race
+		// even when the counter is provably non-zero. U10 will replace
+		// this with proper accept-loop tracking.
+		s.mu.Lock()
+		if s.closing {
+			s.mu.Unlock()
+			// Release the in-flight slot we just took, then bail.
+			s.releaseInFlight(conn.RemoteAddr())
+			_ = conn.Close()
+			continue
+		}
 		s.wg.Add(1)
+		s.mu.Unlock()
 		go s.handleRawConn(conn)
 	}
 }
@@ -221,6 +235,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
 	ln := s.listener
 	s.listener = nil
+	// Setting closing=true under mu happens-before any future Add in
+	// the accept loop (which also takes mu), so wg.Wait below cannot
+	// race with Add on a new connection.
+	s.closing = true
 	s.mu.Unlock()
 
 	if ln != nil {
