@@ -31,6 +31,14 @@ type Config struct {
 	// MaxChannelsPerConn caps the number of session channels open at any
 	// time on a single SSH connection. Defaults to 8.
 	MaxChannelsPerConn int
+
+	// GoroutineCap is the global goroutine threshold above which the
+	// accept loop refuses new connections without entering the SSH
+	// handshake. runtime.NumGoroutine() is the cheap signal; once it
+	// exceeds this cap the next accept disconnects with "server
+	// overloaded". Defaults to 4000. Set to a smaller value in tests to
+	// simulate overload.
+	GoroutineCap int
 }
 
 // applyDefaults fills in zero-valued fields with the documented defaults.
@@ -47,6 +55,9 @@ func (c *Config) applyDefaults() {
 	if c.MaxChannelsPerConn == 0 {
 		c.MaxChannelsPerConn = 8
 	}
+	if c.GoroutineCap == 0 {
+		c.GoroutineCap = 4000
+	}
 }
 
 // Validate checks for required fields and obviously-wrong values.
@@ -62,6 +73,9 @@ func (c *Config) Validate() error {
 	}
 	if c.MaxChannelsPerConn < 1 {
 		return fmt.Errorf("MaxChannelsPerConn must be >= 1")
+	}
+	if c.GoroutineCap < 1 {
+		return fmt.Errorf("GoroutineCap must be >= 1")
 	}
 	return nil
 }
