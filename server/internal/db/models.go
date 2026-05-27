@@ -94,12 +94,10 @@ type TeamMember struct {
 }
 
 type User struct {
-	ID               uuid.UUID          `json:"id"`
-	Name             string             `json:"name"`
-	Email            string             `json:"email"`
-	Avatar           string             `json:"avatar"`
-	Status           string             `json:"status"`
-	CreatedAt        time.Time          `json:"created_at"`
-	ForgeUserID      pgtype.Int8        `json:"forge_user_id"`
-	ForgeFirstSeenAt pgtype.Timestamptz `json:"forge_first_seen_at"`
+	ID        uuid.UUID `json:"id"`
+	Name      string    `json:"name"`
+	Email     string    `json:"email"`
+	Avatar    string    `json:"avatar"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
 }

@@ -180,7 +180,7 @@ func (q *Queries) ListSessionAgents(ctx context.Context, sessionID uuid.UUID) ([
 }
 
 const listSessionMembers = `-- name: ListSessionMembers :many
-SELECT u.id, u.name, u.email, u.avatar, u.status, u.created_at, u.forge_user_id, u.forge_first_seen_at FROM users u
+SELECT u.id, u.name, u.email, u.avatar, u.status, u.created_at FROM users u
 JOIN session_members sm ON u.id = sm.user_id
 WHERE sm.session_id = $1
 ORDER BY u.name
@@ -202,8 +202,6 @@ func (q *Queries) ListSessionMembers(ctx context.Context, sessionID uuid.UUID) (
 			&i.Avatar,
 			&i.Status,
 			&i.CreatedAt,
-			&i.ForgeUserID,
-			&i.ForgeFirstSeenAt,
 		); err != nil {
 			return nil, err
 		}

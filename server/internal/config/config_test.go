@@ -29,6 +29,25 @@ func TestValidate_UnknownAuthModeRejected(t *testing.T) {
 	}
 }
 
+func TestValidate_ForgeProxyLiteralGivesMigrationHint(t *testing.T) {
+	cfg := &Config{
+		AuthMode:         "forge-proxy",
+		WSAllowedOrigins: "deuce.example.com",
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected migration hint for legacy mode value")
+	}
+	// The hint must name the new mode value AND the new env-var prefix so
+	// an operator copy-pasting an old env file sees both halves of the
+	// rename in one error.
+	for _, want := range []string{"forge-proxy is no longer supported", "DEUCE_AUTH_MODE=proxy", "DEUCE_PROXY_HEADER_"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("migration hint should mention %q, got: %v", want, err)
+		}
+	}
+}
+
 func TestValidate_WildcardWSOriginRejected(t *testing.T) {
 	cfg := &Config{
 		AuthMode:         AuthModeDev,
@@ -43,69 +62,217 @@ func TestValidate_WildcardWSOriginRejected(t *testing.T) {
 	}
 }
 
-func TestValidate_ForgeProxyFullyConfiguredPasses(t *testing.T) {
-	cfg := &Config{
-		AuthMode:             AuthModeForgeProxy,
-		ForgeProxySecret:     "topsecret",
-		ForgeRequiredRole:    "member",
-		ForgeContractVersion: 1,
-		WSAllowedOrigins:     "deuce.example.com",
-	}
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("forge-proxy with full config should validate: %v", err)
+// forgeStyleConfig returns a proxy-mode config wired up the way a real
+// forge-proxy deployment would (CSV roles + secret + contract version).
+func forgeStyleConfig() *Config {
+	return &Config{
+		AuthMode:                   AuthModeProxy,
+		ProxyHeaderEmail:           "X-Forge-Email",
+		ProxyHeaderName:            "X-Forge-Name",
+		ProxyHeaderAvatar:          "X-Forge-Avatar",
+		ProxyHeaderSecret:          "X-Forge-Proxy-Secret",
+		ProxySecret:                "topsecret",
+		ProxyHeaderContractVersion: "X-Forge-Contract-Version",
+		ProxyContractVersion:       1,
+		ProxyHeaderRoles:           "X-Forge-Roles",
+		ProxyRolesFormat:           RolesFormatCSV,
+		ProxyRequiredRole:          "member",
+		WSAllowedOrigins:           "deuce.example.com",
 	}
 }
 
-func TestValidate_ForgeProxyMissingSecret(t *testing.T) {
-	cfg := &Config{
-		AuthMode:          AuthModeForgeProxy,
-		ForgeRequiredRole: "member",
+// tailscaleStyleConfig returns a proxy-mode config wired up the way a real
+// Tailscale Serve deployment would (JSON-object roles, no secret, no
+// contract version — the tailnet plus bind-to-loopback is the trust
+// boundary).
+func tailscaleStyleConfig() *Config {
+	return &Config{
+		AuthMode:          AuthModeProxy,
+		ProxyHeaderEmail:  "Tailscale-User-Login",
+		ProxyHeaderName:   "Tailscale-User-Name",
+		ProxyHeaderAvatar: "Tailscale-User-Profile-Pic",
+		ProxyHeaderRoles:  "Tailscale-App-Capabilities",
+		ProxyRolesFormat:  RolesFormatJSONObject,
+		ProxyRequiredRole: "example.com/cap/deuce/access",
 		WSAllowedOrigins:  "deuce.example.com",
 	}
-	err := cfg.Validate()
-	if err == nil || !strings.Contains(err.Error(), "FORGE_PROXY_SECRET") {
-		t.Fatalf("expected error naming FORGE_PROXY_SECRET, got: %v", err)
+}
+
+func TestValidate_ProxyForgeStyleFullyConfiguredPasses(t *testing.T) {
+	if err := forgeStyleConfig().Validate(); err != nil {
+		t.Fatalf("forge-style proxy config should validate: %v", err)
 	}
 }
 
-func TestValidate_ForgeProxyMissingRole(t *testing.T) {
-	cfg := &Config{
-		AuthMode:         AuthModeForgeProxy,
-		ForgeProxySecret: "topsecret",
-		WSAllowedOrigins: "deuce.example.com",
-	}
-	err := cfg.Validate()
-	if err == nil || !strings.Contains(err.Error(), "FORGE_REQUIRED_ROLE") {
-		t.Fatalf("expected error naming FORGE_REQUIRED_ROLE, got: %v", err)
+func TestValidate_ProxyTailscaleStyleFullyConfiguredPasses(t *testing.T) {
+	if err := tailscaleStyleConfig().Validate(); err != nil {
+		t.Fatalf("Tailscale-style proxy config should validate: %v", err)
 	}
 }
 
-func TestValidate_ForgeProxyMissingWSOrigins(t *testing.T) {
-	cfg := &Config{
-		AuthMode:          AuthModeForgeProxy,
-		ForgeProxySecret:  "topsecret",
-		ForgeRequiredRole: "member",
-		WSAllowedOrigins:  "",
-	}
-	err := cfg.Validate()
-	if err == nil || !strings.Contains(err.Error(), "DEUCE_WS_ALLOWED_ORIGINS") {
-		t.Fatalf("expected error naming DEUCE_WS_ALLOWED_ORIGINS, got: %v", err)
-	}
-}
-
-func TestValidate_ForgeProxyAllMissingErrorLists(t *testing.T) {
-	cfg := &Config{
-		AuthMode:         AuthModeForgeProxy,
-		WSAllowedOrigins: "",
-	}
+func TestValidate_ProxyEmptyAggregatesAllRequired(t *testing.T) {
+	cfg := &Config{AuthMode: AuthModeProxy, WSAllowedOrigins: ""}
 	err := cfg.Validate()
 	if err == nil {
-		t.Fatal("expected aggregate error for all missing fields")
+		t.Fatal("expected aggregate error for bare proxy mode")
 	}
-	for _, want := range []string{"FORGE_PROXY_SECRET", "FORGE_REQUIRED_ROLE", "DEUCE_WS_ALLOWED_ORIGINS"} {
+	for _, want := range []string{"DEUCE_PROXY_HEADER_EMAIL", "DEUCE_PROXY_HEADER_NAME", "DEUCE_WS_ALLOWED_ORIGINS"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("aggregate error should mention %s, got: %v", want, err)
 		}
+	}
+}
+
+func TestValidate_ProxySecretPairAsymmetric(t *testing.T) {
+	cases := []struct {
+		name      string
+		header    string
+		secret    string
+		wantMatch string
+	}{
+		{"header without value", "X-Forge-Proxy-Secret", "", "DEUCE_PROXY_HEADER_SECRET and DEUCE_PROXY_SECRET"},
+		{"value without header", "", "topsecret", "DEUCE_PROXY_HEADER_SECRET and DEUCE_PROXY_SECRET"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := tailscaleStyleConfig()
+			cfg.ProxyHeaderSecret = tc.header
+			cfg.ProxySecret = tc.secret
+			err := cfg.Validate()
+			if err == nil || !strings.Contains(err.Error(), tc.wantMatch) {
+				t.Fatalf("expected asymmetric-pair error mentioning %q, got: %v", tc.wantMatch, err)
+			}
+		})
+	}
+}
+
+func TestValidate_ProxyContractPairAsymmetric(t *testing.T) {
+	cases := []struct {
+		name      string
+		header    string
+		version   int
+		wantMatch string
+	}{
+		{"header without version", "X-Forge-Contract-Version", 0, "DEUCE_PROXY_CONTRACT_VERSION must be > 0"},
+		{"version without header", "", 1, "DEUCE_PROXY_HEADER_CONTRACT_VERSION must be set"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := tailscaleStyleConfig()
+			cfg.ProxyHeaderContractVersion = tc.header
+			cfg.ProxyContractVersion = tc.version
+			err := cfg.Validate()
+			if err == nil || !strings.Contains(err.Error(), tc.wantMatch) {
+				t.Fatalf("expected contract-pair error mentioning %q, got: %v", tc.wantMatch, err)
+			}
+		})
+	}
+}
+
+func TestValidate_ProxyRolesHeaderWithoutFormat(t *testing.T) {
+	cfg := tailscaleStyleConfig()
+	cfg.ProxyRolesFormat = ""
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "DEUCE_PROXY_ROLES_FORMAT") {
+		t.Fatalf("expected error for missing roles format: %v", err)
+	}
+}
+
+func TestValidate_ProxyRolesHeaderWithoutRequiredRole(t *testing.T) {
+	cfg := tailscaleStyleConfig()
+	cfg.ProxyRequiredRole = ""
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "DEUCE_PROXY_REQUIRED_ROLE") {
+		t.Fatalf("expected error for missing required role: %v", err)
+	}
+}
+
+func TestValidate_ProxyRolesUnknownFormat(t *testing.T) {
+	cfg := tailscaleStyleConfig()
+	cfg.ProxyRolesFormat = "xml"
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), `"xml" is invalid`) {
+		t.Fatalf("expected invalid-format error: %v", err)
+	}
+}
+
+func TestValidate_ProxyRolesValueWithoutHeader(t *testing.T) {
+	cfg := tailscaleStyleConfig()
+	cfg.ProxyHeaderRoles = ""
+	// Leave RolesFormat + RequiredRole set; the validator must catch this
+	// because silently ignoring them would mask a typo in the header env var.
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "DEUCE_PROXY_HEADER_ROLES must be set") {
+		t.Fatalf("expected error for orphaned roles config: %v", err)
+	}
+}
+
+func TestValidate_ProxyHeaderCollision(t *testing.T) {
+	cfg := forgeStyleConfig()
+	cfg.ProxyHeaderName = cfg.ProxyHeaderEmail // intentional collision
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected collision error")
+	}
+	// Both env var names must appear so the operator can find the typo.
+	for _, want := range []string{"DEUCE_PROXY_HEADER_EMAIL", "DEUCE_PROXY_HEADER_NAME", "both map to header"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("collision error should mention %q, got: %v", want, err)
+		}
+	}
+}
+
+func TestValidate_ProxyMalformedHeaderName(t *testing.T) {
+	cases := []struct {
+		name      string
+		headerVal string
+	}{
+		{"space in name", "X-Forge Email"},
+		{"newline in name", "X-Forge-Email\n"},
+		{"empty after canonicalize", "  "},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := forgeStyleConfig()
+			cfg.ProxyHeaderEmail = tc.headerVal
+			err := cfg.Validate()
+			if err == nil || !strings.Contains(err.Error(), "DEUCE_PROXY_HEADER_EMAIL") {
+				t.Fatalf("expected malformed-header error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidate_ProxyMissingWSOrigins(t *testing.T) {
+	cfg := tailscaleStyleConfig()
+	cfg.WSAllowedOrigins = ""
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "DEUCE_WS_ALLOWED_ORIGINS") {
+		t.Fatalf("expected origins-required error: %v", err)
+	}
+}
+
+func TestProxyCheckEnabledHelpers(t *testing.T) {
+	forge := forgeStyleConfig()
+	if !forge.ProxySecretCheckEnabled() {
+		t.Error("forge-style config should report secret check enabled")
+	}
+	if !forge.ProxyContractCheckEnabled() {
+		t.Error("forge-style config should report contract check enabled")
+	}
+	if !forge.ProxyRoleCheckEnabled() {
+		t.Error("forge-style config should report role check enabled")
+	}
+
+	ts := tailscaleStyleConfig()
+	if ts.ProxySecretCheckEnabled() {
+		t.Error("Tailscale-style config should report secret check disabled")
+	}
+	if ts.ProxyContractCheckEnabled() {
+		t.Error("Tailscale-style config should report contract check disabled")
+	}
+	if !ts.ProxyRoleCheckEnabled() {
+		t.Error("Tailscale-style config has roles header → role check enabled")
 	}
 }
 
