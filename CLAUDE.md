@@ -120,6 +120,22 @@ DEUCE_PROXY_ROLES_FORMAT=          # "csv" | "json-object"
 DEUCE_PROXY_REQUIRED_ROLE=
 
 DEUCE_WS_ALLOWED_ORIGINS=localhost:4000,localhost:8080  # CSV; rejects wildcard '*'
+
+# SSH proxy (for "Open in VS Code"). Embedded SSH listener that routes
+# VS Code Remote-SSH into per-session DevPod containers via docker exec.
+# Empty DEUCE_SSH_LISTEN_ADDR disables SSH; HTTP keeps serving and the
+# vscode-uri endpoint returns 503 SSH_UNAVAILABLE.
+DEUCE_SSH_LISTEN_ADDR=:2222
+DEUCE_SSH_HOST_KEY_PATH=                       # empty → ~/.deuce/ssh_host_ed25519_key
+DEUCE_SSH_HANDSHAKE_TIMEOUT_SEC=10             # pre-handshake deadline on raw net.Conn
+DEUCE_SSH_MAX_HANDSHAKES_PER_IP=8              # concurrent in-flight handshakes per source IP
+DEUCE_SSH_MAX_CHANNELS_PER_CONN=8              # session channels per SSH connection
+DEUCE_SSH_GOROUTINE_CAP=4000                   # accept-loop refuses new conns above this
+
+# Externally-reachable hostname embedded in vscode:// URIs. REQUIRED in
+# proxy mode when SSH is enabled — Host-header spoofing would otherwise
+# let a misconfigured reverse proxy inject a malicious destination.
+DEUCE_PUBLIC_HOSTNAME=
 ```
 
 ### Hosted deployment checklist (proxy mode)
@@ -175,6 +191,35 @@ DEUCE_WS_ALLOWED_ORIGINS=vmname.exe.xyz
 #  is left unset — new users land on the welcome screen and pick their own
 #  display name on first sign-in.)
 ```
+
+### SSH proxy ("Open in VS Code") deployment checklist
+
+1. **`DEUCE_PUBLIC_HOSTNAME` is required in proxy mode when SSH is enabled.** Without it, the vscode:// URI builder falls back to the request `Host` header — a misconfigured reverse proxy can let an attacker inject a malicious destination that VS Code then opens. Validated at startup.
+2. **SSH host key is generated on first boot at `~/.deuce/ssh_host_ed25519_key`** (override via `DEUCE_SSH_HOST_KEY_PATH`). Persist the parent directory across deploys — rotating the key forces every user to clear `known_hosts`. The directory MUST NOT be on a volume shared with other containers; the host key is the SSH identity, treat it like a TLS private key.
+3. **SSH listener (default `:2222`) must be reachable** by user VS Code installations. If port 22 is taken by the VM's admin sshd, deploy on a dedicated hostname/IP routed to port 2222 (or pre-route via load balancer if browsers don't accept the port-in-URI on your VS Code version). Set `DEUCE_SSH_LISTEN_ADDR=` (empty) to disable SSH entirely — HTTP keeps serving and the vscode-uri endpoint returns 503.
+4. **`docker exec` permissions:** the deuce process user must be in the `docker` group on the host, or have an equivalent privileged path to talk to the Docker daemon. Otherwise SSH auth succeeds but the channel-open `docker exec` fails with a confusing error.
+5. **Logs include SSH-key fingerprints (SHA256:…), never full keys.** If you add a logging middleware that dumps headers or process state, ensure it doesn't capture `Permissions.Extensions` either (it carries fingerprint, session-id, user-id, key-id).
+6. **Deleted users keep their in-flight SSH sessions** until the user disconnects naturally. Revocation propagates on the next auth attempt (LISTEN/NOTIFY real-time disconnect was deliberately deferred for v1 — `MaxAuthTries=3` caps post-revoke reuse to three rejected handshakes).
+7. **Tailscale Funnel / VS Code Tunnels are NOT supported** — the SSH proxy is a direct TCP listener. If your deployment is fronted by a tunnel that strips the source IP or doesn't preserve TCP semantics, the per-IP handshake cap may misbehave.
+
+### Terminal vs Open-in-VS-Code divergence
+
+The browser **Terminal panel** uses `devpod ssh` (VM sshd → DevPod's in-container shim → user shell). The **Open-in-VS-Code** path uses `docker exec`. They diverge on:
+
+- **Environment:** `docker exec` does not set `SSH_*` vars; the SSH proxy explicitly forwards only `VSCODE_*`, `LANG`, `LC_*`, `TERM`, `HOME`, `USER`, `SHELL` (allowlist defeats `LD_PRELOAD` injection). The browser terminal inherits whatever DevPod forwards.
+- **UID:** `devpod ssh` runs as the devcontainer's `remoteUser` (typically `vscode`/`node`). `docker exec` defaults to the image's `USER` directive (which is often the same user, but not guaranteed — verify per image).
+- **Shell startup:** `docker exec -it /bin/bash -l` is a login shell; the terminal panel's interactive bash is non-login.
+
+Users may see "my git config works in the terminal but not VS Code" surprises — document the divergence in user-facing docs. Convergence (route the terminal panel through the SSH proxy too) is reserved as a v2 cleanup.
+
+### Devcontainer compatibility for VS Code Remote-SSH
+
+Devcontainers used with "Open in VS Code" must include:
+- `bash`, `tar`, and `curl` or `wget` — VS Code's install probe downloads `~/.vscode-server` inside the container
+- `openssh-sftp-server` (Debian: `/usr/lib/openssh/sftp-server`) — required for SFTP-based file operations
+- A **glibc-compatible base image** — VS Code Remote requires glibc ≥ 2.17. Alpine + musl needs `apk add gcompat`.
+
+`~/.vscode-server` lives in the container's own filesystem; a fresh ~120MB download fires on every container recreate. Per-user named volume caching is a v2 follow-up.
 
 ## Documented Solutions
 
