@@ -16,6 +16,7 @@ import (
 	db "github.com/forgeutah/deuce/server/internal/db"
 	"github.com/forgeutah/deuce/server/internal/handler"
 	"github.com/forgeutah/deuce/server/internal/terminal"
+	"github.com/forgeutah/deuce/server/internal/web"
 	"github.com/forgeutah/deuce/server/internal/workspace"
 	"github.com/forgeutah/deuce/server/internal/ws"
 )
@@ -120,6 +121,12 @@ func (s *Server) Router() http.Handler {
 
 	r.Get("/ws", h.HandleWebSocket)
 	r.Get("/ws/terminal/{sessionID}", h.HandleTerminalWebSocket)
+
+	// Catch-all static handler for the embedded Vite SPA. Mounted last so the
+	// /api and /ws routes above take precedence — chi resolves most-specific
+	// first. Returns 404 for missing /assets/* (hashed-asset misses) and
+	// falls back to index.html for unknown application routes.
+	r.Handle("/*", web.Handler())
 
 	return r
 }

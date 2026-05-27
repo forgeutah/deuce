@@ -8,3 +8,11 @@ dist
 .claude/settings.local.json
 .DS_Store
 server/bin/
+
+# server/internal/web/dist is the embed target. The directory must exist so
+# `go:embed all:dist` resolves, but its contents are build output. Track only
+# the .gitkeep placeholder; the real Vite build lands here at Docker build
+# time (Dockerfile) or via `make embed-dist` locally.
+!server/internal/web/dist/
+server/internal/web/dist/*
+!server/internal/web/dist/.gitkeep
