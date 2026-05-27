@@ -1,0 +1,14 @@
+version: 2
+
+updates:
+  # GitHub Actions used by our workflows. First-party (actions/*, docker/*)
+  # are pinned at major tags; third-party (when added) should be SHA-pinned.
+  # Dependabot surfaces minor and patch bumps for review.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore(ci)

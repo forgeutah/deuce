@@ -16,6 +16,7 @@ import (
 	db "github.com/forgeutah/deuce/server/internal/db"
 	"github.com/forgeutah/deuce/server/internal/handler"
 	"github.com/forgeutah/deuce/server/internal/terminal"
+	"github.com/forgeutah/deuce/server/internal/web"
 	"github.com/forgeutah/deuce/server/internal/workspace"
 	"github.com/forgeutah/deuce/server/internal/ws"
 )
@@ -25,14 +26,19 @@ type Server struct {
 	queries *db.Queries
 	cfg     *config.Config
 	hub     *ws.Hub
+	version string
 }
 
-func New(pool *pgxpool.Pool, cfg *config.Config) *Server {
+// New constructs a Server. version is the build-injected version string
+// surfaced at GET /api/version and on startup logs. Pass "dev" for non-release
+// builds.
+func New(pool *pgxpool.Pool, cfg *config.Config, version string) *Server {
 	return &Server{
 		pool:    pool,
 		queries: db.New(pool),
 		cfg:     cfg,
 		hub:     ws.NewHub(),
+		version: version,
 	}
 }
 
@@ -91,6 +97,7 @@ func (s *Server) Router() http.Handler {
 	go s.hub.Run()
 
 	r.Route("/api", func(r chi.Router) {
+		r.Get("/version", handler.Version(s.version))
 		r.Get("/me", h.GetMe)
 		r.Get("/teams", h.ListTeams)
 		r.Get("/projects", h.ListProjects)
@@ -120,6 +127,12 @@ func (s *Server) Router() http.Handler {
 
 	r.Get("/ws", h.HandleWebSocket)
 	r.Get("/ws/terminal/{sessionID}", h.HandleTerminalWebSocket)
+
+	// Catch-all static handler for the embedded Vite SPA. Mounted last so the
+	// /api and /ws routes above take precedence — chi resolves most-specific
+	// first. Returns 404 for missing /assets/* (hashed-asset misses) and
+	// falls back to index.html for unknown application routes.
+	r.Handle("/*", web.Handler())
 
 	return r
 }

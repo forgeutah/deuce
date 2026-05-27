@@ -1,0 +1,43 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Build artifacts and dependency directories the Dockerfile doesn't need.
+# Note: ./dist IS included in the context — the workflow builds it before
+# `docker build` and the Dockerfile copies it into the backend stage. Source
+# directories the frontend build consumes (src/, public/, etc.) and
+# package.json are NOT needed inside the image at all.
+node_modules
+src
+public
+index.html
+package.json
+package-lock.json
+vite.config.ts
+tsconfig*.json
+eslint.config.js
+server/bin
+server/tmp
+server/internal/web/dist
+
+# Local environment files — never bake these into the image.
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Editor / tooling state that's never relevant to a build.
+.vscode
+.idea
+.devcontainer
+.claude
+.DS_Store
+
+# Workflows and meta — not consumed by the build itself; docker/build-push-action
+# checks out only the build context, so dropping these keeps the context lean.
+.github
+
+# Docs and plans don't affect the binary.
+docs
+*.md
