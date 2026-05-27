@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Hash,
+  Key,
   Pencil,
   Plus,
   Search,
@@ -23,6 +24,7 @@ import { api } from "@/lib/api";
 import { useSessionStore } from "@/stores/session-store";
 import { CreateSessionDialog } from "@/components/session/CreateSessionDialog";
 import { AgentSettingsDialog } from "@/components/settings/AgentSettingsDialog";
+import { SSHKeysDialog } from "@/components/settings/SSHKeysDialog";
 import type { Session, Project } from "@/types";
 
 const MAX_DESCRIPTION_LENGTH = 200;
@@ -234,6 +236,7 @@ function ProjectGroup({
 export function SessionSidebar() {
   const [createOpen, setCreateOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sshKeysOpen, setSshKeysOpen] = useState(false);
   const {
     projects,
     sessions,
@@ -319,6 +322,13 @@ export function SessionSidebar() {
           Teams
         </button>
         <button
+          onClick={() => setSshKeysOpen(true)}
+          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground-muted hover:bg-background-hover hover:text-foreground"
+        >
+          <Key className="h-4 w-4" />
+          SSH Keys
+        </button>
+        <button
           onClick={() => setSettingsOpen(true)}
           className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground-muted hover:bg-background-hover hover:text-foreground"
         >
@@ -329,6 +339,7 @@ export function SessionSidebar() {
 
       <CreateSessionDialog open={createOpen} onOpenChange={setCreateOpen} />
       <AgentSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <SSHKeysDialog open={sshKeysOpen} onOpenChange={setSshKeysOpen} />
     </div>
   );
 }
