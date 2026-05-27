@@ -24,6 +24,18 @@ type Server struct {
 	queries    *db.Queries
 	workspaces *workspace.Manager
 
+	// resolveContainerHook lets tests inject a deterministic container
+	// resolver without spinning up Docker or the workspace.Manager. The
+	// production path falls back to a queries+workspaces lookup; tests
+	// can swap this for a stub. Always nil in production builds.
+	resolveContainerHook func(ctx context.Context, sessionID string) (string, error)
+
+	// dockerBin is the docker CLI binary used by session-channel handlers.
+	// Empty means defaultDockerBin ("docker"). Tests override this to
+	// point at a fake helper script. Per-Server to avoid races between
+	// concurrent test instances.
+	dockerBin string
+
 	mu             sync.Mutex
 	listener       net.Listener
 	inFlightPerIP  map[string]int
@@ -175,18 +187,10 @@ func (s *Server) handleRawConn(c net.Conn) {
 		slog.Warn("clear handshake deadline failed", "error", err)
 	}
 
-	// U7/U8 wire up auth and channel handling. For U6 this is just a
-	// no-op handshake-only path that discards channels and requests so
-	// the connection drains cleanly.
-	go ssh.DiscardRequests(reqs)
-	for newCh := range chans {
-		// U6 stub: reject all channel types. U8 replaces this with the
-		// session-channel allowlist.
-		if err := newCh.Reject(ssh.UnknownChannelType, "session channel handling not yet implemented"); err != nil {
-			slog.Debug("channel reject failed", "type", newCh.ChannelType(), "error", err)
-		}
-	}
-	_ = sshConn.Close()
+	// U8: hand off to the authenticated-connection handler. It enforces
+	// the channel-type allowlist, per-connection channel caps, and
+	// spawns one goroutine per accepted session channel.
+	s.handleAuthenticatedConn(sshConn, chans, reqs)
 }
 
 // serverConfig builds the per-connection ssh.ServerConfig. Wires the
