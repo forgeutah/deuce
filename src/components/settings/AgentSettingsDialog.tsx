@@ -13,18 +13,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
+import type { Agent } from "@/types";
 
-interface AgentData {
-  id: string;
-  name: string;
-  role: string;
-  color: string;
-  color_muted: string;
-  provider: string;
-  model: string;
-  description: string;
-  system_prompt: string;
-}
+// AgentDraft mirrors Agent but drops the status field, which is server-managed
+// (idle/working/etc.) and never edited from this dialog.
+type AgentDraft = Omit<Agent, "status">;
 
 const MODEL_OPTIONS = [
   "claude-opus-4-6",
@@ -39,8 +32,8 @@ export function AgentSettingsDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const [agents, setAgents] = useState<AgentData[]>([]);
-  const [editing, setEditing] = useState<AgentData | null>(null);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [editing, setEditing] = useState<AgentDraft | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -64,16 +57,16 @@ export function AgentSettingsDialog({
       name: "",
       role: "",
       color: "",
-      color_muted: "",
+      colorMuted: "",
       provider: "Anthropic",
       model: "claude-sonnet-4-6",
       description: "",
-      system_prompt: "",
+      systemPrompt: "",
     });
     setIsNew(true);
   }
 
-  function startEdit(agent: AgentData) {
+  function startEdit(agent: Agent) {
     setEditing({ ...agent });
     setIsNew(false);
   }
@@ -94,7 +87,7 @@ export function AgentSettingsDialog({
           provider: editing.provider,
           model: editing.model,
           description: editing.description,
-          systemPrompt: editing.system_prompt,
+          systemPrompt: editing.systemPrompt,
         });
       } else {
         await api.updateAgent(editing.id, {
@@ -103,7 +96,7 @@ export function AgentSettingsDialog({
           provider: editing.provider,
           model: editing.model,
           description: editing.description,
-          systemPrompt: editing.system_prompt,
+          systemPrompt: editing.systemPrompt,
         });
       }
       await loadAgents();
@@ -121,7 +114,7 @@ export function AgentSettingsDialog({
       await api.deleteAgent(id);
       await loadAgents();
       setDeleting(null);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Failed to delete agent:", err);
     }
   }
@@ -249,10 +242,10 @@ function AgentForm({
   onSave,
   onCancel,
 }: {
-  agent: AgentData;
+  agent: AgentDraft;
   isNew: boolean;
   loading: boolean;
-  onChange: (agent: AgentData) => void;
+  onChange: (agent: AgentDraft) => void;
   onSave: () => void;
   onCancel: () => void;
 }) {
@@ -311,8 +304,8 @@ function AgentForm({
       <div className="flex flex-col gap-1.5">
         <label className="text-xs font-medium text-foreground-muted">System Prompt</label>
         <Textarea
-          value={agent.system_prompt}
-          onChange={(e) => onChange({ ...agent, system_prompt: e.target.value })}
+          value={agent.systemPrompt}
+          onChange={(e) => onChange({ ...agent, systemPrompt: e.target.value })}
           placeholder="Instructions for what this agent does, its personality, constraints..."
           rows={6}
           className="bg-background border-border-muted text-sm resize-none"

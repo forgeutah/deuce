@@ -16,10 +16,10 @@ export function PlanView() {
   const session = sessions.find((s) => s.id === activeSessionId);
   const content = session?.planContent ?? "";
 
-  if (!session) return null;
-
-  const isReadOnly = session.status !== "active";
-
+  // Declare every hook before any early return so React sees a stable hook
+  // order across renders. The handler closes over activeSessionId, which is
+  // null-checked inside the body — safe regardless of whether session exists
+  // on this render.
   const handleChange = useCallback(
     (value: string) => {
       if (!activeSessionId) return;
@@ -34,6 +34,10 @@ export function PlanView() {
     },
     [activeSessionId, updateSessionPlan],
   );
+
+  if (!session) return null;
+
+  const isReadOnly = session.status !== "active";
 
   return (
     <div className="flex h-full flex-col">

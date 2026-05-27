@@ -1,12 +1,15 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useSessionStore } from "@/stores/session-store";
-import type { Message, ActivityItem } from "@/types";
+import type { AgentStatus, Message, ActivityItem } from "@/types";
 import { api } from "@/lib/api";
 
 interface ServerMessage {
   type: string;
   sessionId: string;
-  payload: any;
+  // Per-type discriminated narrowing happens inside the switch — payloads
+  // vary by `type` and the server is the source of truth. `unknown` forces
+  // callers to assert the expected shape instead of silently accepting any.
+  payload: unknown;
 }
 
 // Per-session trailing-edge debounce for files refreshes triggered by
@@ -60,58 +63,13 @@ export function useWebSocket() {
     clearAgentOutput,
   } = useSessionStore();
 
-  const connect = useCallback(() => {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
-
-    ws.onopen = () => {
-      console.log("[ws] connected");
-      reconnectDelay.current = 1000;
-      reconnectAttempts.current = 0;
-
-      // Re-join active session
-      if (activeSessionRef.current) {
-        ws.send(
-          JSON.stringify({
-            type: "join",
-            sessionId: activeSessionRef.current,
-          }),
-        );
-      }
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const msg: ServerMessage = JSON.parse(event.data);
-        handleMessage(msg);
-      } catch {
-        console.warn("[ws] failed to parse message", event.data);
-      }
-    };
-
-    ws.onclose = () => {
-      wsRef.current = null;
-      if (reconnectAttempts.current >= MAX_RECONNECT_ATTEMPTS) {
-        console.warn(
-          `[ws] disconnected, max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached — giving up. Reload the page to retry.`,
-        );
-        return;
-      }
-      console.log("[ws] disconnected, reconnecting...");
-      reconnectTimer.current = setTimeout(() => {
-        reconnectAttempts.current += 1;
-        reconnectDelay.current = Math.min(reconnectDelay.current * 2, 30000);
-        connect();
-      }, reconnectDelay.current);
-    };
-
-    ws.onerror = (err) => {
-      console.error("[ws] error", err);
-      ws.close();
-    };
-
-    wsRef.current = ws;
-  }, []);
+  // Refs hold the latest version of handleMessage and connect so the
+  // long-lived ws.onmessage / ws.onclose closures always reach the current
+  // function bodies instead of stale ones captured at first connect. This
+  // also breaks the connect/handleMessage capture cycle that the
+  // react-hooks/immutability rule otherwise flags.
+  const handleMessageRef = useRef<(msg: ServerMessage) => void>(() => {});
+  const connectRef = useRef<() => void>(() => {});
 
   const handleMessage = useCallback(
     (msg: ServerMessage) => {
@@ -135,7 +93,10 @@ export function useWebSocket() {
         }
 
         case "agent_status": {
-          const { agentId, status } = msg.payload;
+          const { agentId, status } = msg.payload as {
+            agentId: string;
+            status: AgentStatus;
+          };
           updateAgentStatus(msg.sessionId, agentId, status);
           // Clear streaming output when agent finishes
           if (status === "idle" || status === "error") {
@@ -145,7 +106,10 @@ export function useWebSocket() {
         }
 
         case "typing_indicator": {
-          const { agentId, active } = msg.payload;
+          const { agentId, active } = msg.payload as {
+            agentId: string;
+            active: boolean;
+          };
           if (active) {
             setThinkingAgent(msg.sessionId, agentId);
           } else {
@@ -169,13 +133,17 @@ export function useWebSocket() {
         }
 
         case "agent_output": {
-          const { agentId, content, contentType } = msg.payload;
+          const { agentId, content, contentType } = msg.payload as {
+            agentId: string;
+            content: string;
+            contentType: string;
+          };
           appendAgentOutput(msg.sessionId, { agentId, content, contentType });
           break;
         }
 
         case "workspace_log": {
-          const { line } = msg.payload;
+          const { line } = msg.payload as { line: string };
           appendWorkspaceLog(msg.sessionId, line);
           break;
         }
@@ -189,7 +157,7 @@ export function useWebSocket() {
         }
 
         case "unread_update": {
-          const { unreadCount } = msg.payload;
+          const { unreadCount } = msg.payload as { unreadCount: number };
           const store = useSessionStore.getState();
           store.setSessions(
             store.sessions.map((s) =>
@@ -202,6 +170,71 @@ export function useWebSocket() {
     },
     [addMessage, updateAgentStatus, setThinkingAgent, clearThinkingAgent, addActivity, appendWorkspaceLog, appendAgentOutput, clearAgentOutput],
   );
+
+  // Keep the latest handleMessage reachable from the long-lived ws.onmessage
+  // closure without forcing connect to re-create on every render.
+  useEffect(() => {
+    handleMessageRef.current = handleMessage;
+  }, [handleMessage]);
+
+  const connect = useCallback(() => {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+    ws.onopen = () => {
+      console.log("[ws] connected");
+      reconnectDelay.current = 1000;
+      reconnectAttempts.current = 0;
+
+      // Re-join active session
+      if (activeSessionRef.current) {
+        ws.send(
+          JSON.stringify({
+            type: "join",
+            sessionId: activeSessionRef.current,
+          }),
+        );
+      }
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const msg: ServerMessage = JSON.parse(event.data);
+        handleMessageRef.current(msg);
+      } catch {
+        console.warn("[ws] failed to parse message", event.data);
+      }
+    };
+
+    ws.onclose = () => {
+      wsRef.current = null;
+      if (reconnectAttempts.current >= MAX_RECONNECT_ATTEMPTS) {
+        console.warn(
+          `[ws] disconnected, max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached — giving up. Reload the page to retry.`,
+        );
+        return;
+      }
+      console.log("[ws] disconnected, reconnecting...");
+      reconnectTimer.current = setTimeout(() => {
+        reconnectAttempts.current += 1;
+        reconnectDelay.current = Math.min(reconnectDelay.current * 2, 30000);
+        connectRef.current();
+      }, reconnectDelay.current);
+    };
+
+    ws.onerror = (err) => {
+      console.error("[ws] error", err);
+      ws.close();
+    };
+
+    wsRef.current = ws;
+  }, []);
+
+  // Keep connectRef pointed at the latest connect so the reconnect timer
+  // captured in ws.onclose calls the current function.
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   // Connect on mount
   useEffect(() => {

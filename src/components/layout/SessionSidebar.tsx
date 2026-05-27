@@ -51,7 +51,13 @@ function SessionCard({
   }, [editing]);
 
   useEffect(() => {
+    // Synchronize local draft with the canonical session.description when we
+    // are NOT editing. This is the React-blessed "sync state to external
+    // value" pattern — without it, the input goes stale when another client
+    // updates the session over WS. Gated on !editing to avoid clobbering
+    // in-progress user edits.
     if (!editing) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDraft(session.description);
     }
   }, [session.description, editing]);

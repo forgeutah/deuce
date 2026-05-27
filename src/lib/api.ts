@@ -1,4 +1,65 @@
-import type { FileNode, FileContentResponse, User } from "@/types";
+import type {
+  ActivityItem,
+  Agent,
+  FileContentResponse,
+  FileNode,
+  Message,
+  Project,
+  Session,
+  Team,
+  User,
+} from "@/types";
+
+interface GitHubOrg {
+  login: string;
+  avatarUrl: string;
+}
+
+interface GitHubRepo {
+  name: string;
+  fullName: string;
+  cloneUrl: string;
+  description: string;
+  language: string;
+  private: boolean;
+  defaultBranch: string;
+}
+
+interface MessagesPage {
+  messages: Message[];
+  cursor: string;
+  hasMore: boolean;
+}
+
+interface AgentMutation {
+  name: string;
+  role: string;
+  provider: string;
+  model: string;
+  description: string;
+  systemPrompt: string;
+}
+
+interface CreateSessionBody {
+  name: string;
+  description?: string;
+  projectId: string;
+  repoUrl?: string;
+  agentIds: string[];
+  memberIds: string[];
+}
+
+interface UpdateSessionBody {
+  status?: string;
+  planContent?: string;
+  workspaceStatus?: string;
+  description?: string;
+}
+
+interface SendMessageBody {
+  content: string;
+  mentions: string[];
+}
 
 const BASE = "/api";
 
@@ -46,38 +107,21 @@ async function request<T>(
 export const api = {
   getMe: () => request<User>("/me"),
 
-  listTeams: () => request<any[]>("/teams"),
+  listTeams: () => request<Team[]>("/teams"),
 
   listProjects: (teamId?: string) =>
-    request<any[]>(teamId ? `/projects?teamId=${teamId}` : "/projects"),
+    request<Project[]>(teamId ? `/projects?teamId=${teamId}` : "/projects"),
 
-  listAgents: () => request<any[]>("/agents"),
+  listAgents: () => request<Agent[]>("/agents"),
 
-  createAgent: (body: {
-    name: string;
-    role: string;
-    provider: string;
-    model: string;
-    description: string;
-    systemPrompt: string;
-  }) =>
-    request<any>("/agents", {
+  createAgent: (body: AgentMutation) =>
+    request<Agent>("/agents", {
       method: "POST",
       body: JSON.stringify(body),
     }),
 
-  updateAgent: (
-    id: string,
-    body: {
-      name: string;
-      role: string;
-      provider: string;
-      model: string;
-      description: string;
-      systemPrompt: string;
-    },
-  ) =>
-    request<any>(`/agents/${id}`, {
+  updateAgent: (id: string, body: AgentMutation) =>
+    request<Agent>(`/agents/${id}`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
@@ -88,33 +132,18 @@ export const api = {
   stopAgent: (sessionId: string) =>
     request<void>(`/sessions/${sessionId}/agents/stop`, { method: "POST" }),
 
-  listSessions: () => request<any[]>("/sessions"),
+  listSessions: () => request<Session[]>("/sessions"),
 
-  getSession: (id: string) => request<any>(`/sessions/${id}`),
+  getSession: (id: string) => request<Session>(`/sessions/${id}`),
 
-  createSession: (body: {
-    name: string;
-    description?: string;
-    projectId: string;
-    repoUrl?: string;
-    agentIds: string[];
-    memberIds: string[];
-  }) =>
-    request<any>("/sessions", {
+  createSession: (body: CreateSessionBody) =>
+    request<Session>("/sessions", {
       method: "POST",
       body: JSON.stringify(body),
     }),
 
-  updateSession: (
-    id: string,
-    body: {
-      status?: string;
-      planContent?: string;
-      workspaceStatus?: string;
-      description?: string;
-    },
-  ) =>
-    request<any>(`/sessions/${id}`, {
+  updateSession: (id: string, body: UpdateSessionBody) =>
+    request<Session>(`/sessions/${id}`, {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
@@ -122,44 +151,30 @@ export const api = {
   listMessages: (sessionId: string, before?: string, limit = 50) => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (before) params.set("before", before);
-    return request<{ messages: any[]; cursor: string; hasMore: boolean }>(
+    return request<MessagesPage>(
       `/sessions/${sessionId}/messages?${params}`,
     );
   },
 
-  sendMessage: (
-    sessionId: string,
-    body: { content: string; mentions: string[] },
-  ) =>
-    request<any>(`/sessions/${sessionId}/messages`, {
+  sendMessage: (sessionId: string, body: SendMessageBody) =>
+    request<Message>(`/sessions/${sessionId}/messages`, {
       method: "POST",
       body: JSON.stringify(body),
     }),
 
   listActivities: (sessionId: string, limit = 20) =>
-    request<any[]>(`/sessions/${sessionId}/activities?limit=${limit}`),
+    request<ActivityItem[]>(`/sessions/${sessionId}/activities?limit=${limit}`),
 
   updateSessionAgents: (sessionId: string, agentIds: string[]) =>
-    request<any[]>(`/sessions/${sessionId}/agents`, {
+    request<Agent[]>(`/sessions/${sessionId}/agents`, {
       method: "PUT",
       body: JSON.stringify({ agentIds }),
     }),
 
-  listGitHubOrgs: () =>
-    request<{ login: string; avatarUrl: string }[]>("/github/orgs"),
+  listGitHubOrgs: () => request<GitHubOrg[]>("/github/orgs"),
 
   listGitHubRepos: (owner: string) =>
-    request<
-      {
-        name: string;
-        fullName: string;
-        cloneUrl: string;
-        description: string;
-        language: string;
-        private: boolean;
-        defaultBranch: string;
-      }[]
-    >(`/github/repos?owner=${encodeURIComponent(owner)}`),
+    request<GitHubRepo[]>(`/github/repos?owner=${encodeURIComponent(owner)}`),
 
   listFiles: (sessionId: string) =>
     request<FileNode[]>(`/sessions/${sessionId}/files`),
