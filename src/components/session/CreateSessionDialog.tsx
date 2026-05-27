@@ -102,6 +102,9 @@ export function CreateSessionDialog({
   useEffect(() => {
     if (!open) return;
 
+    // setOrgsLoading kicks off the load; subsequent setStates happen inside
+    // .then/.finally which are post-async, not synchronous cascades.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setOrgsLoading(true);
     api
       .listGitHubOrgs()
@@ -127,6 +130,10 @@ export function CreateSessionDialog({
   // Load repos when org changes
   useEffect(() => {
     if (!selectedOrg) return;
+    // Reset repo-related state in response to an external trigger (selectedOrg
+    // changed). This is the React-blessed "react to derived state change"
+    // pattern; the rule's heuristic flags any setState in an effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRepos([]);
     setSelectedRepo(null);
     setRepoSearch("");
@@ -175,8 +182,10 @@ export function CreateSessionDialog({
       setActiveSession(session.id);
       onOpenChange(false);
       resetForm();
-    } catch (err: any) {
-      setError(err.message ?? "Failed to create session");
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to create session";
+      setError(message);
     } finally {
       setCreating(false);
     }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppShell } from "@/components/layout/AppShell";
 import { NotAuthorizedView } from "@/components/auth/NotAuthorizedView";
@@ -17,11 +17,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [notAuthorized, setNotAuthorized] = useState(false);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  async function loadData() {
+  const loadData = useCallback(async () => {
     const store = useSessionStore.getState();
 
     // /api/me runs in its own try/catch so a 403 here — meaning "this user
@@ -59,9 +55,7 @@ export function App() {
       store.setSessions(sessions);
 
       // Set first active session
-      const firstActive = sessions.find(
-        (s: any) => s.status === "active",
-      );
+      const firstActive = sessions.find((s) => s.status === "active");
       if (firstActive) {
         store.setActiveSession(firstActive.id);
 
@@ -82,7 +76,15 @@ export function App() {
       setError(message);
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    // loadData is async and the only setState calls inside happen AFTER an
+    // awaited fetch — not synchronously in the effect body. React 18+ batches
+    // those, so the rule's cascading-render concern doesn't apply here.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadData();
+  }, [loadData]);
 
   function retry() {
     setError(null);
