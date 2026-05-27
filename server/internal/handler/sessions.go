@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -415,7 +416,14 @@ func (h *Handler) GetSessionVSCodeURI(w http.ResponseWriter, r *http.Request) {
 
 	host := h.publicHostname
 	if host == "" {
+		// Strip any port from r.Host before splicing in the SSH port.
+		// Devcontainer / proxy setups commonly land here with "host:port"
+		// and concatenating ":2222" would otherwise produce a malformed
+		// "host:8080:2222" authority that VS Code rejects.
 		host = r.Host
+		if hostOnly, _, splitErr := net.SplitHostPort(r.Host); splitErr == nil {
+			host = hostOnly
+		}
 	}
 	port := sshPortFromAddr(h.sshListenAddr)
 

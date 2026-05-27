@@ -26,17 +26,19 @@
     }
   },
 
-  "forwardPorts": [4000, 8080, 5432],
+  "forwardPorts": [4000, 8080, 5432, 2222],
   "portsAttributes": {
     "4000": { "label": "Vite (frontend)" },
     "8080": { "label": "Backend (Go)" },
-    "5432": { "label": "Postgres" }
+    "5432": { "label": "Postgres" },
+    "2222": { "label": "Deuce SSH proxy (VS Code Remote)" }
   },
 
   "containerEnv": {
     "DATABASE_URL": "postgres://deuce:deuce@postgres:5432/deuce?sslmode=disable",
     "DEUCE_USER_ID": "10000000-0000-0000-0000-000000000001",
-    "DEVPOD_PROVIDER": "docker"
+    "DEVPOD_PROVIDER": "docker",
+    "DEUCE_PUBLIC_HOSTNAME": "localhost"
   },
 
   "customizations": {

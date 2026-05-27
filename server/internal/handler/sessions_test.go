@@ -316,6 +316,38 @@ func TestGetSessionVSCodeURI_PublicHostnameFallback(t *testing.T) {
 	}
 }
 
+// TestGetSessionVSCodeURI_StripsPortFromHostHeader covers the devcontainer
+// case: r.Host comes in as "localhost:8080" because the browser hit the
+// forwarded backend port. Without stripping, the URI would splice in
+// "localhost:8080:2222" (double-colon) and VS Code rejects it.
+func TestGetSessionVSCodeURI_StripsPortFromHostHeader(t *testing.T) {
+	f := newVSCodeURIFixture(t, "", "")
+	f.seedKey(t, 'E')
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+f.sessionID.String()+"/vscode-uri", nil)
+	req.Host = "localhost:8080"
+	req.Header.Set("X-User-ID", f.userID.String())
+	rec := httptest.NewRecorder()
+	f.router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: want 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		URI string `json:"uri"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	// Must NOT contain the double-colon authority.
+	if strings.Contains(body.URI, "localhost:8080:") {
+		t.Errorf("URI must not contain double-port; got %q", body.URI)
+	}
+	if !strings.Contains(body.URI, "@localhost:2222/") {
+		t.Errorf("URI should embed @localhost:2222/, got %q", body.URI)
+	}
+}
+
 // TestSSHPortFromAddr covers the small parser that strips the host portion
 // from a Go listen-address string. The fallback path matters because U11
 // has not yet shipped real config — every code path that lands here today
