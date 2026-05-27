@@ -1,7 +1,7 @@
 ---
 title: Tag-triggered release workflow for Docker image and GitHub Release
 type: feat
-status: active
+status: completed
 date: 2026-05-26
 ---
 
