@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -13,6 +15,11 @@ import (
 	db "github.com/forgeutah/deuce/server/internal/db"
 	"github.com/forgeutah/deuce/server/internal/ws"
 )
+
+// defaultSSHPort is the fallback port used when sshListenAddr is unset or
+// unparseable. Mirrors the sshproxy package default; U11 will wire the real
+// value through config.
+const defaultSSHPort = 2222
 
 const maxSessionDescriptionLength = 200
 
@@ -354,6 +361,83 @@ func (h *Handler) UpdateSession(w http.ResponseWriter, r *http.Request) {
 	h.hub.BroadcastToSession(sessionID.String(), msg, nil)
 
 	writeJSON(w, http.StatusOK, sr)
+}
+
+// vscodeURIResponse is the JSON body returned by GetSessionVSCodeURI.
+type vscodeURIResponse struct {
+	URI string `json:"uri"`
+}
+
+// GetSessionVSCodeURI returns a vscode://vscode-remote/... URI that opens
+// the session's devcontainer in VS Code Remote-SSH. The endpoint is gated
+// on the calling user having at least one SSH key on file — without one,
+// the SSH proxy (U7) would reject the connection. The frontend uses the
+// 412 NO_SSH_KEY response to open the SSH key setup modal.
+//
+// Authorization mirrors GetSession: any authenticated user can fetch the
+// URI. The real access gate is the SSH proxy's public-key auth — only a
+// session-member's registered key will authenticate at SSH time.
+func (h *Handler) GetSessionVSCodeURI(w http.ResponseWriter, r *http.Request) {
+	sessionID, err := uuid.Parse(chi.URLParam(r, "sessionID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_SESSION_ID", "invalid session ID")
+		return
+	}
+
+	userID, err := uuid.Parse(getUserID(r))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_USER", "invalid user ID")
+		return
+	}
+
+	session, err := h.queries.GetSession(r.Context(), sessionID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "session not found")
+		return
+	}
+
+	keys, err := h.queries.ListUserSSHKeys(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to list SSH keys")
+		return
+	}
+	if len(keys) == 0 {
+		writeError(w, http.StatusPreconditionFailed, "NO_SSH_KEY", "user has no SSH keys on file")
+		return
+	}
+
+	host := h.publicHostname
+	if host == "" {
+		host = r.Host
+	}
+	port := sshPortFromAddr(h.sshListenAddr)
+
+	// session.Name is the workspace ID per the existing repo invariant
+	// (U2 was deferred). Sessions cannot be renamed today, so this is
+	// stable for the lifetime of the URI.
+	uri := "vscode://vscode-remote/ssh-remote+dc-" + session.ID.String() +
+		"@" + host + ":" + strconv.Itoa(port) +
+		"/workspaces/" + session.Name
+
+	writeJSON(w, http.StatusOK, vscodeURIResponse{URI: uri})
+}
+
+// sshPortFromAddr extracts the port from a Go listen-address string such as
+// ":2222" or "0.0.0.0:2222". Any parse failure falls back to the default
+// 2222 — defensive because U11 hasn't shipped real config yet.
+func sshPortFromAddr(addr string) int {
+	if addr == "" {
+		return defaultSSHPort
+	}
+	// Strip an optional host portion before the colon.
+	if idx := strings.LastIndex(addr, ":"); idx >= 0 {
+		addr = addr[idx+1:]
+	}
+	port, err := strconv.Atoi(addr)
+	if err != nil || port <= 0 || port > 65535 {
+		return defaultSSHPort
+	}
+	return port
 }
 
 func (h *Handler) startWorkspace(sessionID uuid.UUID, workspaceID, repoURL string) {

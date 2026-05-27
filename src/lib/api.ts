@@ -194,4 +194,7 @@ export const api = {
       `/sessions/${sessionId}/files/content?path=${encodeURIComponent(path)}`,
       { signal },
     ),
+
+  getSessionVSCodeURI: (sessionId: string) =>
+    request<{ uri: string }>(`/sessions/${sessionId}/vscode-uri`),
 };
