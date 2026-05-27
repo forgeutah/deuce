@@ -95,8 +95,15 @@ func (s *Server) Router() http.Handler {
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/version", handler.Version(s.version))
-		r.Get("/me", h.GetMe)
-		r.Patch("/me", h.UpdateMe)
+		r.Route("/me", func(r chi.Router) {
+			r.Get("/", h.GetMe)
+			r.Patch("/", h.UpdateMe)
+			r.Route("/ssh-keys", func(r chi.Router) {
+				r.Get("/", h.ListMySSHKeys)
+				r.Post("/", h.CreateMySSHKey)
+				r.Delete("/{keyID}", h.DeleteMySSHKey)
+			})
+		})
 		r.Get("/teams", h.ListTeams)
 		r.Get("/projects", h.ListProjects)
 		r.Get("/agents", h.ListAgents)
