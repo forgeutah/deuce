@@ -89,7 +89,10 @@ func (s *Server) Router() http.Handler {
 		slog.Warn("failed to reset stale agent statuses", "error", err)
 	}
 
-	h := handler.New(s.queries, s.pool, s.hub, s.cfg.GitHubToken, wm, tm, exec, aq, s.cfg.WSAllowedOriginList())
+	// publicHostname and sshListenAddr are placeholders until U11 wires real
+	// config values (DEUCE_PUBLIC_HOSTNAME, DEUCE_SSH_LISTEN_ADDR). For now
+	// the URI builder falls back to r.Host and port 2222.
+	h := handler.New(s.queries, s.pool, s.hub, s.cfg.GitHubToken, wm, tm, exec, aq, s.cfg.WSAllowedOriginList(), "", "")
 
 	go s.hub.Run()
 
@@ -124,6 +127,7 @@ func (s *Server) Router() http.Handler {
 				r.Get("/activities", h.ListActivities)
 				r.Get("/files", h.ListFiles)
 				r.Get("/files/content", h.GetFileContent)
+				r.Get("/vscode-uri", h.GetSessionVSCodeURI)
 				r.Put("/agents", h.UpdateSessionAgents)
 				r.Post("/agents/stop", h.StopAgent)
 			})

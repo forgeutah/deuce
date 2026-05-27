@@ -16,28 +16,36 @@ import (
 )
 
 type Handler struct {
-	queries     *db.Queries
-	pool        *pgxpool.Pool
-	hub         *ws.Hub
-	githubToken string
-	workspaces  *workspace.Manager
-	terminals   *terminal.Manager
-	executor    *agent.Executor
-	agentQueue  *agent.Queue
-	wsOrigins   []string
+	queries        *db.Queries
+	pool           *pgxpool.Pool
+	hub            *ws.Hub
+	githubToken    string
+	workspaces     *workspace.Manager
+	terminals      *terminal.Manager
+	executor       *agent.Executor
+	agentQueue     *agent.Queue
+	wsOrigins      []string
+	publicHostname string
+	sshListenAddr  string
 }
 
-func New(queries *db.Queries, pool *pgxpool.Pool, hub *ws.Hub, githubToken string, wm *workspace.Manager, tm *terminal.Manager, exec *agent.Executor, aq *agent.Queue, wsOrigins []string) *Handler {
+// New constructs a Handler. publicHostname and sshListenAddr feed the
+// vscode:// URI builder in GetSessionVSCodeURI. Both are placeholders until
+// U11 wires real config values; for now callers pass empty strings and the
+// handler falls back to the request Host header / default port 2222.
+func New(queries *db.Queries, pool *pgxpool.Pool, hub *ws.Hub, githubToken string, wm *workspace.Manager, tm *terminal.Manager, exec *agent.Executor, aq *agent.Queue, wsOrigins []string, publicHostname, sshListenAddr string) *Handler {
 	return &Handler{
-		queries:     queries,
-		pool:        pool,
-		hub:         hub,
-		githubToken: githubToken,
-		workspaces:  wm,
-		terminals:   tm,
-		executor:    exec,
-		agentQueue:  aq,
-		wsOrigins:   wsOrigins,
+		queries:        queries,
+		pool:           pool,
+		hub:            hub,
+		githubToken:    githubToken,
+		workspaces:     wm,
+		terminals:      tm,
+		executor:       exec,
+		agentQueue:     aq,
+		wsOrigins:      wsOrigins,
+		publicHostname: publicHostname,
+		sshListenAddr:  sshListenAddr,
 	}
 }
 
