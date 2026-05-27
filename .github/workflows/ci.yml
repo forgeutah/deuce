@@ -1,0 +1,64 @@
+name: ci
+
+# Runs on push to main AND on every pull request. A green run here means the
+# release workflow's test/frontend_build gates will pass when a tag is pushed.
+# This workflow does NOT publish anything — no GHCR push, no GitHub Release.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel in-progress runs on the same ref when a newer commit lands. For PRs
+# this means a force-push aborts the previous run; for main it serializes
+# pushes (the previous run is interrupted, the latest commit wins).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # Run only on the canonical repo for push events; fork-PRs still run (they
+    # need the lint/build signal too) but they're sandboxed by GitHub's
+    # fork-PR token restrictions.
+    if: github.event_name == 'pull_request' || github.repository == 'forgeutah/deuce'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: deuce
+          POSTGRES_PASSWORD: deuce
+          POSTGRES_DB: deuce
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U deuce -d deuce"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - name: Install JS deps
+        run: npm ci
+      - name: ESLint
+        run: npm run lint
+      - name: TypeScript typecheck
+        run: npx tsc --noEmit
+      - name: Frontend build
+        run: npm run build
+      - name: Go tests (integration enabled via TEST_DATABASE_URL)
+        working-directory: server
+        env:
+          TEST_DATABASE_URL: postgres://deuce:deuce@localhost:5432/deuce?sslmode=disable
+        run: go test ./...
