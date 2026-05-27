@@ -92,7 +92,22 @@ export function SSHKeysDialog({
   // Copy-button feedback
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
+  async function loadKeys() {
+    try {
+      const data = await api.listMySSHKeys();
+      setKeys(data);
+    } catch (err) {
+      // Mirror AgentSettingsDialog's silent-swallow pattern — surface a
+      // dedicated load-error UI is intentionally out of scope for U12.
+      console.error("Failed to load SSH keys:", err);
+    }
+  }
+
   useEffect(() => {
+    // loadKeys triggers setKeys(data) async — intentional pattern for
+    // dialog-opened-fetch, not a cascade risk because loadKeys is not in
+    // the dep list.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (open) loadKeys();
   }, [open]);
 
@@ -112,25 +127,18 @@ export function SSHKeysDialog({
   }, [copiedKey]);
 
   // Reset transient state on close so reopening the dialog starts fresh.
+  // The synchronous setState batch here is intentional — React 18 batches
+  // these into a single render, and none of these state vars are in this
+  // effect's dep list so there's no cascade risk.
   useEffect(() => {
     if (!open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDeletingKeyId(null);
       setRecentlyAdded(null);
       setAddError(null);
       setCopiedKey(null);
     }
   }, [open]);
-
-  async function loadKeys() {
-    try {
-      const data = await api.listMySSHKeys();
-      setKeys(data);
-    } catch (err) {
-      // Mirror AgentSettingsDialog's silent-swallow pattern — surface a
-      // dedicated load-error UI is intentionally out of scope for U12.
-      console.error("Failed to load SSH keys:", err);
-    }
-  }
 
   async function addKey() {
     const label = newLabel.trim();

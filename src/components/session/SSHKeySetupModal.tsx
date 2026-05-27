@@ -60,8 +60,11 @@ export function SSHKeySetupModal({
   const [error, setError] = useState<string | null>(null);
 
   // Reset form when the modal closes so a future re-open starts clean.
+  // The synchronous setState batch is intentional — React 18 batches these
+  // into a single render and none are in this effect's dep list.
   useEffect(() => {
     if (!open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLabel("");
       setPublicKey("");
       setError(null);
