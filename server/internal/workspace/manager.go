@@ -3,11 +3,27 @@ package workspace
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"regexp"
 	"strings"
 )
+
+// ErrContainerNotRunning is returned by ContainerName when no Docker
+// container matches the given DevPod workspace ID.
+var ErrContainerNotRunning = errors.New("container not running for workspace")
+
+// ErrInvalidContainerName is returned by ContainerName when the resolved
+// container name fails the Docker naming-rules regex. Defense-in-depth
+// against a future Docker output-format change or label-injection attack
+// producing an argv that would otherwise be passed to `docker exec`.
+var ErrInvalidContainerName = errors.New("docker returned invalid container name")
+
+// validContainerName matches Docker's own container-name rules:
+// first char [a-zA-Z0-9], then up to 254 of [a-zA-Z0-9_.-].
+var validContainerName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,254}$`)
 
 // LogFunc receives each line of output from a DevPod command.
 type LogFunc func(line string)
@@ -163,6 +179,42 @@ func (m *Manager) ExecInWorkspace(ctx context.Context, workspaceID, command stri
 		args = append(args, "--set-env", env)
 	}
 	return exec.CommandContext(ctx, m.bin, args...)
+}
+
+// ContainerName resolves a DevPod workspace ID to the running Docker
+// container's name, suitable for use with `docker exec`. Returns
+// ErrContainerNotRunning when no container matches, ErrInvalidContainerName
+// when Docker returns something that fails the name-validation regex.
+//
+// Only safe for the docker DevPod provider; remote providers (k8s, AWS,
+// SSH) put the container on a different host where `docker exec` doesn't
+// reach. The caller is responsible for the provider check.
+func (m *Manager) ContainerName(ctx context.Context, workspaceID string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "ps",
+		"--filter", "label=devpod.workspace="+workspaceID,
+		"--format", "{{.Names}}",
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker ps failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(lines) == 0 || lines[0] == "" {
+		return "", ErrContainerNotRunning
+	}
+	name := strings.TrimSpace(lines[0])
+
+	if !validContainerName.MatchString(name) {
+		slog.Warn("docker ps returned name failing validation", "workspace", workspaceID, "name", name)
+		return "", ErrInvalidContainerName
+	}
+
+	if len(lines) > 1 {
+		slog.Warn("multiple containers match workspace label", "workspace", workspaceID, "count", len(lines))
+	}
+
+	return name, nil
 }
 
 // InstallTools installs Claude Code inside the DevPod workspace.
