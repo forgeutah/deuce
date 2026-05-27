@@ -104,3 +104,26 @@ func (q *Queries) LookupUserByEmail(ctx context.Context, email string) (User, er
 	)
 	return i, err
 }
+
+const updateUserName = `-- name: UpdateUserName :one
+UPDATE users SET name = $2 WHERE id = $1 RETURNING id, name, email, avatar, status, created_at
+`
+
+type UpdateUserNameParams struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
+func (q *Queries) UpdateUserName(ctx context.Context, arg UpdateUserNameParams) (User, error) {
+	row := q.db.QueryRow(ctx, updateUserName, arg.ID, arg.Name)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.Avatar,
+		&i.Status,
+		&i.CreatedAt,
+	)
+	return i, err
+}

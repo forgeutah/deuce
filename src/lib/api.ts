@@ -107,6 +107,12 @@ async function request<T>(
 export const api = {
   getMe: () => request<User>("/me"),
 
+  updateMyName: (name: string) =>
+    request<User>("/me", {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    }),
+
   listTeams: () => request<Team[]>("/teams"),
 
   listProjects: (teamId?: string) =>

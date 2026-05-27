@@ -110,16 +110,34 @@ func TestValidate_ProxyTailscaleStyleFullyConfiguredPasses(t *testing.T) {
 	}
 }
 
-func TestValidate_ProxyEmptyAggregatesAllRequired(t *testing.T) {
+func TestValidate_ProxyEmptyAggregatesRequired(t *testing.T) {
 	cfg := &Config{AuthMode: AuthModeProxy, WSAllowedOrigins: ""}
 	err := cfg.Validate()
 	if err == nil {
 		t.Fatal("expected aggregate error for bare proxy mode")
 	}
-	for _, want := range []string{"DEUCE_PROXY_HEADER_EMAIL", "DEUCE_PROXY_HEADER_NAME", "DEUCE_WS_ALLOWED_ORIGINS"} {
+	// Email and origins are required; name is optional (operator can let
+	// users pick their display name via the welcome screen).
+	for _, want := range []string{"DEUCE_PROXY_HEADER_EMAIL", "DEUCE_WS_ALLOWED_ORIGINS"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("aggregate error should mention %s, got: %v", want, err)
 		}
+	}
+	if strings.Contains(err.Error(), "DEUCE_PROXY_HEADER_NAME") {
+		t.Fatalf("name header is optional now; error should not require it: %v", err)
+	}
+}
+
+func TestValidate_ProxyWithoutNameHeader_Passes(t *testing.T) {
+	// exe.dev-style config: only email, no name, no roles, no secret.
+	// The welcome screen handles name collection at the frontend.
+	cfg := &Config{
+		AuthMode:         AuthModeProxy,
+		ProxyHeaderEmail: "X-ExeDev-Email",
+		WSAllowedOrigins: "vmname.exe.xyz",
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("proxy mode with only email header should validate: %v", err)
 	}
 }
 

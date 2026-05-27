@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppShell } from "@/components/layout/AppShell";
 import { NotAuthorizedView } from "@/components/auth/NotAuthorizedView";
+import { WelcomeView } from "@/components/auth/WelcomeView";
+import type { User } from "@/types";
 import { useSessionStore } from "@/stores/session-store";
 import { useWebSocket } from "@/hooks/use-websocket";
 import { api, ApiError } from "@/lib/api";
@@ -16,6 +18,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notAuthorized, setNotAuthorized] = useState(false);
+  const currentUser = useSessionStore((s) => s.currentUser);
 
   const loadData = useCallback(async () => {
     const store = useSessionStore.getState();
@@ -42,6 +45,16 @@ export function App() {
       return;
     }
     store.setCurrentUser(me);
+
+    // Users provisioned through a proxy that doesn't forward a name
+    // header (e.g. exe.dev) land here with name=="". The WelcomeView
+    // gates the rest of the app until they pick a display name — we
+    // don't fetch teams/sessions/etc yet because the sidebar and
+    // chat surfaces would render an empty name throughout.
+    if (!me.name) {
+      setLoading(false);
+      return;
+    }
 
     try {
       const [teams, projects, sessions] = await Promise.all([
@@ -95,6 +108,19 @@ export function App() {
 
   if (notAuthorized) {
     return <NotAuthorizedView onRetry={retry} />;
+  }
+
+  if (currentUser && !currentUser.name) {
+    return (
+      <WelcomeView
+        email={currentUser.email}
+        onComplete={(updated: User) => {
+          useSessionStore.getState().setCurrentUser(updated);
+          setLoading(true);
+          loadData();
+        }}
+      />
+    );
   }
 
   if (loading) {

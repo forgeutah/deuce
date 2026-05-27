@@ -125,7 +125,14 @@ func ProxyMiddleware(store ProxyUserStore, pc ProxyConfig) func(http.Handler) ht
 				}
 			}
 
-			// 3. Required identity headers: email + name.
+			// 3. Email is the only required identity header — it's the
+			// lookup key. Name is optional: when no name header is
+			// configured (or the proxy doesn't supply one), the user is
+			// provisioned with an empty name and the frontend gates the
+			// app behind a welcome screen until they choose a display
+			// name. When a name header IS configured, it must be present
+			// and non-empty — a configured-but-missing name is operator
+			// misconfiguration, not "new user, please welcome."
 			rawEmail, ok := singleHeader(r, pc.EmailHeader)
 			if !ok {
 				writeAuthError(w, http.StatusBadRequest, codeInvalidHeaders, "missing or duplicate email header")
@@ -136,14 +143,18 @@ func ProxyMiddleware(store ProxyUserStore, pc ProxyConfig) func(http.Handler) ht
 				writeAuthError(w, http.StatusBadRequest, codeInvalidHeaders, "empty email header")
 				return
 			}
-			name, ok := singleHeader(r, pc.NameHeader)
-			if !ok {
-				writeAuthError(w, http.StatusBadRequest, codeInvalidHeaders, "missing or duplicate name header")
-				return
-			}
-			if strings.TrimSpace(name) == "" {
-				writeAuthError(w, http.StatusBadRequest, codeInvalidHeaders, "empty name header")
-				return
+			var name string
+			if pc.NameHeader != "" {
+				got, ok := singleHeader(r, pc.NameHeader)
+				if !ok {
+					writeAuthError(w, http.StatusBadRequest, codeInvalidHeaders, "missing or duplicate name header")
+					return
+				}
+				if strings.TrimSpace(got) == "" {
+					writeAuthError(w, http.StatusBadRequest, codeInvalidHeaders, "empty name header")
+					return
+				}
+				name = got
 			}
 
 			// 4. Optional avatar — scheme-validated, silently coerced to

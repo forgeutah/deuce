@@ -130,12 +130,12 @@ func (c *Config) Validate() error {
 func (c *Config) validateProxyMode(origins []string) error {
 	var problems []string
 
-	// Required identity headers.
+	// Email is the only required identity header — it's the lookup key.
+	// Name is optional: when not provided, the user lands on a welcome
+	// screen and supplies their display name before reaching the app.
+	// Avatar is also optional; rejected schemes silently coerce to empty.
 	if c.ProxyHeaderEmail == "" {
 		problems = append(problems, "DEUCE_PROXY_HEADER_EMAIL")
-	}
-	if c.ProxyHeaderName == "" {
-		problems = append(problems, "DEUCE_PROXY_HEADER_NAME")
 	}
 	if len(origins) == 0 {
 		problems = append(problems, "DEUCE_WS_ALLOWED_ORIGINS")

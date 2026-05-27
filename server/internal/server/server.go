@@ -96,6 +96,7 @@ func (s *Server) Router() http.Handler {
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/version", handler.Version(s.version))
 		r.Get("/me", h.GetMe)
+		r.Patch("/me", h.UpdateMe)
 		r.Get("/teams", h.ListTeams)
 		r.Get("/projects", h.ListProjects)
 		r.Get("/agents", h.ListAgents)

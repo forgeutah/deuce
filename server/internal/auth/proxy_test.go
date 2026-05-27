@@ -295,6 +295,33 @@ func TestNameHeader_EmptyAfterTrim(t *testing.T) {
 	assertNotAuthed(t, w, rec, http.StatusBadRequest, codeInvalidHeaders)
 }
 
+func TestNameHeader_UnconfiguredOptional_AdmitsWithEmptyName(t *testing.T) {
+	// exe.dev-style: no name header configured. Middleware skips the name
+	// read entirely and provisions the user with an empty name. The
+	// welcome screen on the frontend collects the display name from there.
+	pc := ProxyConfig{
+		EmailHeader: "X-ExeDev-Email",
+	}
+	h := http.Header{}
+	h.Set("X-ExeDev-Email", "alice@example.com")
+	// Caller sends some unrelated header — it must be ignored, not consumed.
+	h.Set("X-Other-Name", "Should Be Ignored")
+
+	want := makeUser(t, "alice@example.com", "")
+	store := &fakeStore{
+		lookupErrs:    []error{pgx.ErrNoRows},
+		createResults: []db.User{want},
+	}
+
+	w, rec := invoke(t, store, pc, h)
+	if w.Code != http.StatusOK || !rec.called {
+		t.Fatalf("unconfigured name header should admit: status=%d body=%q", w.Code, w.Body.String())
+	}
+	if store.createHistory[0].params.Name != "" {
+		t.Fatalf("create should receive empty name when name header unconfigured, got %q", store.createHistory[0].params.Name)
+	}
+}
+
 // ---------- email normalization ----------
 
 func TestEmail_NormalizesCaseAndWhitespace(t *testing.T) {
