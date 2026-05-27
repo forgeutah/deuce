@@ -13,7 +13,11 @@
       "Bash(gh release *)",
       "Bash(git push *)",
       "Bash(netstat -tlnp)",
-      "Bash(docker compose *)"
+      "Bash(docker compose *)",
+      "Bash(git rebase *)",
+      "Bash(git commit *)",
+      "Bash(gh pr *)",
+      "Bash(gh api *)"
     ]
   },
   "enabledPlugins": {
