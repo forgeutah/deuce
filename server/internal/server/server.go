@@ -26,14 +26,19 @@ type Server struct {
 	queries *db.Queries
 	cfg     *config.Config
 	hub     *ws.Hub
+	version string
 }
 
-func New(pool *pgxpool.Pool, cfg *config.Config) *Server {
+// New constructs a Server. version is the build-injected version string
+// surfaced at GET /api/version and on startup logs. Pass "dev" for non-release
+// builds.
+func New(pool *pgxpool.Pool, cfg *config.Config, version string) *Server {
 	return &Server{
 		pool:    pool,
 		queries: db.New(pool),
 		cfg:     cfg,
 		hub:     ws.NewHub(),
+		version: version,
 	}
 }
 
@@ -92,6 +97,7 @@ func (s *Server) Router() http.Handler {
 	go s.hub.Run()
 
 	r.Route("/api", func(r chi.Router) {
+		r.Get("/version", handler.Version(s.version))
 		r.Get("/me", h.GetMe)
 		r.Get("/teams", h.ListTeams)
 		r.Get("/projects", h.ListProjects)

@@ -16,6 +16,18 @@ embed-dist:
 build:
 	go build -o bin/deuce .
 
+# Build the binary the same way the release Dockerfile does: CGO off, static,
+# stripped, with the version injected via ldflags. Run `make embed-dist` first
+# so the //go:embed directive has the real Vite build, not just .gitkeep.
+#
+# Usage: make release-build VERSION=v0.1.0
+release-build:
+	@: $${VERSION?VERSION env var is required (e.g. VERSION=v0.1.0)}
+	CGO_ENABLED=0 GOOS=linux go build \
+		-trimpath \
+		-ldflags="-s -w -X main.Version=$(VERSION)" \
+		-o bin/deuce .
+
 test:
 	go test ./...
 

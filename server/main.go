@@ -19,6 +19,12 @@ import (
 	"github.com/forgeutah/deuce/server/internal/server"
 )
 
+// Version is set at build time via -ldflags="-X main.Version=<tag>". The
+// release Dockerfile and the release-build Makefile target both inject the
+// git tag here. Default "dev" for unflagged builds (go run, go build with
+// no flags, IDE builds).
+var Version = "dev"
+
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
@@ -58,7 +64,8 @@ func main() {
 	migrateCancel()
 	slog.Info("migrations applied")
 
-	srv := server.New(pool, cfg)
+	slog.Info("deuce starting", "version", Version)
+	srv := server.New(pool, cfg, Version)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	httpServer := &http.Server{
