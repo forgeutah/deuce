@@ -128,6 +128,9 @@ func (s *Server) handleAuthenticatedConn(sshConn *ssh.ServerConn, chans <-chan s
 				"session_id", sessionID,
 				"user_id", userID,
 			)
+			if s.metrics != nil {
+				s.metrics.incChannelOpenOther()
+			}
 			if err := newCh.Reject(ssh.Prohibited, "only 'session' channels are allowed"); err != nil {
 				slog.Debug("channel reject failed", "type", newCh.ChannelType(), "error", err)
 			}
@@ -144,6 +147,9 @@ func (s *Server) handleAuthenticatedConn(sshConn *ssh.ServerConn, chans <-chan s
 			slog.Warn("ssh channel accept failed", "error", err, "session_id", sessionID)
 			s.releaseChannel(state)
 			continue
+		}
+		if s.metrics != nil {
+			s.metrics.incChannelOpenSession()
 		}
 
 		channelWG.Add(1)

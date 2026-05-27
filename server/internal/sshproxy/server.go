@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"runtime"
 	"sync"
 	"time"
 
 	"github.com/forgeutah/deuce/server/internal/db"
 	"github.com/forgeutah/deuce/server/internal/workspace"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -36,10 +38,24 @@ type Server struct {
 	// concurrent test instances.
 	dockerBin string
 
-	mu             sync.Mutex
-	listener       net.Listener
-	closing        bool // set under mu by Shutdown to gate wg.Add in the accept loop
-	inFlightPerIP  map[string]int
+	mu            sync.Mutex
+	listener      net.Listener
+	closing       bool // set under mu by Shutdown to gate wg.Add in the accept loop (U9)
+	inFlightPerIP map[string]int
+
+	// activeConns tracks every authenticated SSH connection, keyed by a
+	// per-conn UUID generated at handshake-success time. The value is
+	// the connection's ssh.Permissions.Extensions snapshot, which carries
+	// session-id / user-id / key-id / fp. sync.Map keeps reads
+	// (ActiveSessionCount, future drain hooks) off the main mutex.
+	//
+	// IMPORTANT: only authenticated connections live here. Failed-auth
+	// connections never make it past the handshake and so never insert.
+	activeConns sync.Map // map[uuid.UUID]map[string]string
+
+	// metrics is the package-private metrics surface. Counters use
+	// sync/atomic so the hot path stays lock-free.
+	metrics *Metrics
 
 	wg   sync.WaitGroup
 	done chan struct{}
@@ -66,6 +82,7 @@ func New(cfg Config, queries *db.Queries, workspaces *workspace.Manager) (*Serve
 		queries:       queries,
 		workspaces:    workspaces,
 		inFlightPerIP: make(map[string]int),
+		metrics:       newMetrics(),
 		done:          make(chan struct{}),
 	}, nil
 }
@@ -106,6 +123,26 @@ func (s *Server) ListenAndServe(addr string) error {
 				return nil
 			}
 			slog.Warn("ssh accept failed", "error", err)
+			continue
+		}
+
+		// Overload protection BEFORE per-IP admit and BEFORE entering
+		// the handshake. runtime.NumGoroutine() is cheap; once it
+		// crosses cfg.GoroutineCap, refuse new connections without
+		// spawning the handler goroutine. The refusal is a synchronous
+		// close + a "server overloaded" line written to the wire so a
+		// human dialing in sees feedback (real SSH clients won't see
+		// it because they expect the server banner first, but it
+		// distinguishes the failure mode in tcpdump and `nc`).
+		if runtime.NumGoroutine() > s.cfg.GoroutineCap {
+			slog.Warn("ssh accept: goroutine cap reached",
+				"goroutines", runtime.NumGoroutine(),
+				"cap", s.cfg.GoroutineCap,
+				"remote", conn.RemoteAddr().String(),
+			)
+			s.metrics.incAcceptOverloaded()
+			_, _ = conn.Write([]byte("server overloaded\r\n"))
+			_ = conn.Close()
 			continue
 		}
 
@@ -192,6 +229,7 @@ func (s *Server) handleRawConn(c net.Conn) {
 		// (set by U7) logs the auth-attempt details; this branch is the
 		// terminal log line.
 		slog.Debug("ssh handshake failed", "remote", c.RemoteAddr().String(), "error", err)
+		s.metrics.incConnectionFail()
 		return
 	}
 
@@ -201,10 +239,75 @@ func (s *Server) handleRawConn(c net.Conn) {
 		slog.Warn("clear handshake deadline failed", "error", err)
 	}
 
+	// Register in activeConns under a per-conn UUID. Storing
+	// Extensions (and not the underlying ssh.Conn) keeps the value
+	// small and makes future drain-before-destroy hooks match purely
+	// by session-id. Increment the connection / sessions_active
+	// counters here so they only count fully-authenticated conns.
+	connID := uuid.New()
+	exts := copyExtensions(sshConn.Permissions)
+	s.activeConns.Store(connID, exts)
+	s.metrics.incConnectionOK()
+	s.metrics.incSessionsActive()
+	defer func() {
+		s.activeConns.Delete(connID)
+		s.metrics.decSessionsActive()
+	}()
+
 	// U8: hand off to the authenticated-connection handler. It enforces
 	// the channel-type allowlist, per-connection channel caps, and
 	// spawns one goroutine per accepted session channel.
 	s.handleAuthenticatedConn(sshConn, chans, reqs)
+}
+
+// copyExtensions returns a shallow copy of perms.Extensions so the
+// value stored in activeConns is independent of the live ssh.Permissions
+// map. Returns nil if perms or its Extensions field is nil — callers
+// must tolerate that (real handshake success always populates it via
+// publicKeyCallback, but defensive copies make the unit tests cleaner).
+func copyExtensions(perms *ssh.Permissions) map[string]string {
+	if perms == nil || perms.Extensions == nil {
+		return nil
+	}
+	out := make(map[string]string, len(perms.Extensions))
+	for k, v := range perms.Extensions {
+		out[k] = v
+	}
+	return out
+}
+
+// ActiveSessionCount returns the number of authenticated SSH
+// connections currently bound to the given session ID. Walks
+// activeConns under sync.Map's lockless read path; safe to call from
+// any goroutine. Returns 0 when no connections target the session
+// (or when sessionID is the zero UUID).
+//
+// Intended for future drain-before-destroy hooks in the session
+// teardown path. The count is a point-in-time read; concurrent
+// connect / disconnect events may shift the result by the time the
+// caller acts on it.
+func (s *Server) ActiveSessionCount(sessionID uuid.UUID) int {
+	want := sessionID.String()
+	n := 0
+	s.activeConns.Range(func(_, v any) bool {
+		exts, ok := v.(map[string]string)
+		if !ok {
+			return true
+		}
+		if exts[extSessionID] == want {
+			n++
+		}
+		return true
+	})
+	return n
+}
+
+// Metrics returns a point-in-time snapshot of the proxy's counters.
+// Safe to call concurrently; the returned MetricsSnapshot is a value
+// copy (mutations don't affect the live counters). The GoroutinesSSH
+// gauge is sampled from runtime.NumGoroutine() at snapshot time.
+func (s *Server) Metrics() MetricsSnapshot {
+	return s.metrics.snapshot()
 }
 
 // serverConfig builds the per-connection ssh.ServerConfig. Wires the

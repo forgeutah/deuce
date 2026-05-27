@@ -106,16 +106,23 @@ func (s *Server) publicKeyCallback(meta ssh.ConnMetadata, key ssh.PublicKey) (*s
 
 // authLogCallback emits a structured log line for every auth attempt
 // (pass or fail, any method). Never logs the public key — only the
-// fingerprint.
+// fingerprint. Also bumps the auth_attempts_total{result} counter so
+// callers can observe auth pressure without parsing logs.
 func (s *Server) authLogCallback(meta ssh.ConnMetadata, method string, authErr error) {
 	srcIP := remoteIP(meta.RemoteAddr())
 	if authErr == nil {
+		if s.metrics != nil {
+			s.metrics.incAuthAttemptOK()
+		}
 		slog.Info("ssh_auth_ok",
 			"user", meta.User(),
 			"method", method,
 			"src_ip", srcIP,
 		)
 		return
+	}
+	if s.metrics != nil {
+		s.metrics.incAuthAttemptFail()
 	}
 	// On failure we don't have the fingerprint readily available unless
 	// the publicKeyCallback put it on Permissions, which doesn't happen
