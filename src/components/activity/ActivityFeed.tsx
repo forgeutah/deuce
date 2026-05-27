@@ -1,4 +1,4 @@
-import { File, GitCommit, CircleCheck, CircleX, Bot } from "lucide-react";
+import { File, GitCommit, CircleCheck, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ActivityItem } from "@/types";
 

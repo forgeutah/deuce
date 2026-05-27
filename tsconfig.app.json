@@ -15,7 +15,10 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
-    /* Path aliases */
+    /* TS 7 will remove baseUrl; we still rely on it for the @/* alias.
+       Pinned to silence the 6.0 deprecation error; revisit when migrating
+       to a pure paths-based alias setup. */
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
