@@ -6,12 +6,10 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  # workflow_dispatch lets you re-run the release against an existing tag if a
+  # previous run failed mid-flight (e.g. transient GHCR error). Trigger from
+  # the Actions tab and select the tag ref in the dropdown.
   workflow_dispatch:
-    inputs:
-      ref:
-        description: 'Existing tag to re-run against (advanced; normally leave empty)'
-        required: false
-        default: ''
 
 permissions:
   contents: write   # gh release create
@@ -155,13 +153,18 @@ jobs:
           notes_file="$(mktemp)"
           trap 'rm -f "$notes_file"' EXIT
 
+          # docker/metadata-action strips the leading 'v' from semver tags
+          # (OCI convention), so v1.2.3 produces image tag :1.2.3. The pull
+          # command in the release notes has to match that, not the git tag.
+          IMAGE_TAG="${TAG_NAME#v}"
+
           # Header: how to pull the image. Comes first so it's the first thing
           # readers see when they click into the release.
           {
             echo "## Container image"
             echo ""
             echo '```'
-            echo "docker pull ${IMAGE_NAME}:${TAG_NAME}"
+            echo "docker pull ${IMAGE_NAME}:${IMAGE_TAG}"
             echo '```'
             echo ""
             echo "---"
