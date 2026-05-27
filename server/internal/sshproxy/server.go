@@ -189,17 +189,16 @@ func (s *Server) handleRawConn(c net.Conn) {
 	_ = sshConn.Close()
 }
 
-// serverConfig builds the per-connection ssh.ServerConfig. U6 ships a
-// no-auth-callback stub that rejects every key; U7 replaces
-// PublicKeyCallback with the session-member-scoped lookup.
+// serverConfig builds the per-connection ssh.ServerConfig. Wires the
+// session-member-scoped publicKeyCallback (U7) and the structured-log
+// AuthLogCallback. Password / keyboard-interactive / GSSAPI auth methods
+// are NOT installed — omission is the off-switch in crypto/ssh.
 func (s *Server) serverConfig() *ssh.ServerConfig {
 	cfg := &ssh.ServerConfig{
-		ServerVersion: s.cfg.ServerVersion,
-		MaxAuthTries:  3,
-		PublicKeyCallback: func(meta ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-			// U6 stub: refuse all keys. U7 replaces this.
-			return nil, fmt.Errorf("auth not yet implemented")
-		},
+		ServerVersion:     s.cfg.ServerVersion,
+		MaxAuthTries:      3,
+		PublicKeyCallback: s.publicKeyCallback,
+		AuthLogCallback:   s.authLogCallback,
 		BannerCallback: func(conn ssh.ConnMetadata) string {
 			return "Deuce session proxy. Connections logged.\n"
 		},
