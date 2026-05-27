@@ -163,6 +163,20 @@ DEUCE_WS_ALLOWED_ORIGINS=deuce.example.com
 # (no secret, no contract version — tailnet + loopback bind is the trust boundary)
 ```
 
+**exe.dev "Login with exe" env block** (see <https://exe.dev/docs/login-with-exe>):
+
+```
+DEUCE_AUTH_MODE=proxy
+DEUCE_PROXY_HEADER_EMAIL=X-ExeDev-Email
+DEUCE_PROXY_HEADER_NAME=X-ExeDev-UserID
+DEUCE_WS_ALLOWED_ORIGINS=vmname.exe.xyz
+# (no secret, no roles — exe.dev's HTTP proxy is the trust boundary; the
+#  app implements its own authorization, e.g. an upstream nginx email
+#  allow-list. exe.dev does not pass a name header, so DEUCE_PROXY_HEADER_NAME
+#  points at X-ExeDev-UserID; layer an upstream proxy that synthesizes an
+#  X-ExeDev-Name header if you want real display names.)
+```
+
 ## Documented Solutions
 
 `docs/solutions/` — documented solutions to past problems (bugs, best practices, architectural patterns), organized by category (`architecture-patterns/`, `performance-issues/`, etc.) with YAML frontmatter (`module`, `tags`, `problem_type`). Relevant when implementing or debugging in documented areas.
