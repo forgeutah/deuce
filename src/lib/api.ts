@@ -6,6 +6,7 @@ import type {
   Message,
   Project,
   Session,
+  SSHKey,
   Team,
   User,
 } from "@/types";
@@ -112,6 +113,17 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ name }),
     }),
+
+  listMySSHKeys: () => request<SSHKey[]>("/me/ssh-keys"),
+
+  createMySSHKey: (label: string, publicKey: string) =>
+    request<SSHKey>("/me/ssh-keys", {
+      method: "POST",
+      body: JSON.stringify({ label, publicKey }),
+    }),
+
+  deleteMySSHKey: (keyID: string) =>
+    request<void>(`/me/ssh-keys/${keyID}`, { method: "DELETE" }),
 
   listTeams: () => request<Team[]>("/teams"),
 
