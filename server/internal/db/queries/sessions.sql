@@ -24,6 +24,21 @@ UPDATE sessions SET description = $2 WHERE id = $1 RETURNING *;
 -- name: UpdateSessionWorkspaceStatus :one
 UPDATE sessions SET workspace_status = $2 WHERE id = $1 RETURNING *;
 
+-- name: UpdateSessionWorkspaceStatusIfMatches :execrows
+UPDATE sessions
+SET workspace_status = @new_status
+WHERE id = @id AND workspace_status = @expected_status;
+
+-- name: ListNonArchivedSessions :many
+SELECT * FROM sessions
+WHERE status != 'archived'
+ORDER BY id;
+
+-- name: ResetStaleWorkspaceTransitions :exec
+UPDATE sessions
+SET workspace_status = 'failed'
+WHERE workspace_status IN ('starting', 'stopping', 'rebuilding', 'deleting');
+
 -- name: UpdateSessionLastActivity :exec
 UPDATE sessions SET last_activity_at = now() WHERE id = $1;
 

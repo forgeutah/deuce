@@ -40,8 +40,8 @@ INSERT INTO sessions (id, name, project_id, status, workspace_status, plan_conte
     ('40000000-0000-0000-0000-000000000001', 'auth-module',        '30000000-0000-0000-0000-000000000001', 'active',   'ready',     E'# Auth Module Plan\n\n## Goals\n- [ ] Implement JWT token validation\n- [ ] Add token expiration checks\n- [x] Set up auth middleware\n- [x] Create user model\n\n## Technical Notes\n- Using `golang-jwt/jwt/v5` for JWT parsing\n- Token expiry window: 24 hours\n- Refresh tokens stored in Redis', now() - interval '5 minutes'),
     ('40000000-0000-0000-0000-000000000002', 'api-rate-limiting',  '30000000-0000-0000-0000-000000000001', 'active',   'ready',     E'# Rate Limiting Plan\n\n## Approach\n- Token bucket algorithm\n- Per-user rate limits via Redis', now() - interval '2 hours'),
     ('40000000-0000-0000-0000-000000000003', 'homepage-redesign',  '30000000-0000-0000-0000-000000000002', 'active',   'ready',     '', now() - interval '30 minutes'),
-    ('40000000-0000-0000-0000-000000000004', 'ci-pipeline',        '30000000-0000-0000-0000-000000000001', 'paused',   'suspended', '', now() - interval '2 days'),
-    ('40000000-0000-0000-0000-000000000005', 'onboarding-flow',    '30000000-0000-0000-0000-000000000002', 'archived', 'suspended', '', now() - interval '7 days'),
+    ('40000000-0000-0000-0000-000000000004', 'ci-pipeline',        '30000000-0000-0000-0000-000000000001', 'paused',   'stopped', '', now() - interval '2 days'),
+    ('40000000-0000-0000-0000-000000000005', 'onboarding-flow',    '30000000-0000-0000-0000-000000000002', 'archived', 'stopped', '', now() - interval '7 days'),
     ('40000000-0000-0000-0000-000000000006', 'dashboard-charts',   '30000000-0000-0000-0000-000000000003', 'active',   'starting',  '', now() - interval '15 minutes');
 
 -- Session members
