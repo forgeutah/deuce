@@ -91,8 +91,10 @@ func (e *Executor) Execute(ctx context.Context, params ExecuteParams, streamFn S
 		prompt = fmt.Sprintf("Recent conversation context:\n%s\n\nCurrent request:\n%s", params.ChatHistory, params.UserMessage)
 	}
 
-	// Build the full SSH command — pipe prompt via stdin
-	fullCommand := fmt.Sprintf("echo %s | %s", shellQuote(prompt), strings.Join(cmdParts, " "))
+	// Build the full SSH command — pipe prompt via stdin. Prefix PATH with
+	// $HOME/.local/bin since the native installer drops `claude` there and
+	// `devpod ssh --command` runs a non-interactive shell.
+	fullCommand := fmt.Sprintf("echo %s | %s%s", shellQuote(prompt), workspace.ClaudePathPrefix, strings.Join(cmdParts, " "))
 
 	// Pass API key into the container via --set-env (not cmd.Env, which only sets host env)
 	cmd := e.workspaces.ExecInWorkspace(ctx, params.WorkspaceID, fullCommand,

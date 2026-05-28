@@ -51,6 +51,7 @@
       ],
       "settings": {
         "files.eol": "\n",
+        "window.openFoldersInNewWindow": "on",
         "go.useLanguageServer": true,
         "[go]": {
           "editor.defaultFormatter": "golang.go",

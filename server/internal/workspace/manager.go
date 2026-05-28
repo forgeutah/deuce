@@ -276,15 +276,24 @@ func readWorkspaceUID(workspaceID string) (string, error) {
 	return ws.UID, nil
 }
 
-// InstallTools installs Claude Code inside the DevPod workspace.
-// Output is streamed line-by-line to logFn (if non-nil).
+// ClaudePathPrefix is prepended to every command that invokes the `claude`
+// binary inside a DevPod workspace. The native installer drops the binary
+// at $HOME/.local/bin/claude and updates the user's shell profile — but
+// `devpod ssh --command` runs a non-interactive shell that does not source
+// .bashrc/.profile, so $HOME/.local/bin is not on PATH by default.
+const ClaudePathPrefix = `PATH="$HOME/.local/bin:$PATH" `
+
+// InstallTools installs Claude Code inside the DevPod workspace using the
+// native installer (https://claude.ai/install.sh) — single curl-piped
+// script, no Node/npm needed. Output is streamed line-by-line to logFn
+// (if non-nil).
 func (m *Manager) InstallTools(ctx context.Context, workspaceID string, logFn LogFunc) error {
 	if logFn != nil {
 		logFn("Checking for Claude Code installation...")
 	}
 
 	// Check if claude is already installed
-	checkCmd := m.ExecInWorkspace(ctx, workspaceID, "claude --version")
+	checkCmd := m.ExecInWorkspace(ctx, workspaceID, ClaudePathPrefix+"claude --version")
 	if output, err := checkCmd.CombinedOutput(); err == nil {
 		version := strings.TrimSpace(string(output))
 		slog.Info("claude code already installed", "workspace", workspaceID, "version", version)
@@ -300,7 +309,7 @@ func (m *Manager) InstallTools(ctx context.Context, workspaceID string, logFn Lo
 	}
 	slog.Info("installing claude code in workspace", "workspace", workspaceID)
 
-	installCmd := m.ExecInWorkspace(ctx, workspaceID, "npm install -g @anthropic-ai/claude-code")
+	installCmd := m.ExecInWorkspace(ctx, workspaceID, "curl -fsSL https://claude.ai/install.sh | bash")
 	stdout, err := installCmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("stdout pipe: %w", err)
@@ -309,7 +318,7 @@ func (m *Manager) InstallTools(ctx context.Context, workspaceID string, logFn Lo
 
 	if err := installCmd.Start(); err != nil {
 		if logFn != nil {
-			logFn("WARNING: Failed to install Claude Code (npm/node may not be available)")
+			logFn("WARNING: Failed to install Claude Code (curl may not be available in this devcontainer)")
 		}
 		slog.Warn("failed to start claude code install", "workspace", workspaceID, "error", err)
 		return nil // Non-fatal — workspace is still usable, just without agent support
