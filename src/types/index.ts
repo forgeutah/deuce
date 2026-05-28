@@ -110,3 +110,17 @@ export interface ActivityItem {
   agentId?: string;
   metadata?: Record<string, string>;
 }
+
+// SSHKey is the wire shape for a user-registered SSH public key.
+// `publicKey` is only present on the create response (the R15 inline
+// confirmation); list/get responses omit it so a compromised client
+// cannot snapshot every key on file. `lastUsedAt` is null until the
+// proxy auth callback touches it.
+export interface SSHKey {
+  id: string;
+  label: string;
+  fingerprint: string;
+  publicKey?: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}

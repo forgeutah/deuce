@@ -12,6 +12,9 @@ services:
       dockerfile: Dockerfile
     volumes:
       - .:/workspaces/deuce:cached
+      # Persist the Deuce SSH host key across rebuilds so VS Code's
+      # known_hosts doesn't go stale on every devcontainer recreate.
+      - deuce-ssh-host-key:/home/vscode/.deuce
     # docker-in-docker: run a Docker daemon inside this container so the DevPod
     # CLI can clone workspaces into the container's filesystem and mount those
     # paths into child containers without host/container path mismatches.
@@ -19,3 +22,6 @@ services:
     command: sleep infinity
     depends_on:
       - postgres
+
+volumes:
+  deuce-ssh-host-key:

@@ -1,4 +1,5 @@
-import { MessageSquare, FileText, FolderTree, Terminal, ScrollText } from "lucide-react";
+import { MessageSquare, FileText, FolderTree, Terminal, ScrollText, Code, Loader2 } from "lucide-react";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { useSessionStore } from "@/stores/session-store";
 import { ChatView } from "@/components/chat/ChatView";
@@ -6,6 +7,8 @@ import { PlanView } from "@/components/plan/PlanView";
 import { FilesView } from "@/components/files/FilesView";
 import { TerminalView } from "@/components/terminal/TerminalView";
 import { LogsView } from "@/components/logs/LogsView";
+import { SSHKeySetupModal } from "@/components/session/SSHKeySetupModal";
+import { api, ApiError } from "@/lib/api";
 import type { TabType } from "@/types";
 
 const tabs: { id: TabType; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -30,9 +33,20 @@ function EmptyState() {
   );
 }
 
+// Hide the "Open in VS Code" button on mobile browsers. Per R13, the
+// vscode:// URI handoff doesn't work on mobile. UA-sniff (not viewport)
+// because a narrowed desktop browser should still show the button.
+function isMobileUA(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|Mobile/i.test(navigator.userAgent);
+}
+
 export function CenterPanel() {
   const { activeSessionId, activeTabMap, setActiveTab, sessions, showLogs, setShowLogs, workspaceLogs } =
     useSessionStore();
+  const [vscodeLoading, setVscodeLoading] = useState(false);
+  const [sshKeyModalOpen, setSshKeyModalOpen] = useState(false);
+  const [vscodeError, setVscodeError] = useState<string | null>(null);
 
   if (!activeSessionId) {
     return <EmptyState />;
@@ -42,6 +56,32 @@ export function CenterPanel() {
   const activeTab = activeTabMap[activeSessionId] ?? "chat";
   const hasLogs = (workspaceLogs[activeSessionId]?.length ?? 0) > 0;
   const isBuilding = activeSession?.workspaceStatus === "starting";
+  const workspaceReady = activeSession?.workspaceStatus === "ready";
+  const showVSCodeButton = !isMobileUA();
+
+  async function handleOpenInVSCode() {
+    if (!activeSessionId || vscodeLoading) return;
+    setVscodeLoading(true);
+    setVscodeError(null);
+    try {
+      const { uri } = await api.getSessionVSCodeURI(activeSessionId);
+      window.location.href = uri;
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.code === "NO_SSH_KEY") {
+          setSshKeyModalOpen(true);
+        } else if (err.code === "SSH_UNAVAILABLE") {
+          setVscodeError("VS Code remote access isn't available. Contact your administrator.");
+        } else {
+          setVscodeError("Couldn't open VS Code. Try again.");
+        }
+      } else {
+        setVscodeError("Couldn't open VS Code. Try again.");
+      }
+    } finally {
+      setVscodeLoading(false);
+    }
+  }
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -98,11 +138,35 @@ export function CenterPanel() {
           );
         })}
 
-        {/* Logs icon — far right */}
+        {/* Open in VS Code — pushed right with ml-auto on the FIRST right-side button */}
+        {showVSCodeButton && (
+          <button
+            data-vscode-button
+            onClick={handleOpenInVSCode}
+            disabled={vscodeLoading || !workspaceReady}
+            aria-busy={vscodeLoading}
+            title={!workspaceReady ? "Container not ready" : vscodeError ?? "Open this session in VS Code"}
+            className={cn(
+              "ml-auto flex items-center gap-1.5 border-b-2 border-transparent px-4 py-2 text-sm transition-colors",
+              "text-foreground-muted hover:text-foreground",
+              "disabled:cursor-not-allowed disabled:opacity-50",
+            )}
+          >
+            {vscodeLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Code className="h-4 w-4" />
+            )}
+            VS Code
+          </button>
+        )}
+
+        {/* Logs icon — to the right of VS Code (or ml-auto when VS Code is hidden) */}
         <button
           onClick={() => setShowLogs(!showLogs)}
           className={cn(
-            "ml-auto flex items-center gap-1.5 border-b-2 px-4 py-2 text-sm transition-colors",
+            "flex items-center gap-1.5 border-b-2 px-4 py-2 text-sm transition-colors",
+            !showVSCodeButton && "ml-auto",
             showLogs
               ? "border-accent text-foreground-emphasis"
               : "border-transparent text-foreground-muted hover:text-foreground",
@@ -134,6 +198,17 @@ export function CenterPanel() {
           </>
         )}
       </div>
+
+      {/* SSH key setup modal — fired by handleOpenInVSCode when /vscode-uri
+          returns 412 NO_SSH_KEY. The modal handles the create-key flow and
+          navigates to the vscode:// URI itself on success. */}
+      {showVSCodeButton && (
+        <SSHKeySetupModal
+          sessionID={activeSessionId}
+          open={sshKeyModalOpen}
+          onClose={() => setSshKeyModalOpen(false)}
+        />
+      )}
     </div>
   );
 }

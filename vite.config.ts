@@ -25,9 +25,24 @@ function buildForgeHeaders(env: Record<string, string>): Record<string, string> 
   };
 }
 
+// Vite blocks requests whose Host header isn't in `server.allowedHosts` (DNS
+// rebinding protection). Localhost/IP literals are always allowed; anything
+// else — Tailscale Serve hostnames, ngrok tunnels, custom dev domains — must
+// be opted in. We always allow `.ts.net` (Tailscale magic DNS) and merge in
+// any extra hostnames from VITE_ALLOWED_HOSTS (CSV). A `.` prefix matches
+// suffixes (e.g. `.ngrok.app`).
+function buildAllowedHosts(env: Record<string, string>): string[] {
+  const extras = (env.VITE_ALLOWED_HOSTS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return [".ts.net", ...extras];
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const forgeHeaders = buildForgeHeaders(env);
+  const allowedHosts = buildAllowedHosts(env);
 
   const configureProxy: ProxyOptions["configure"] = forgeHeaders
     ? (proxy) => {
@@ -65,6 +80,7 @@ export default defineConfig(({ mode }) => {
     server: {
       host: true,
       port: 4000,
+      allowedHosts,
       proxy: {
         "/api": {
           target: "http://localhost:8080",
