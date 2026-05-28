@@ -420,8 +420,15 @@ func mustWriteSFTPSleepDockerStub(t *testing.T, marker string) string {
 	t.Helper()
 	dir := t.TempDir()
 	surrogatePath := filepath.Join(dir, "sftp-surrogate-"+marker)
+	// Plain `sleep 60` — NOT `exec sleep 60`. With exec, the kernel
+	// replaces the shell's argv with the child's, which strips the
+	// marker-bearing script path from `ps -ef` and the marker poll loop
+	// times out. Keeping the script as the parent process preserves
+	// the cmdline that pgrepFound greps for. The sleep child is still
+	// in the same process group via Setpgid, so the kill-PGID assertion
+	// (the actual subject of the test) still exercises the right path.
 	surrogate := `#!/bin/sh
-exec sleep 60
+sleep 60
 `
 	if err := writeFile(surrogatePath, surrogate, 0o755); err != nil {
 		t.Fatalf("write sftp surrogate: %v", err)
