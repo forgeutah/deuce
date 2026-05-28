@@ -430,9 +430,15 @@ func (h *Handler) GetSessionVSCodeURI(w http.ResponseWriter, r *http.Request) {
 	// session.Name is the workspace ID per the existing repo invariant
 	// (U2 was deferred). Sessions cannot be renamed today, so this is
 	// stable for the lifetime of the URI.
+	//
+	// ?windowId=_blank forces VS Code to spawn a NEW window instead of
+	// hijacking the user's last-focused one — otherwise opening Deuce
+	// while already working in another VS Code window closes that
+	// workspace.
 	uri := "vscode://vscode-remote/ssh-remote+dc-" + session.ID.String() +
 		"@" + host + ":" + strconv.Itoa(port) +
-		"/workspaces/" + session.Name
+		"/workspaces/" + session.Name +
+		"?windowId=_blank"
 
 	writeJSON(w, http.StatusOK, vscodeURIResponse{URI: uri})
 }

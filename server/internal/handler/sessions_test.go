@@ -180,8 +180,14 @@ func TestGetSessionVSCodeURI_HappyPath(t *testing.T) {
 		t.Errorf("port: want :%d in URI, got %q", defaultSSHPort, body.URI)
 	}
 	wantPath := "/workspaces/" + f.session.Name
-	if !strings.HasSuffix(body.URI, wantPath) {
-		t.Errorf("path: want suffix %q, got %q", wantPath, body.URI)
+	if !strings.Contains(body.URI, wantPath) {
+		t.Errorf("path: want %q in URI, got %q", wantPath, body.URI)
+	}
+
+	// windowId=_blank forces a new VS Code window so opening Deuce
+	// doesn't hijack the user's currently-focused workspace.
+	if !strings.HasSuffix(body.URI, "?windowId=_blank") {
+		t.Errorf("windowId: want suffix ?windowId=_blank, got %q", body.URI)
 	}
 
 	// Smoke-check that the URI string is at least parseable (no embedded

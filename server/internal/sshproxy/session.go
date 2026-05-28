@@ -18,10 +18,15 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// SSH channel-type allowlist. Only "session" is accepted; any other
-// channel-open is rejected with ssh.Prohibited. This blocks
-// `direct-tcpip`, `x11`, `auth-agent@openssh.com`,
+// SSH channel-type allowlist. "session" and "direct-tcpip" are
+// accepted; any other channel-open is rejected with ssh.Prohibited.
+// This blocks `x11`, `auth-agent@openssh.com`,
 // `direct-streamlocal@openssh.com`, and everything else.
+//
+// direct-tcpip is needed by VS Code Remote-SSH to tunnel the
+// in-container vscode-server's listening port back to the editor over
+// the existing SSH connection. Destinations are restricted to loopback
+// only — see validateLoopbackDest in tcpip.go.
 const channelTypeSession = "session"
 
 // SSH session-request types we recognize. Anything not in this set
@@ -119,10 +124,75 @@ func (s *Server) handleAuthenticatedConn(sshConn *ssh.ServerConn, chans <-chan s
 	var channelWG sync.WaitGroup
 
 	for newCh := range chans {
-		// Reject all non-session channel types. RFC 4254 §5.1 reserves
-		// "Prohibited" for "the request was denied because of policy"
-		// which is exactly what we mean here.
-		if newCh.ChannelType() != channelTypeSession {
+		switch newCh.ChannelType() {
+		case channelTypeSession:
+			if !s.admitChannel(state, sessionID, userID, newCh) {
+				continue
+			}
+			ch, chanReqs, err := newCh.Accept()
+			if err != nil {
+				slog.Warn("ssh channel accept failed", "error", err, "session_id", sessionID)
+				s.releaseChannel(state)
+				continue
+			}
+			if s.metrics != nil {
+				s.metrics.incChannelOpenSession()
+			}
+			channelWG.Add(1)
+			go func() {
+				defer channelWG.Done()
+				defer recoverPanic("ssh session channel")
+				defer s.releaseChannel(state)
+				s.runSessionChannel(ctx, sshConn, ch, chanReqs, sessionID, userID)
+			}()
+
+		case channelTypeDirectTCPIP:
+			// Parse + validate the destination BEFORE counting against
+			// the channel cap, so a hostile peer can't burn channel
+			// slots with malformed payloads.
+			var p directTCPIPPayload
+			if err := ssh.Unmarshal(newCh.ExtraData(), &p); err != nil {
+				slog.Info("ssh direct-tcpip rejected: malformed payload",
+					"session_id", sessionID, "user_id", userID, "error", err)
+				if s.metrics != nil {
+					s.metrics.incChannelOpenOther()
+				}
+				_ = newCh.Reject(ssh.ConnectionFailed, "malformed payload")
+				continue
+			}
+			if err := validateLoopbackDest(p.DestHost, p.DestPort); err != nil {
+				slog.Info("ssh direct-tcpip rejected: non-loopback destination",
+					"session_id", sessionID, "user_id", userID,
+					"dest_host", p.DestHost, "dest_port", p.DestPort, "error", err)
+				if s.metrics != nil {
+					s.metrics.incChannelOpenOther()
+				}
+				_ = newCh.Reject(ssh.Prohibited, "destination not allowed")
+				continue
+			}
+			if !s.admitChannel(state, sessionID, userID, newCh) {
+				continue
+			}
+			ch, chanReqs, err := newCh.Accept()
+			if err != nil {
+				slog.Warn("ssh direct-tcpip accept failed", "error", err, "session_id", sessionID)
+				s.releaseChannel(state)
+				continue
+			}
+			if s.metrics != nil {
+				s.metrics.incChannelOpenSession()
+			}
+			channelWG.Add(1)
+			go func() {
+				defer channelWG.Done()
+				defer recoverPanic("ssh direct-tcpip channel")
+				defer s.releaseChannel(state)
+				s.runDirectTCPIPChannel(ctx, ch, chanReqs, sessionID, userID, p)
+			}()
+
+		default:
+			// RFC 4254 §5.1 reserves "Prohibited" for "denied because
+			// of policy" — exactly the case here.
 			slog.Info("ssh channel rejected: type not allowed",
 				"type", newCh.ChannelType(),
 				"session_id", sessionID,
@@ -131,34 +201,10 @@ func (s *Server) handleAuthenticatedConn(sshConn *ssh.ServerConn, chans <-chan s
 			if s.metrics != nil {
 				s.metrics.incChannelOpenOther()
 			}
-			if err := newCh.Reject(ssh.Prohibited, "only 'session' channels are allowed"); err != nil {
+			if err := newCh.Reject(ssh.Prohibited, "channel type not allowed"); err != nil {
 				slog.Debug("channel reject failed", "type", newCh.ChannelType(), "error", err)
 			}
-			continue
 		}
-
-		// Per-connection + lifetime + global caps.
-		if !s.admitChannel(state, sessionID, userID, newCh) {
-			continue
-		}
-
-		ch, chanReqs, err := newCh.Accept()
-		if err != nil {
-			slog.Warn("ssh channel accept failed", "error", err, "session_id", sessionID)
-			s.releaseChannel(state)
-			continue
-		}
-		if s.metrics != nil {
-			s.metrics.incChannelOpenSession()
-		}
-
-		channelWG.Add(1)
-		go func() {
-			defer channelWG.Done()
-			defer recoverPanic("ssh session channel")
-			defer s.releaseChannel(state)
-			s.runSessionChannel(ctx, sshConn, ch, chanReqs, sessionID, userID)
-		}()
 	}
 
 	channelWG.Wait()
@@ -532,13 +578,24 @@ func (s *Server) handleSessionRequest(
 			req.Reply(false, nil)
 			return
 		}
-		// Force a pty-req if the client somehow sent shell without one
-		// (OpenSSH server does the same; bash -l with no tty is broken).
+		// Branch on whether a pty-req was buffered earlier on this
+		// channel. An interactive ssh client (terminal panel, `ssh user@host`)
+		// sends pty-req first, then shell — we run bash -l with a PTY so
+		// the user sees PS1 and bash treats stdin as a TTY.
+		//
+		// VS Code Remote-SSH connects with `ssh -T` (PTY disabled) and
+		// sends shell with NO pty-req. It then pipes its install script
+		// into stdin and parses stdout. Forcing a PTY here would cause
+		// the kernel pty driver to echo every input byte back, and bash
+		// would print its prompt — both corrupt the byte stream the
+		// install script needs to talk over. So no-pty-req → no PTY,
+		// just a non-interactive login shell.
+		mode := execModePTYShell
 		if *ptyReqOut == nil {
-			*ptyReqOut = &ptyReqPayload{Term: "xterm-256color", Cols: 80, Rows: 24}
+			mode = execModeNonPTYShell
 		}
 		req.Reply(true, nil)
-		startProc(execModePTYShell, "")
+		startProc(mode, "")
 
 	case reqExec:
 		var p execPayload

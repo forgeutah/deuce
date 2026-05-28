@@ -40,6 +40,18 @@ func TestDockerArgs_PTYShell(t *testing.T) {
 	}
 }
 
+// TestDockerArgs_NonPTYShell pins the no-pty shell mode used by VS Code
+// Remote-SSH (ssh -T + shell req). Critical: -i (no -t) so the kernel
+// pty driver can't echo VS Code's piped install-script bytes back and
+// corrupt the byte stream it parses.
+func TestDockerArgs_NonPTYShell(t *testing.T) {
+	got := dockerArgs("alice", "", execModeNonPTYShell)
+	want := []string{"exec", "-i", "alice", "/bin/bash", "-l"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("dockerArgs(non-pty-shell):\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
 func TestDockerArgs_PTYExec(t *testing.T) {
 	got := dockerArgs("alice", "ls /", execModePTYExec)
 	want := []string{"exec", "-it", "alice", "/bin/sh", "-c", "ls /"}
@@ -343,7 +355,11 @@ func keysEqual(a, b ssh.PublicKey) bool {
 // Channel-type allowlist
 // ----------------------------------------------------------------------
 
-func TestChannelOpen_RejectsDirectTCPIP(t *testing.T) {
+// TestDirectTCPIP_RejectsNonLoopback locks in the loopback-only
+// destination policy: any non-{localhost, 127.0.0.1, ::1} dest must be
+// refused with Prohibited at channel-open, BEFORE counting against the
+// channel cap or spawning any docker exec.
+func TestDirectTCPIP_RejectsNonLoopback(t *testing.T) {
 	h := newProxyHarness(t)
 	defer h.stop()
 
@@ -353,24 +369,54 @@ func TestChannelOpen_RejectsDirectTCPIP(t *testing.T) {
 	}
 	defer conn.Close()
 
-	// Build a stub direct-tcpip payload (we don't need real fields; the
-	// server should reject before unmarshaling).
-	payload := ssh.Marshal(struct {
-		Host string
-		Port uint32
-		Orig string
-		OPort uint32
-	}{"localhost", 1234, "127.0.0.1", 5678})
-	_, _, err = conn.OpenChannel("direct-tcpip", payload)
-	if err == nil {
-		t.Fatal("expected direct-tcpip to be rejected")
+	hostile := []string{"10.0.0.1", "169.254.169.254", "example.com", "0.0.0.0", ""}
+	for _, host := range hostile {
+		payload := ssh.Marshal(directTCPIPPayload{
+			DestHost: host, DestPort: 1234,
+			OrigHost: "127.0.0.1", OrigPort: 5678,
+		})
+		_, _, err := conn.OpenChannel("direct-tcpip", payload)
+		if err == nil {
+			t.Errorf("dest %q: expected rejection, got channel open", host)
+			continue
+		}
+		openErr, ok := err.(*ssh.OpenChannelError)
+		if !ok {
+			t.Errorf("dest %q: expected *ssh.OpenChannelError, got %T: %v", host, err, err)
+			continue
+		}
+		if openErr.Reason != ssh.Prohibited {
+			t.Errorf("dest %q: reason want Prohibited, got %v", host, openErr.Reason)
+		}
 	}
-	openErr, ok := err.(*ssh.OpenChannelError)
-	if !ok {
-		t.Fatalf("expected *ssh.OpenChannelError, got %T: %v", err, err)
+}
+
+// TestDirectTCPIP_AcceptsLoopback verifies the three loopback literal
+// forms all open successfully at the SSH layer. The bash forwarder
+// may fail downstream (no real container in test), but the channel
+// MUST open — that's the contract.
+func TestDirectTCPIP_AcceptsLoopback(t *testing.T) {
+	h := newProxyHarness(t)
+	defer h.stop()
+
+	conn, _, _, err := dialSSH(t, h)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
 	}
-	if openErr.Reason != ssh.Prohibited {
-		t.Errorf("reason: want Prohibited, got %v", openErr.Reason)
+	defer conn.Close()
+
+	for _, host := range []string{"localhost", "127.0.0.1", "::1"} {
+		payload := ssh.Marshal(directTCPIPPayload{
+			DestHost: host, DestPort: 40301,
+			OrigHost: "127.0.0.1", OrigPort: 1234,
+		})
+		ch, reqs, err := conn.OpenChannel("direct-tcpip", payload)
+		if err != nil {
+			t.Errorf("dest %q: channel open failed: %v", host, err)
+			continue
+		}
+		go ssh.DiscardRequests(reqs)
+		_ = ch.Close()
 	}
 }
 

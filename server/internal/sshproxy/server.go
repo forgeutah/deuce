@@ -316,8 +316,14 @@ func (s *Server) Metrics() MetricsSnapshot {
 // are NOT installed — omission is the off-switch in crypto/ssh.
 func (s *Server) serverConfig() *ssh.ServerConfig {
 	cfg := &ssh.ServerConfig{
-		ServerVersion:     s.cfg.ServerVersion,
-		MaxAuthTries:      3,
+		ServerVersion: s.cfg.ServerVersion,
+		// 10 accommodates typical agents (5–10 keys) without the user
+		// having to pin IdentityFile in ~/.ssh/config. Still bounds the
+		// post-revoke window to one connection's worth of rejected
+		// handshakes, which is the only security-relevant property of
+		// this knob (revocation propagates on the NEXT new connection;
+		// existing sessions persist regardless of this value).
+		MaxAuthTries:      10,
 		PublicKeyCallback: s.publicKeyCallback,
 		AuthLogCallback:   s.authLogCallback,
 		BannerCallback: func(conn ssh.ConnMetadata) string {

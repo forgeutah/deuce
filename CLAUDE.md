@@ -121,6 +121,12 @@ DEUCE_PROXY_REQUIRED_ROLE=
 
 DEUCE_WS_ALLOWED_ORIGINS=localhost:4000,localhost:8080  # CSV; rejects wildcard '*'
 
+# Vite dev server only (frontend). Extra hosts allowed by Vite's Host-header
+# check, on top of the always-on `.ts.net` default and localhost/IP literals
+# Vite allows by itself. CSV; prefix entries with '.' to match a domain
+# suffix (e.g. ".ngrok.app"). Only applies to `npm run dev`.
+VITE_ALLOWED_HOSTS=
+
 # SSH proxy (for "Open in VS Code"). Embedded SSH listener that routes
 # VS Code Remote-SSH into per-session DevPod containers via docker exec.
 # Empty DEUCE_SSH_LISTEN_ADDR disables SSH; HTTP keeps serving and the
@@ -199,7 +205,7 @@ DEUCE_WS_ALLOWED_ORIGINS=vmname.exe.xyz
 3. **SSH listener (default `:2222`) must be reachable** by user VS Code installations. If port 22 is taken by the VM's admin sshd, deploy on a dedicated hostname/IP routed to port 2222 (or pre-route via load balancer if browsers don't accept the port-in-URI on your VS Code version). Set `DEUCE_SSH_LISTEN_ADDR=` (empty) to disable SSH entirely — HTTP keeps serving and the vscode-uri endpoint returns 503.
 4. **`docker exec` permissions:** the deuce process user must be in the `docker` group on the host, or have an equivalent privileged path to talk to the Docker daemon. Otherwise SSH auth succeeds but the channel-open `docker exec` fails with a confusing error.
 5. **Logs include SSH-key fingerprints (SHA256:…), never full keys.** If you add a logging middleware that dumps headers or process state, ensure it doesn't capture `Permissions.Extensions` either (it carries fingerprint, session-id, user-id, key-id).
-6. **Deleted users keep their in-flight SSH sessions** until the user disconnects naturally. Revocation propagates on the next auth attempt (LISTEN/NOTIFY real-time disconnect was deliberately deferred for v1 — `MaxAuthTries=3` caps post-revoke reuse to three rejected handshakes).
+6. **Deleted users keep their in-flight SSH sessions** until the user disconnects naturally. Revocation propagates on the next auth attempt (LISTEN/NOTIFY real-time disconnect was deliberately deferred for v1 — `MaxAuthTries=10` caps post-revoke reuse to ten rejected handshakes per attempted reconnect, sized to accommodate typical multi-key ssh-agent setups while still bounding the abuse window).
 7. **Tailscale Funnel / VS Code Tunnels are NOT supported** — the SSH proxy is a direct TCP listener. If your deployment is fronted by a tunnel that strips the source IP or doesn't preserve TCP semantics, the per-IP handshake cap may misbehave.
 
 ### Terminal vs Open-in-VS-Code divergence

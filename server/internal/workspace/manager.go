@@ -3,10 +3,13 @@ package workspace
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -189,9 +192,33 @@ func (m *Manager) ExecInWorkspace(ctx context.Context, workspaceID, command stri
 // Only safe for the docker DevPod provider; remote providers (k8s, AWS,
 // SSH) put the container on a different host where `docker exec` doesn't
 // reach. The caller is responsible for the provider check.
+//
+// Lookup strategy: DevPod's docker provider does NOT set a
+// `devpod.workspace=<id>` label of its own. Containers are created by
+// the embedded devcontainer CLI, which labels them with
+// `dev.containers.id=<context>-<truncated-id>-<hash>`. The same value
+// is persisted by DevPod as the `uid` field of
+// ~/.devpod/contexts/default/workspaces/<id>/workspace.json. We read
+// that file to get the uid, then filter docker ps by the matching
+// `dev.containers.id` label.
+//
+// Context is hardcoded to "default" — Deuce never invokes `devpod` with
+// `--context`, so workspaces always land there. Revisit if multi-context
+// support is ever introduced.
 func (m *Manager) ContainerName(ctx context.Context, workspaceID string) (string, error) {
+	uid, err := readWorkspaceUID(workspaceID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// No on-disk state means DevPod never finished creating
+			// this workspace (or it's been destroyed). Either way, no
+			// running container exists.
+			return "", ErrContainerNotRunning
+		}
+		return "", fmt.Errorf("read workspace uid: %w", err)
+	}
+
 	cmd := exec.CommandContext(ctx, "docker", "ps",
-		"--filter", "label=devpod.workspace="+workspaceID,
+		"--filter", "label=dev.containers.id="+uid,
 		"--format", "{{.Names}}",
 	)
 	output, err := cmd.CombinedOutput()
@@ -215,6 +242,38 @@ func (m *Manager) ContainerName(ctx context.Context, workspaceID string) (string
 	}
 
 	return name, nil
+}
+
+// readWorkspaceUID returns the DevPod-assigned uid for workspaceID by
+// parsing ~/.devpod/contexts/default/workspaces/<id>/workspace.json.
+// The uid is the value the embedded devcontainer CLI uses for the
+// `dev.containers.id` label on the running container.
+//
+// Returns os.ErrNotExist (wrapped) when the workspace directory doesn't
+// exist — distinguishable from JSON-parse errors so callers can map
+// "never created" to ErrContainerNotRunning.
+func readWorkspaceUID(workspaceID string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("user home dir: %w", err)
+	}
+	path := filepath.Join(home, ".devpod", "contexts", "default", "workspaces", workspaceID, "workspace.json")
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	var ws struct {
+		UID string `json:"uid"`
+	}
+	if err := json.NewDecoder(f).Decode(&ws); err != nil {
+		return "", fmt.Errorf("decode workspace.json: %w", err)
+	}
+	if ws.UID == "" {
+		return "", fmt.Errorf("workspace.json has no uid")
+	}
+	return ws.UID, nil
 }
 
 // InstallTools installs Claude Code inside the DevPod workspace.

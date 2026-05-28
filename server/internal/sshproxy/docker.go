@@ -3,6 +3,7 @@ package sshproxy
 import (
 	"context"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -75,14 +76,15 @@ type envEntry struct {
 	Value string
 }
 
-// execMode discriminates the three docker-exec invocation shapes we use.
+// execMode discriminates the docker-exec invocation shapes we use.
 type execMode int
 
 const (
-	execModeNonPTY execMode = iota // docker exec -i ... /bin/sh -c <command>
-	execModePTYExec                // docker exec -it ... /bin/sh -c <command>
-	execModePTYShell               // docker exec -it ... /bin/bash -l
-	execModeSFTP                   // docker exec -i ... /usr/lib/openssh/sftp-server (U9; not used by U8)
+	execModeNonPTY      execMode = iota // docker exec -i ... /bin/sh -c <command>
+	execModePTYExec                     // docker exec -it ... /bin/sh -c <command>
+	execModePTYShell                    // docker exec -it ... /bin/bash -l
+	execModeNonPTYShell                 // docker exec -i ... /bin/bash -l (VS Code Remote-SSH sends shell+stdin without pty-req)
+	execModeSFTP                        // docker exec -i ... /usr/lib/openssh/sftp-server (U9; not used by U8)
 )
 
 // buildExecCmd assembles the *exec.Cmd for a docker exec invocation. The
@@ -106,6 +108,41 @@ func buildExecCmd(ctx context.Context, bin, container, command string, mode exec
 	return cmd
 }
 
+// buildTCPForwardCmd assembles a docker-exec invocation that bridges
+// SSH-channel bytes ↔ a loopback TCP socket inside the container, used
+// for VS Code Remote-SSH's `direct-tcpip` port forwarding. The bash
+// `/dev/tcp/<host>/<port>` builtin opens the socket inside the
+// container's network namespace, so no `nc`/`socat` dependency is
+// required — bash is already required for the shell-channel mode.
+//
+// The shell script is:
+//
+//	exec 3<>/dev/tcp/<host>/<port> || exit 1
+//	( cat <&3; kill -TERM $$ 2>/dev/null ) &
+//	cat >&3
+//
+// The backgrounded `cat <&3` pipes container→client; the foreground
+// `cat >&3` pipes client→container. Either side closing fires the
+// TERM, killing the script, which lets docker exec clean up and the
+// SSH channel see EOF.
+//
+// Caller MUST validate host (loopback-only) and port (1..65535) before
+// calling. The script splices them into a bash command verbatim, but
+// the inputs go through ssh.Unmarshal of a typed payload struct (host
+// is a length-prefixed string, port is a uint32), so the only attack
+// surface is the validation rules — not shell-parsing.
+func buildTCPForwardCmd(ctx context.Context, bin, container, host string, port uint32) *exec.Cmd {
+	if bin == "" {
+		bin = defaultDockerBin
+	}
+	script := "exec 3<>/dev/tcp/" + host + "/" + strconv.FormatUint(uint64(port), 10) + " || exit 1\n" +
+		"( cat <&3; kill -TERM $$ 2>/dev/null ) &\n" +
+		"cat >&3\n"
+	cmd := exec.CommandContext(ctx, bin, "exec", "-i", container, "bash", "-c", script)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	return cmd
+}
+
 // dockerArgs builds the argv slice for a docker exec invocation in the
 // given mode. Exposed for unit tests so they can assert the exact argv
 // without running docker.
@@ -113,6 +150,8 @@ func dockerArgs(container, command string, mode execMode) []string {
 	switch mode {
 	case execModePTYShell:
 		return []string{"exec", "-it", container, "/bin/bash", "-l"}
+	case execModeNonPTYShell:
+		return []string{"exec", "-i", container, "/bin/bash", "-l"}
 	case execModePTYExec:
 		return []string{"exec", "-it", container, "/bin/sh", "-c", command}
 	case execModeSFTP:
