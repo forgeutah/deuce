@@ -443,11 +443,26 @@ func (s *Server) runSessionChannel(
 			}()
 
 			go func() {
-				_ = cmd.Wait()
-				// Force-close stdin so the stdin pump exits even if the
-				// peer never closes its write side.
-				_ = stdinPipe.Close()
+				// cmd.Wait() closes the parent's read ends of the stdout
+				// and stderr pipes as part of its cleanup (see exec.Cmd
+				// docs: "it is thus incorrect to call Wait before all
+				// reads from the pipe have completed"). When the child
+				// exits faster than the Go scheduler runs the pump
+				// goroutines (common for `echo`-class commands), Wait
+				// races them and closes the read ends before they've
+				// drained the pipe buffer — pumps see EOF immediately
+				// and forward zero bytes.
+				//
+				// cmd.Process.Wait() reaps the zombie WITHOUT touching
+				// the pipes. We set cmd.ProcessState manually so the
+				// downstream exit-status code path keeps working, then
+				// wait for the pumps to drain (they EOF naturally once
+				// the child closes its write ends on exit), then close
+				// stdin to unblock the stdin pump.
+				state, _ := cmd.Process.Wait()
+				cmd.ProcessState = state
 				pumpsDone.Wait()
+				_ = stdinPipe.Close()
 				close(ioDone)
 			}()
 		})
