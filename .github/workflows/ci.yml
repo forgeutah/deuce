@@ -61,4 +61,11 @@ jobs:
         working-directory: server
         env:
           TEST_DATABASE_URL: postgres://deuce:deuce@localhost:5432/deuce?sslmode=disable
-        run: go test ./...
+        # -p 1 runs PACKAGES serially. Multiple integration-test packages
+        # (db, handler, sshproxy) each call `DROP SCHEMA public CASCADE;
+        # CREATE SCHEMA public;` + RunMigrations on the SAME database,
+        # which races into "relation goose_db_version does not exist" and
+        # "duplicate key on pg_type_typname_nsp_index" when packages run
+        # in parallel. Within each package, t.Parallel() still applies.
+        # Proper fix (per-package schema or DB) is a follow-up.
+        run: go test -p 1 ./...
