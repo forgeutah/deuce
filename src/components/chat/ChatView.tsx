@@ -1,11 +1,125 @@
 import { useState, useRef, useEffect } from "react";
-import { SendHorizontal, Bot, Square } from "lucide-react";
+import {
+  SendHorizontal,
+  Bot,
+  Square,
+  Play,
+  RefreshCw,
+  AlertCircle,
+  Loader2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 import { cn } from "@/lib/utils";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useSessionStore } from "@/stores/session-store";
-import type { Agent, Message, User } from "@/types";
+import type { Agent, Message, User, Session, WorkspaceStatus } from "@/types";
+
+function isWorkspaceLive(status: WorkspaceStatus | undefined): boolean {
+  return status === "ready" || status === "starting";
+}
+
+function isWorkspaceTransitioning(status: WorkspaceStatus | undefined): boolean {
+  return (
+    status === "starting" ||
+    status === "stopping" ||
+    status === "rebuilding" ||
+    status === "deleting"
+  );
+}
+
+const NON_LIVE_MESSAGES: Partial<Record<WorkspaceStatus, string>> = {
+  stopped: "Workspace is stopped",
+  missing: "Workspace no longer exists",
+  failed: "Workspace failed to start",
+  stopping: "Stopping workspace…",
+  rebuilding: "Rebuilding workspace…",
+  deleting: "Deleting workspace…",
+};
+
+// WorkspaceComposerGate replaces the chat composer when the workspace isn't
+// live. Messages above stay scrollable and readable (just dimmed) so users
+// can review history before deciding what to do; the composer is locked
+// because sending a message would target an agent that has no container to
+// run in.
+function WorkspaceComposerGate({ session }: { session: Session }) {
+  const updateWorkspaceStatus = useSessionStore((s) => s.updateWorkspaceStatus);
+  const [pending, setPending] = useState<"start" | "rebuild" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const status = session.workspaceStatus;
+  const transitioning = isWorkspaceTransitioning(status);
+  const message = NON_LIVE_MESSAGES[status] ?? "Workspace not available";
+
+  // 'stopped' → Start (cheap, resumes the existing container).
+  // 'missing' / 'failed' → Rebuild (creates a fresh container).
+  // Transitional → no action; the spinner waits for the server to settle.
+  const action: "start" | "rebuild" | null =
+    status === "stopped"
+      ? "start"
+      : status === "missing" || status === "failed"
+        ? "rebuild"
+        : null;
+
+  async function fire() {
+    if (!action || pending) return;
+    setError(null);
+    setPending(action);
+    try {
+      const fn =
+        action === "start" ? api.startWorkspace : api.rebuildWorkspace;
+      const updated = await fn(session.id);
+      updateWorkspaceStatus(session.id, updated.workspaceStatus);
+    } catch (err) {
+      setError(
+        err instanceof ApiError ? err.message : `${action} failed. Try again.`,
+      );
+    } finally {
+      setPending(null);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-border-muted bg-background-subtle px-3 py-2.5">
+      <div className="flex items-center gap-2 text-sm">
+        {transitioning ? (
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-warning" />
+        ) : (
+          <AlertCircle className="h-4 w-4 shrink-0 text-danger" />
+        )}
+        <span className="text-foreground-muted">{message}</span>
+        {action && !transitioning && (
+          <Button
+            onClick={fire}
+            disabled={pending !== null}
+            size="sm"
+            className="ml-auto gap-1.5 h-7"
+          >
+            {pending === action ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : action === "start" ? (
+              <Play className="h-3.5 w-3.5" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            {action === "start" ? "Start workspace" : "Rebuild workspace"}
+          </Button>
+        )}
+      </div>
+      {error && (
+        <p className="text-xs text-danger" role="alert">
+          {error}
+        </p>
+      )}
+      {!error && (
+        <p className="text-[11px] text-foreground-subtle">
+          History stays readable. Sending a new message is locked until the
+          workspace is back up.
+        </p>
+      )}
+    </div>
+  );
+}
 
 function TypingIndicator({
   agentName,
@@ -253,11 +367,20 @@ export function ChatView() {
   };
 
   const isReadOnly = session?.status !== "active";
+  const workspaceLive = isWorkspaceLive(session?.workspaceStatus);
 
   return (
     <div className="flex h-full flex-col">
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto" onScroll={handleScroll}>
+      {/* Messages — dimmed when the workspace is off, so history stays
+          readable and the composer gate at the bottom is the clear next
+          surface for the user. */}
+      <div
+        className={cn(
+          "flex-1 overflow-y-auto transition-opacity",
+          !workspaceLive && "opacity-60",
+        )}
+        onScroll={handleScroll}
+      >
         <div className="flex flex-col gap-1 py-4">
           {sessionMessages.length === 0 && (
             <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -327,7 +450,11 @@ export function ChatView() {
         </div>
       </div>
 
-      {/* Input */}
+      {/* Input — three modes, in priority order:
+            1. Session paused/archived → existing read-only banner (session
+               lifecycle, not workspace lifecycle).
+            2. Workspace not live → WorkspaceComposerGate with Start/Rebuild.
+            3. Normal composer. */}
       <div className="border-t border-border-muted p-3">
         {isReadOnly ? (
           <div className="flex items-center justify-center rounded-md border border-border-muted bg-background-subtle py-2 text-xs text-foreground-subtle">
@@ -335,6 +462,8 @@ export function ChatView() {
               ? "Session is paused"
               : "Session is archived"}
           </div>
+        ) : !workspaceLive && session ? (
+          <WorkspaceComposerGate session={session} />
         ) : (
           <div className="flex items-end gap-2">
             <textarea

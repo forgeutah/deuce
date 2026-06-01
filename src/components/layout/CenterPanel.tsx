@@ -24,8 +24,15 @@ type Tab = {
 };
 
 const tabs: Tab[] = [
-  { id: "chat", label: "Chat", icon: MessageSquare, requiresLiveWorkspace: true },
+  // Chat is always available — message history lives in Postgres, not the
+  // container, so users can browse and read chat even when the workspace is
+  // off. ChatView surfaces an inline Start/Rebuild banner when not live and
+  // disables the composer.
+  { id: "chat", label: "Chat", icon: MessageSquare, requiresLiveWorkspace: false },
   { id: "plan", label: "Plan", icon: FileText, requiresLiveWorkspace: false },
+  // Files and Terminal genuinely need a running container — they shell into
+  // the devpod over SSH/websocket. The parent renders RecoveryCard in their
+  // place when not live.
   { id: "files", label: "Files", icon: FolderTree, requiresLiveWorkspace: true },
   { id: "terminal", label: "Terminal", icon: Terminal, requiresLiveWorkspace: true },
 ];
@@ -247,12 +254,12 @@ export function CenterPanel() {
         ) : (
           <>
             {activeTab === "plan" && <PlanView />}
-            {/* The other three tabs require a live container. When the
-                workspace isn't live, the recovery card replaces the panel
-                entirely — no spinner, no error message, just a single
-                clear next-action surface. */}
-            {activeTab === "chat" &&
-              (live ? <ChatView /> : activeSession && <RecoveryCard session={activeSession} />)}
+            {/* Chat is always rendered — it shows its own inline banner +
+                Start/Rebuild affordance when the workspace isn't live, and
+                lets the user browse history regardless. */}
+            {activeTab === "chat" && <ChatView />}
+            {/* Files and Terminal swap to the recovery card when the
+                container isn't running — they can't function without it. */}
             {activeTab === "files" &&
               (live ? <FilesView key={activeSessionId} /> : activeSession && <RecoveryCard session={activeSession} />)}
             {activeTab === "terminal" &&
