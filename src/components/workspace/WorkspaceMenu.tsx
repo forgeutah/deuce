@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { MoreVertical, Pause, RefreshCw, Trash2 } from "lucide-react";
+import { MoreVertical, Pause, Play, RefreshCw, Trash2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,6 +13,8 @@ import { useSessionStore } from "@/stores/session-store";
 import type { Session, WorkspaceStatus } from "@/types";
 import { DeleteWorkspaceDialog } from "./DeleteWorkspaceDialog";
 
+type PowerAction = "start" | "stop";
+
 function isBusy(status: WorkspaceStatus): boolean {
   return (
     status === "starting" ||
@@ -22,24 +24,41 @@ function isBusy(status: WorkspaceStatus): boolean {
   );
 }
 
+// powerActionFor reads the current workspace state and picks which power
+// action makes sense as the menu's first item. ready → Stop (running, so
+// halt it). stopped → Start (halted, so resume it). Anything else returns
+// undefined and the menu still renders the slot but disables it — the
+// label defaults to Stop so the slot's position doesn't reflow.
+function powerActionFor(status: WorkspaceStatus): PowerAction | undefined {
+  if (status === "ready") return "stop";
+  if (status === "stopped") return "start";
+  return undefined;
+}
+
 export function WorkspaceMenu({ session }: { session: Session }) {
   const updateWorkspaceStatus = useSessionStore((s) => s.updateWorkspaceStatus);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [pending, setPending] = useState<"stop" | "rebuild" | null>(null);
+  const [pending, setPending] = useState<PowerAction | "rebuild" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const busy = isBusy(session.workspaceStatus);
   const status = session.workspaceStatus;
+  const powerAction = powerActionFor(status);
 
-  // Per the brainstorm: Stop and Rebuild fire immediately on click (no
+  // Per the brainstorm: Start/Stop/Rebuild fire immediately on click (no
   // confirm modal). Delete is the only destructive action that opens a
   // modal — wiping a container takes minutes to recover from.
-  async function fireAction(action: "stop" | "rebuild") {
+  async function fireAction(action: PowerAction | "rebuild") {
     if (pending || busy) return;
     setError(null);
     setPending(action);
     try {
-      const fn = action === "stop" ? api.stopWorkspace : api.rebuildWorkspace;
+      const fn =
+        action === "start"
+          ? api.startWorkspace
+          : action === "stop"
+            ? api.stopWorkspace
+            : api.rebuildWorkspace;
       const updated = await fn(session.id);
       updateWorkspaceStatus(session.id, updated.workspaceStatus);
     } catch (err) {
@@ -70,14 +89,22 @@ export function WorkspaceMenu({ session }: { session: Session }) {
           className="z-60 min-w-45 border-border bg-background-overlay text-foreground shadow-lg"
         >
           <DropdownMenuItem
-            onClick={() => fireAction("stop")}
-            disabled={busy || pending !== null || status !== "ready"}
+            onClick={() => powerAction && fireAction(powerAction)}
+            disabled={busy || pending !== null || powerAction === undefined}
           >
-            <Pause className="mr-2 h-4 w-4" />
+            {powerAction === "start" ? (
+              <Play className="mr-2 h-4 w-4" />
+            ) : (
+              <Pause className="mr-2 h-4 w-4" />
+            )}
             <div className="flex flex-col">
-              <span>Stop workspace</span>
+              <span>
+                {powerAction === "start" ? "Start workspace" : "Stop workspace"}
+              </span>
               <span className="text-[11px] text-foreground-subtle">
-                Container halts; Start resumes it.
+                {powerAction === "start"
+                  ? "Resume the existing container."
+                  : "Container halts; Start resumes it."}
               </span>
             </div>
           </DropdownMenuItem>
