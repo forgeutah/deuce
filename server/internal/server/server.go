@@ -52,6 +52,14 @@ func (s *Server) SetSSHAvailable(predicate func() bool) {
 	s.sshAvailable = predicate
 }
 
+// Hub returns the shared WebSocket hub. main.go uses it to construct the
+// reconciler before Router() starts the hub goroutine. Safe to call before
+// Router() — Hub itself is created in New() and BroadcastToSession only
+// writes to subscriber channels (no dependency on Run()).
+func (s *Server) Hub() *ws.Hub {
+	return s.hub
+}
+
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 
@@ -96,6 +104,15 @@ func (s *Server) Router() http.Handler {
 	// Startup recovery: reset stale agent statuses from prior server crash
 	if err := s.queries.ResetStaleAgentStatuses(context.Background()); err != nil {
 		slog.Warn("failed to reset stale agent statuses", "error", err)
+	}
+
+	// Startup recovery: flip any workspace_status sitting in a transitional
+	// state (starting/stopping/rebuilding/deleting) to `failed`. Their owning
+	// goroutines died with the prior process; without this, the rows would
+	// sit transitional indefinitely (the reconciler skips them by design).
+	// The user can recover via the Start / Rebuild endpoints.
+	if err := s.queries.ResetStaleWorkspaceTransitions(context.Background()); err != nil {
+		slog.Warn("failed to reset stale workspace transitions", "error", err)
 	}
 
 	// PublicHostname / SSHListenAddr come from config (U11). The vscode-uri
