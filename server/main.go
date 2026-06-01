@@ -204,6 +204,14 @@ func main() {
 		slog.Error("reconciler shutdown error", "error", err)
 	}
 
+	// Drain any workspace lifecycle goroutines (Start/Stop/Rebuild/Delete)
+	// the handler has in flight. Without this, a devpod CLI call kicked off
+	// just before SIGTERM would keep running past the shutdown window and
+	// could mutate a workspace after the operator reported orderly shutdown.
+	if err := srv.WaitWorkspaceActions(shutdownCtx); err != nil {
+		slog.Error("workspace actions shutdown error", "error", err)
+	}
+
 	if err := <-httpDone; err != nil {
 		slog.Error("server shutdown error", "error", err)
 	}
