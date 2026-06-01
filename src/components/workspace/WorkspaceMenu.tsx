@@ -65,7 +65,10 @@ export function WorkspaceMenu({ session }: { session: Session }) {
             <MoreVertical className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="z-60 min-w-45">
+        <DropdownMenuContent
+          align="end"
+          className="z-60 min-w-45 border-border bg-background-overlay text-foreground shadow-lg"
+        >
           <DropdownMenuItem
             onClick={() => fireAction("stop")}
             disabled={busy || pending !== null || status !== "ready"}
