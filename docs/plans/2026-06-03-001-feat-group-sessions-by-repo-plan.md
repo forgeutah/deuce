@@ -1,7 +1,7 @@
 ---
 title: "feat: Group sessions by repository instead of project"
 type: feat
-status: active
+status: completed
 date: 2026-06-03
 depth: lightweight
 origin: none (direct request)
