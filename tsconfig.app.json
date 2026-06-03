@@ -31,5 +31,9 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  /* Test specs import a runner (vitest) that isn't a project dependency yet.
+     Exclude them from the app typecheck so they stay ready-to-run without
+     breaking `tsc --noEmit`. Remove this once a test runner is wired up. */
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
 }
