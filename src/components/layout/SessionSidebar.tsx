@@ -25,7 +25,7 @@ import { useSessionStore } from "@/stores/session-store";
 import { CreateSessionDialog } from "@/components/session/CreateSessionDialog";
 import { AgentSettingsDialog } from "@/components/settings/AgentSettingsDialog";
 import { SSHKeysDialog } from "@/components/settings/SSHKeysDialog";
-import { repoGroupLabel } from "@/lib/repo";
+import { repoGroupKey, repoGroupLabel } from "@/lib/repo";
 import type { Session } from "@/types";
 
 const MAX_DESCRIPTION_LENGTH = 200;
@@ -252,32 +252,38 @@ export function SessionSidebar() {
   );
 
   // Group sessions by repository. A session references a project, and a project
-  // carries the repoUrl; sessions from projects sharing a repoUrl merge into one
-  // group. Sessions whose project is missing or has no repoUrl collapse into a
-  // single "No repository" group (keyed by the empty string) rather than being
-  // dropped. Groups are ordered by most-recent activity so active repos float up.
+  // carries the repoUrl; sessions whose projects resolve to the same repo merge
+  // into one group, keyed by a canonical host/owner/repo identity so different
+  // clone forms (HTTPS vs SSH) of one repo group together. Sessions whose
+  // project is missing or has no repoUrl collapse into a single "No repository"
+  // group (the empty key). Groups are ordered by most-recent activity so active
+  // repos float up.
   const repoUrlByProjectId = new Map(projects.map((p) => [p.id, p.repoUrl]));
 
-  const groupsByRepoUrl = new Map<string, Session[]>();
+  const groupsByRepo = new Map<
+    string,
+    { label: string; sessions: Session[]; lastActivityAt: number }
+  >();
   for (const session of filteredSessions) {
-    const repoUrl = (repoUrlByProjectId.get(session.projectId) ?? "").trim();
-    const existing = groupsByRepoUrl.get(repoUrl);
+    const repoUrl = repoUrlByProjectId.get(session.projectId) ?? "";
+    const key = repoGroupKey(repoUrl);
+    const ts = new Date(session.lastActivityAt).getTime();
+    const activity = Number.isNaN(ts) ? 0 : ts;
+    const existing = groupsByRepo.get(key);
     if (existing) {
-      existing.push(session);
+      existing.sessions.push(session);
+      existing.lastActivityAt = Math.max(existing.lastActivityAt, activity);
     } else {
-      groupsByRepoUrl.set(repoUrl, [session]);
+      groupsByRepo.set(key, {
+        label: repoGroupLabel(repoUrl),
+        sessions: [session],
+        lastActivityAt: activity,
+      });
     }
   }
 
-  const repoGroups = Array.from(groupsByRepoUrl.entries())
-    .map(([repoUrl, groupSessions]) => ({
-      repoUrl,
-      label: repoGroupLabel(repoUrl),
-      sessions: groupSessions,
-      lastActivityAt: Math.max(
-        ...groupSessions.map((s) => new Date(s.lastActivityAt).getTime()),
-      ),
-    }))
+  const repoGroups = Array.from(groupsByRepo.entries())
+    .map(([key, group]) => ({ key, ...group }))
     .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 
   return (
@@ -319,9 +325,9 @@ export function SessionSidebar() {
 
       {/* Session List */}
       <ScrollArea className="flex-1 px-2 py-2">
-        {repoGroups.map(({ repoUrl, label, sessions: groupSessions }) => (
+        {repoGroups.map(({ key, label, sessions: groupSessions }) => (
           <RepoGroup
-            key={repoUrl || "__no_repo__"}
+            key={key || "__no_repo__"}
             label={label}
             sessions={groupSessions}
             activeSessionId={activeSessionId}
