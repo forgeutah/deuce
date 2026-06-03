@@ -25,7 +25,8 @@ import { useSessionStore } from "@/stores/session-store";
 import { CreateSessionDialog } from "@/components/session/CreateSessionDialog";
 import { AgentSettingsDialog } from "@/components/settings/AgentSettingsDialog";
 import { SSHKeysDialog } from "@/components/settings/SSHKeysDialog";
-import type { Session, Project } from "@/types";
+import { repoGroupKey, repoGroupLabel } from "@/lib/repo";
+import type { Session } from "@/types";
 
 const MAX_DESCRIPTION_LENGTH = 200;
 
@@ -206,13 +207,13 @@ function SessionCard({
   );
 }
 
-function ProjectGroup({
-  project,
+function RepoGroup({
+  label,
   sessions,
   activeSessionId,
   onSelectSession,
 }: {
-  project: Project;
+  label: string;
   sessions: Session[];
   activeSessionId: string | null;
   onSelectSession: (id: string) => void;
@@ -230,7 +231,7 @@ function ProjectGroup({
         ) : (
           <ChevronRight className="h-3 w-3" />
         )}
-        {project.name}
+        {label}
       </button>
       {isOpen && (
         <div className="flex flex-col gap-0.5 pl-1">
@@ -271,10 +272,40 @@ export function SessionSidebar() {
     s.name.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
-  const sessionsByProject = projects.map((project) => ({
-    project,
-    sessions: filteredSessions.filter((s) => s.projectId === project.id),
-  }));
+  // Group sessions by repository. A session references a project, and a project
+  // carries the repoUrl; sessions whose projects resolve to the same repo merge
+  // into one group, keyed by a canonical host/owner/repo identity so different
+  // clone forms (HTTPS vs SSH) of one repo group together. Sessions whose
+  // project is missing or has no repoUrl collapse into a single "No repository"
+  // group (the empty key). Groups are ordered by most-recent activity so active
+  // repos float up.
+  const repoUrlByProjectId = new Map(projects.map((p) => [p.id, p.repoUrl]));
+
+  const groupsByRepo = new Map<
+    string,
+    { label: string; sessions: Session[]; lastActivityAt: number }
+  >();
+  for (const session of filteredSessions) {
+    const repoUrl = repoUrlByProjectId.get(session.projectId) ?? "";
+    const key = repoGroupKey(repoUrl);
+    const ts = new Date(session.lastActivityAt).getTime();
+    const activity = Number.isNaN(ts) ? 0 : ts;
+    const existing = groupsByRepo.get(key);
+    if (existing) {
+      existing.sessions.push(session);
+      existing.lastActivityAt = Math.max(existing.lastActivityAt, activity);
+    } else {
+      groupsByRepo.set(key, {
+        label: repoGroupLabel(repoUrl),
+        sessions: [session],
+        lastActivityAt: activity,
+      });
+    }
+  }
+
+  const repoGroups = Array.from(groupsByRepo.entries())
+    .map(([key, group]) => ({ key, ...group }))
+    .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 
   return (
     <div className="flex h-full flex-col">
@@ -315,18 +346,15 @@ export function SessionSidebar() {
 
       {/* Session List */}
       <ScrollArea className="flex-1 px-2 py-2">
-        {sessionsByProject.map(
-          ({ project, sessions: projectSessions }) =>
-            projectSessions.length > 0 && (
-              <ProjectGroup
-                key={project.id}
-                project={project}
-                sessions={projectSessions}
-                activeSessionId={activeSessionId}
-                onSelectSession={setActiveSession}
-              />
-            ),
-        )}
+        {repoGroups.map(({ key, label, sessions: groupSessions }) => (
+          <RepoGroup
+            key={key || "__no_repo__"}
+            label={label}
+            sessions={groupSessions}
+            activeSessionId={activeSessionId}
+            onSelectSession={setActiveSession}
+          />
+        ))}
         {filteredSessions.length === 0 && (
           <p className="px-2 py-4 text-center text-xs text-foreground-subtle">
             {searchQuery ? "No sessions match your search" : "No sessions yet"}
