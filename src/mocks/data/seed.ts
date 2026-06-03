@@ -247,7 +247,7 @@ export const sessions: Session[] = [
     unreadCount: 0,
     createdAt: daysAgo(5),
     lastActivityAt: daysAgo(2),
-    workspaceStatus: "suspended",
+    workspaceStatus: "stopped",
     planContent: "",
   },
   {
@@ -261,7 +261,7 @@ export const sessions: Session[] = [
     unreadCount: 0,
     createdAt: daysAgo(14),
     lastActivityAt: daysAgo(7),
-    workspaceStatus: "suspended",
+    workspaceStatus: "stopped",
     planContent: "",
   },
   {

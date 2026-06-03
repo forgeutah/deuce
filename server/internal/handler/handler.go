@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sync"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -35,6 +37,30 @@ type Handler struct {
 	// Nil means "always available" (legacy callers / tests that don't
 	// wire the predicate).
 	sshAvailable func() bool
+
+	// workspaceActions tracks in-flight workspace lifecycle goroutines
+	// (Start / Stop / Rebuild / Delete). main.go waits on this during
+	// shutdown so a `devpod delete` doesn't continue running after the
+	// process has reported orderly shutdown. The 10s drain window is
+	// the same one HTTP and SSH share.
+	workspaceActions sync.WaitGroup
+}
+
+// WaitWorkspaceActions blocks until every in-flight workspace lifecycle
+// goroutine completes or ctx expires. Called from main.go's shutdown drain
+// alongside httpServer.Shutdown and sshSrv.Shutdown.
+func (h *Handler) WaitWorkspaceActions(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		h.workspaceActions.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // New constructs a Handler. publicHostname is the externally-reachable

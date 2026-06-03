@@ -122,6 +122,43 @@ func (q *Queries) GetUnreadCount(ctx context.Context, arg GetUnreadCountParams) 
 	return column_1, err
 }
 
+const listNonArchivedSessions = `-- name: ListNonArchivedSessions :many
+SELECT id, name, project_id, status, workspace_status, plan_content, created_at, last_activity_at, repo_url, description FROM sessions
+WHERE status != 'archived'
+ORDER BY id
+`
+
+func (q *Queries) ListNonArchivedSessions(ctx context.Context) ([]Session, error) {
+	rows, err := q.db.Query(ctx, listNonArchivedSessions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Session{}
+	for rows.Next() {
+		var i Session
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.ProjectID,
+			&i.Status,
+			&i.WorkspaceStatus,
+			&i.PlanContent,
+			&i.CreatedAt,
+			&i.LastActivityAt,
+			&i.RepoUrl,
+			&i.Description,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessionAgents = `-- name: ListSessionAgents :many
 SELECT a.id, a.name, a.role, a.color, a.color_muted, a.provider, a.model, a.description, a.system_prompt, a.deleted_at, a.created_at, a.updated_at, sa.status as agent_status FROM agents a
 JOIN session_agents sa ON a.id = sa.agent_id
@@ -275,6 +312,17 @@ func (q *Queries) RemoveAllSessionAgents(ctx context.Context, sessionID uuid.UUI
 	return err
 }
 
+const resetStaleWorkspaceTransitions = `-- name: ResetStaleWorkspaceTransitions :exec
+UPDATE sessions
+SET workspace_status = 'failed'
+WHERE workspace_status IN ('starting', 'stopping', 'rebuilding', 'deleting')
+`
+
+func (q *Queries) ResetStaleWorkspaceTransitions(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, resetStaleWorkspaceTransitions)
+	return err
+}
+
 const updateSessionAgentStatus = `-- name: UpdateSessionAgentStatus :exec
 UPDATE session_agents SET status = $3
 WHERE session_id = $1 AND agent_id = $2
@@ -406,4 +454,24 @@ func (q *Queries) UpdateSessionWorkspaceStatus(ctx context.Context, arg UpdateSe
 		&i.Description,
 	)
 	return i, err
+}
+
+const updateSessionWorkspaceStatusIfMatches = `-- name: UpdateSessionWorkspaceStatusIfMatches :execrows
+UPDATE sessions
+SET workspace_status = $1
+WHERE id = $2 AND workspace_status = $3
+`
+
+type UpdateSessionWorkspaceStatusIfMatchesParams struct {
+	NewStatus      string    `json:"new_status"`
+	ID             uuid.UUID `json:"id"`
+	ExpectedStatus string    `json:"expected_status"`
+}
+
+func (q *Queries) UpdateSessionWorkspaceStatusIfMatches(ctx context.Context, arg UpdateSessionWorkspaceStatusIfMatchesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateSessionWorkspaceStatusIfMatches, arg.NewStatus, arg.ID, arg.ExpectedStatus)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

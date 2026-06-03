@@ -209,4 +209,29 @@ export const api = {
 
   getSessionVSCodeURI: (sessionId: string) =>
     request<{ uri: string }>(`/sessions/${sessionId}/vscode-uri`),
+
+  // Workspace lifecycle. Each endpoint flips workspace_status to a
+  // transitional value synchronously and returns the updated session; a
+  // server-side goroutine then runs devpod and writes the terminal state
+  // (broadcast over WS). The store can optimistically reflect the
+  // transitional state from the returned body.
+  startWorkspace: (sessionId: string) =>
+    request<Session>(`/sessions/${sessionId}/workspace/start`, {
+      method: "POST",
+    }),
+
+  stopWorkspace: (sessionId: string) =>
+    request<Session>(`/sessions/${sessionId}/workspace/stop`, {
+      method: "POST",
+    }),
+
+  rebuildWorkspace: (sessionId: string) =>
+    request<Session>(`/sessions/${sessionId}/workspace/rebuild`, {
+      method: "POST",
+    }),
+
+  deleteWorkspace: (sessionId: string) =>
+    request<Session>(`/sessions/${sessionId}/workspace/delete`, {
+      method: "POST",
+    }),
 };
