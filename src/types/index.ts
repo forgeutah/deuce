@@ -1,7 +1,15 @@
 export type TabType = "chat" | "plan" | "files" | "terminal";
 
 export type SessionStatus = "active" | "paused" | "archived";
-export type WorkspaceStatus = "starting" | "ready" | "failed" | "suspended";
+export type WorkspaceStatus =
+  | "starting"
+  | "ready"
+  | "stopping"
+  | "stopped"
+  | "rebuilding"
+  | "deleting"
+  | "missing"
+  | "failed";
 export type AgentStatus = "idle" | "working" | "warming-up" | "error";
 export type UserStatus = "online" | "offline";
 export type MessageStatus = "sent" | "thinking" | "error";

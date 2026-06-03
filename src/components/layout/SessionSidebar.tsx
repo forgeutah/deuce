@@ -101,12 +101,28 @@ function SessionCard({
     }
   };
 
-  const statusDot = {
+  const statusDot: Record<Session["workspaceStatus"], string> = {
     ready: "bg-success",
     starting: "bg-warning animate-pulse-dot",
+    stopping: "bg-warning animate-pulse-dot",
+    rebuilding: "bg-warning animate-pulse-dot",
+    deleting: "bg-warning animate-pulse-dot",
+    stopped: "bg-neutral-7",
+    missing: "bg-danger",
     failed: "bg-danger",
-    suspended: "bg-neutral-7",
-  }[session.workspaceStatus];
+  };
+  const statusDotClass = statusDot[session.workspaceStatus];
+  const statusLabel: Record<Session["workspaceStatus"], string> = {
+    ready: "Workspace ready",
+    starting: "Workspace starting",
+    stopping: "Workspace stopping",
+    rebuilding: "Workspace rebuilding",
+    deleting: "Workspace deleting",
+    stopped: "Workspace stopped",
+    missing: "Workspace missing",
+    failed: "Workspace failed",
+  };
+  const statusDotLabel = statusLabel[session.workspaceStatus];
 
   const descriptionColor = isActive
     ? "text-foreground-muted"
@@ -174,7 +190,12 @@ function SessionCard({
         )}
       </div>
       <div className="mt-1.5 flex shrink-0 items-center gap-1">
-        <span className={cn("h-2 w-2 shrink-0 rounded-full", statusDot)} />
+        <span
+          className={cn("h-2 w-2 shrink-0 rounded-full", statusDotClass)}
+          role="img"
+          aria-label={statusDotLabel}
+          title={statusDotLabel}
+        />
         {session.unreadCount > 0 && (
           <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-medium text-foreground-on-emphasis">
             {session.unreadCount}

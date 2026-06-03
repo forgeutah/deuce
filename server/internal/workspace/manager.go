@@ -31,16 +31,37 @@ var validContainerName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,254}$`
 // LogFunc receives each line of output from a DevPod command.
 type LogFunc func(line string)
 
+// commandRunner is the seam BulkContainerStatus uses to invoke `docker ps`.
+// Production wires it to exec.CommandContext + CombinedOutput; tests swap in
+// a fake so they don't shell out. Mirrors the per-instance hook pattern at
+// sshproxy.Server.resolveContainerHook.
+type commandRunner func(ctx context.Context, name string, args ...string) ([]byte, error)
+
+func defaultCommandRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+}
+
+// ContainerState is the running/stopped distinction the reconciler needs.
+// Containers that don't appear in `docker ps -a` are absent and not part of
+// the returned map — callers detect absence by missing-key lookup.
+type ContainerState string
+
+const (
+	ContainerRunning ContainerState = "running"
+	ContainerStopped ContainerState = "stopped"
+)
+
 type Manager struct {
 	bin      string
 	provider string
+	runner   commandRunner
 }
 
 func NewManager(bin, provider string) *Manager {
 	if bin == "" {
 		bin = "devpod"
 	}
-	return &Manager{bin: bin, provider: provider}
+	return &Manager{bin: bin, provider: provider, runner: defaultCommandRunner}
 }
 
 // Available checks if the devpod binary is installed and accessible.
@@ -242,6 +263,70 @@ func (m *Manager) ContainerName(ctx context.Context, workspaceID string) (string
 	}
 
 	return name, nil
+}
+
+// WorkspaceUID exposes the DevPod uid for workspaceID to callers outside
+// this package (specifically the reconciler, which cross-references uids
+// against `docker ps` output). The exists return distinguishes "no on-disk
+// state" — meaning DevPod has no record of this workspace — from genuine
+// read/parse errors. Tests that need to fake this should mock the
+// reconciler's workspaceUIDReader interface, not this method.
+func (m *Manager) WorkspaceUID(workspaceID string) (uid string, exists bool, err error) {
+	uid, err = readWorkspaceUID(workspaceID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return uid, true, nil
+}
+
+// BulkContainerStatus runs a single `docker ps -a` to collect the state of
+// every DevPod-managed container on the host, keyed by the `dev.containers.id`
+// label value. The reconciler maps each session's workspace uid (from
+// WorkspaceUID) into this map to derive truth state.
+//
+// Containers not in the returned map are absent from docker entirely. The
+// reconciler treats absent + on-disk-metadata as `stopped` (devpod knows
+// about it, will restart on `up`) and absent + no-metadata as `missing`.
+//
+// Errors from docker are returned to the caller without partial-result
+// fallback — the reconciler must skip the tick on docker daemon failures
+// (per R6 in the brainstorm) rather than mass-flip rows to `missing`.
+func (m *Manager) BulkContainerStatus(ctx context.Context) (map[string]ContainerState, error) {
+	output, err := m.runner(ctx, "docker", "ps", "-a",
+		"--filter", "label=dev.containers.id",
+		"--format", `{{.Label "dev.containers.id"}}	{{.State}}`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("docker ps failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	result := make(map[string]ContainerState)
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		uid, state, ok := strings.Cut(line, "\t")
+		if !ok || uid == "" {
+			slog.Warn("docker ps returned malformed line, skipping", "line", line)
+			continue
+		}
+		if _, dup := result[uid]; dup {
+			slog.Warn("multiple containers share dev.containers.id label, keeping last", "uid", uid)
+		}
+		// Docker's State field is one of: created, restarting, running, removing, paused, exited, dead.
+		// Anything not "running" is collapsed to ContainerStopped — the reconciler only needs the
+		// running/not-running distinction at the application layer.
+		if state == "running" {
+			result[uid] = ContainerRunning
+		} else {
+			result[uid] = ContainerStopped
+		}
+	}
+	return result, nil
 }
 
 // readWorkspaceUID returns the DevPod-assigned uid for workspaceID by

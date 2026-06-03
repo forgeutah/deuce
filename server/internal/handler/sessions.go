@@ -195,8 +195,24 @@ func (h *Handler) CreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// session.Name flows directly into `devpod up --id <name>`, `devpod stop`,
+	// and `devpod delete` argv slots. Validate at the boundary so unsafe IDs
+	// can't reach the CLI later via the workspace lifecycle endpoints.
+	if err := validateWorkspaceID(req.Name); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_NAME", err.Error())
+		return
+	}
+
 	if len(req.Description) > maxSessionDescriptionLength {
 		writeError(w, http.StatusBadRequest, "DESCRIPTION_TOO_LONG", "description exceeds maximum length")
+		return
+	}
+
+	// repoURL flows into `devpod up <repoURL>` and is re-executed on every
+	// Start and Rebuild. Reject file://, embedded credentials, and other
+	// schemes here so the persisted value is always safe to re-execute.
+	if err := validateRepoURL(req.RepoURL); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_REPO_URL", err.Error())
 		return
 	}
 

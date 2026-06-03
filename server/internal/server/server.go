@@ -29,6 +29,10 @@ type Server struct {
 	hub          *ws.Hub
 	version      string
 	sshAvailable func() bool
+
+	// handler is captured at Router() time so main.go can drain the
+	// handler's tracked workspace-action goroutines during shutdown.
+	handler *handler.Handler
 }
 
 // New constructs a Server. version is the build-injected version string
@@ -50,6 +54,26 @@ func New(pool *pgxpool.Pool, cfg *config.Config, version string) *Server {
 // (e.g., tests that don't care).
 func (s *Server) SetSSHAvailable(predicate func() bool) {
 	s.sshAvailable = predicate
+}
+
+// Hub returns the shared WebSocket hub. main.go uses it to construct the
+// reconciler before Router() starts the hub goroutine. Safe to call before
+// Router() — Hub itself is created in New() and BroadcastToSession only
+// writes to subscriber channels (no dependency on Run()).
+func (s *Server) Hub() *ws.Hub {
+	return s.hub
+}
+
+// WaitWorkspaceActions blocks until in-flight workspace lifecycle goroutines
+// complete or ctx expires. main.go calls this in the shutdown drain so a
+// `devpod delete` triggered just before SIGTERM doesn't continue running
+// after the process reported orderly shutdown. Safe before Router() runs —
+// returns nil immediately when no handler is yet attached.
+func (s *Server) WaitWorkspaceActions(ctx context.Context) error {
+	if s.handler == nil {
+		return nil
+	}
+	return s.handler.WaitWorkspaceActions(ctx)
 }
 
 func (s *Server) Router() http.Handler {
@@ -98,6 +122,15 @@ func (s *Server) Router() http.Handler {
 		slog.Warn("failed to reset stale agent statuses", "error", err)
 	}
 
+	// Startup recovery: flip any workspace_status sitting in a transitional
+	// state (starting/stopping/rebuilding/deleting) to `failed`. Their owning
+	// goroutines died with the prior process; without this, the rows would
+	// sit transitional indefinitely (the reconciler skips them by design).
+	// The user can recover via the Start / Rebuild endpoints.
+	if err := s.queries.ResetStaleWorkspaceTransitions(context.Background()); err != nil {
+		slog.Warn("failed to reset stale workspace transitions", "error", err)
+	}
+
 	// PublicHostname / SSHListenAddr come from config (U11). The vscode-uri
 	// endpoint falls back to r.Host when PublicHostname is empty (dev mode);
 	// proxy mode requires it via config.Validate.
@@ -105,6 +138,7 @@ func (s *Server) Router() http.Handler {
 	if s.sshAvailable != nil {
 		h.SetSSHAvailable(s.sshAvailable)
 	}
+	s.handler = h
 
 	go s.hub.Run()
 
@@ -142,6 +176,12 @@ func (s *Server) Router() http.Handler {
 				r.Get("/vscode-uri", h.GetSessionVSCodeURI)
 				r.Put("/agents", h.UpdateSessionAgents)
 				r.Post("/agents/stop", h.StopAgent)
+				r.Route("/workspace", func(r chi.Router) {
+					r.Post("/start", h.StartWorkspace)
+					r.Post("/stop", h.StopWorkspace)
+					r.Post("/rebuild", h.RebuildWorkspace)
+					r.Post("/delete", h.DeleteWorkspace)
+				})
 			})
 		})
 	})

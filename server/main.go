@@ -19,6 +19,7 @@ import (
 
 	"github.com/forgeutah/deuce/server/internal/config"
 	"github.com/forgeutah/deuce/server/internal/db"
+	"github.com/forgeutah/deuce/server/internal/reconcile"
 	"github.com/forgeutah/deuce/server/internal/server"
 	"github.com/forgeutah/deuce/server/internal/sshproxy"
 	"github.com/forgeutah/deuce/server/internal/workspace"
@@ -116,6 +117,15 @@ func main() {
 	}
 	srv.SetSSHAvailable(sshUp.Load)
 
+	// Workspace-state reconciler: a single goroutine that polls `docker ps`
+	// every 10s and writes truth into sessions.workspace_status when reality
+	// drifts. Shares the same shutdown context as HTTP and SSH so SIGTERM
+	// drains all three together. Docker-provider-only by design — the
+	// BulkContainerStatus method assumes the docker DevPod provider.
+	reconWM := workspace.NewManager(cfg.DevPodBin, cfg.DevPodProvider)
+	reconciler := reconcile.New(db.New(pool), srv.Hub(), reconWM, reconWM, 10*time.Second)
+	go reconciler.Run(ctx)
+
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	httpServer := &http.Server{
 		Addr:              addr,
@@ -188,6 +198,18 @@ func main() {
 		if err := sshSrv.Shutdown(shutdownCtx); err != nil {
 			slog.Error("ssh shutdown error", "error", err)
 		}
+	}
+
+	if err := reconciler.Shutdown(shutdownCtx); err != nil {
+		slog.Error("reconciler shutdown error", "error", err)
+	}
+
+	// Drain any workspace lifecycle goroutines (Start/Stop/Rebuild/Delete)
+	// the handler has in flight. Without this, a devpod CLI call kicked off
+	// just before SIGTERM would keep running past the shutdown window and
+	// could mutate a workspace after the operator reported orderly shutdown.
+	if err := srv.WaitWorkspaceActions(shutdownCtx); err != nil {
+		slog.Error("workspace actions shutdown error", "error", err)
 	}
 
 	if err := <-httpDone; err != nil {

@@ -1,5 +1,5 @@
 import { MessageSquare, FileText, FolderTree, Terminal, ScrollText, Code, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useSessionStore } from "@/stores/session-store";
 import { ChatView } from "@/components/chat/ChatView";
@@ -8,15 +8,38 @@ import { FilesView } from "@/components/files/FilesView";
 import { TerminalView } from "@/components/terminal/TerminalView";
 import { LogsView } from "@/components/logs/LogsView";
 import { SSHKeySetupModal } from "@/components/session/SSHKeySetupModal";
+import { RecoveryCard } from "@/components/workspace/RecoveryCard";
+import { WorkspaceMenu } from "@/components/workspace/WorkspaceMenu";
 import { api, ApiError } from "@/lib/api";
-import type { TabType } from "@/types";
+import type { TabType, WorkspaceStatus } from "@/types";
 
-const tabs: { id: TabType; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { id: "chat", label: "Chat", icon: MessageSquare },
-  { id: "plan", label: "Plan", icon: FileText },
-  { id: "files", label: "Files", icon: FolderTree },
-  { id: "terminal", label: "Terminal", icon: Terminal },
+type Tab = {
+  id: TabType;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  // requiresLiveWorkspace=true tabs fade and become unclickable when the
+  // workspace isn't ready/starting. Plan is DB-backed (planContent on the
+  // session row) so it stays interactive regardless of container state.
+  requiresLiveWorkspace: boolean;
+};
+
+const tabs: Tab[] = [
+  // Chat is always available — message history lives in Postgres, not the
+  // container, so users can browse and read chat even when the workspace is
+  // off. ChatView surfaces an inline Start/Rebuild banner when not live and
+  // disables the composer.
+  { id: "chat", label: "Chat", icon: MessageSquare, requiresLiveWorkspace: false },
+  { id: "plan", label: "Plan", icon: FileText, requiresLiveWorkspace: false },
+  // Files and Terminal genuinely need a running container — they shell into
+  // the devpod over SSH/websocket. The parent renders RecoveryCard in their
+  // place when not live.
+  { id: "files", label: "Files", icon: FolderTree, requiresLiveWorkspace: true },
+  { id: "terminal", label: "Terminal", icon: Terminal, requiresLiveWorkspace: true },
 ];
+
+function isWorkspaceLive(status: WorkspaceStatus | undefined): boolean {
+  return status === "ready" || status === "starting";
+}
 
 function EmptyState() {
   return (
@@ -48,15 +71,39 @@ export function CenterPanel() {
   const [sshKeyModalOpen, setSshKeyModalOpen] = useState(false);
   const [vscodeError, setVscodeError] = useState<string | null>(null);
 
+  const activeSession = activeSessionId
+    ? sessions.find((s) => s.id === activeSessionId)
+    : undefined;
+  const activeTab = activeSessionId
+    ? activeTabMap[activeSessionId] ?? "chat"
+    : "chat";
+  const workspaceStatus = activeSession?.workspaceStatus;
+  const live = isWorkspaceLive(workspaceStatus);
+
+  // When the workspace is not live, force-switch the active tab away from one
+  // that requires the live workspace, so the user doesn't land in a
+  // workspace-required tab and find the recovery card with the wrong tab
+  // visually selected. Plan is always safe. Effect must run unconditionally
+  // (hooks rule); the guard inside handles the null-session case.
+  useEffect(() => {
+    if (!activeSessionId || live) return;
+    const currentTab = tabs.find((t) => t.id === activeTab);
+    if (currentTab?.requiresLiveWorkspace) {
+      setActiveTab(activeSessionId, "plan");
+    }
+  }, [activeSessionId, activeTab, live, setActiveTab]);
+
   if (!activeSessionId) {
     return <EmptyState />;
   }
 
-  const activeSession = sessions.find((s) => s.id === activeSessionId);
-  const activeTab = activeTabMap[activeSessionId] ?? "chat";
   const hasLogs = (workspaceLogs[activeSessionId]?.length ?? 0) > 0;
-  const isBuilding = activeSession?.workspaceStatus === "starting";
-  const workspaceReady = activeSession?.workspaceStatus === "ready";
+  const isBuilding =
+    workspaceStatus === "starting" ||
+    workspaceStatus === "stopping" ||
+    workspaceStatus === "rebuilding" ||
+    workspaceStatus === "deleting";
+  const workspaceReady = workspaceStatus === "ready";
   const showVSCodeButton = !isMobileUA();
 
   async function handleOpenInVSCode() {
@@ -105,11 +152,16 @@ export function CenterPanel() {
               </span>
             )}
           </div>
-          {activeSession.description && (
-            <span className="truncate text-xs text-foreground-muted">
-              {activeSession.description}
-            </span>
-          )}
+          <div className="flex items-center justify-between">
+            {activeSession.description && (
+              <span className="truncate text-xs text-foreground-muted">
+                {activeSession.description}
+              </span>
+            )}
+            <div className="ml-auto shrink-0">
+              <WorkspaceMenu session={activeSession} />
+            </div>
+          </div>
         </div>
       )}
 
@@ -118,18 +170,28 @@ export function CenterPanel() {
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id && !showLogs;
+          const tabDisabled = tab.requiresLiveWorkspace && !live;
+          const disabledTitle = tabDisabled
+            ? workspaceStatus
+              ? `Workspace is ${workspaceStatus} — start or rebuild to use this tab`
+              : "Workspace not ready"
+            : undefined;
           return (
             <button
               key={tab.id}
               onClick={() => {
+                if (tabDisabled) return;
                 setActiveTab(activeSessionId, tab.id);
                 setShowLogs(false);
               }}
+              aria-disabled={tabDisabled || undefined}
+              title={disabledTitle}
               className={cn(
                 "flex items-center gap-1.5 border-b-2 px-4 py-2 text-sm transition-colors",
                 isActive
                   ? "border-accent text-foreground-emphasis"
                   : "border-transparent text-foreground-muted hover:text-foreground",
+                tabDisabled && "cursor-not-allowed opacity-50 hover:text-foreground-muted",
               )}
             >
               <Icon className="h-4 w-4" />
@@ -191,10 +253,17 @@ export function CenterPanel() {
           <LogsView />
         ) : (
           <>
-            {activeTab === "chat" && <ChatView />}
             {activeTab === "plan" && <PlanView />}
-            {activeTab === "files" && <FilesView key={activeSessionId} />}
-            {activeTab === "terminal" && <TerminalView />}
+            {/* Chat is always rendered — it shows its own inline banner +
+                Start/Rebuild affordance when the workspace isn't live, and
+                lets the user browse history regardless. */}
+            {activeTab === "chat" && <ChatView />}
+            {/* Files and Terminal swap to the recovery card when the
+                container isn't running — they can't function without it. */}
+            {activeTab === "files" &&
+              (live ? <FilesView key={activeSessionId} /> : activeSession && <RecoveryCard session={activeSession} />)}
+            {activeTab === "terminal" &&
+              (live ? <TerminalView /> : activeSession && <RecoveryCard session={activeSession} />)}
           </>
         )}
       </div>
