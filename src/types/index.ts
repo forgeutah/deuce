@@ -132,3 +132,78 @@ export interface SSHKey {
   createdAt: string;
   lastUsedAt: string | null;
 }
+
+// --- Super Threads: agent tasks, actions, and the AgentRunEvent stream ---
+
+export type TaskState =
+  | "queued"
+  | "running"
+  | "awaiting_input"
+  | "done"
+  | "failed"
+  | "cancelled";
+
+export type ActionStatus = "started" | "completed" | "error" | "interrupted";
+
+// AgentAction is one tool call within a task's action log, correlated by callId.
+export interface AgentAction {
+  callId: string;
+  seq: number;
+  tool: string; // Read | Grep | Edit | Write | Bash | Think | ...
+  arg?: string;
+  text?: string;
+  stat?: string;
+  status: ActionStatus;
+  isError?: boolean;
+}
+
+// AgentTask is one @mention-spawned agent run, anchored to a channel message.
+export interface AgentTask {
+  id: string;
+  sessionId: string;
+  agentId: string;
+  requestedBy?: string;
+  anchorMessageId?: string;
+  prompt: string;
+  state: TaskState;
+  seq: number;
+  position?: number; // queue #N while queued
+  pendingQuestion?: string;
+  reply?: string;
+  actions: AgentAction[];
+}
+
+// AgentRunEvent payloads mirror Go ws.TaskEventPayload / ws.ActionEventPayload.
+// The reducer applies them by seq; a gap triggers a snapshot refetch.
+export interface TaskEventPayload {
+  seq: number;
+  taskId: string;
+  agentId: string;
+  requestedBy?: string;
+  anchorMessageId?: string;
+  prompt?: string;
+  state?: TaskState;
+  position?: number;
+  pendingQuestion?: string;
+  reply?: string;
+  status?: "done" | "failed" | "cancelled";
+}
+
+export interface ActionEventPayload {
+  seq: number;
+  taskId: string;
+  agentId: string;
+  callId: string;
+  tool?: string;
+  arg?: string;
+  text?: string;
+  stat?: string;
+  isError?: boolean;
+}
+
+// Snapshot returned by GET /sessions/:id/agent-runs (R9): current task+action
+// state plus the latest seq the client should resume strictly after.
+export interface AgentRunSnapshot {
+  tasks: AgentTask[];
+  latestSeq: number;
+}

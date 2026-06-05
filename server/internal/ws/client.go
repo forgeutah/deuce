@@ -30,6 +30,21 @@ type Client struct {
 	OnJoin     func(client *Client, sessionID string)
 	OnLeave    func(client *Client, sessionID string)
 	OnMarkRead func(client *Client, sessionID string)
+
+	// Authorize gates access to a session for join (heavy event subscription)
+	// and steer (feeding a live agent run). Set by the handler layer to a
+	// session-membership check (KTD14). When nil, access is allowed — production
+	// wiring MUST set it; an unset gate is a misconfiguration, not a default.
+	Authorize func(userID, sessionID string) bool
+	// OnSteer routes a steer reply for (sessionID, agentID); set by the handler.
+	OnSteer func(client *Client, sessionID, agentID, message string)
+}
+
+func (c *Client) authorized(sessionID string) bool {
+	if c.Authorize == nil {
+		return true
+	}
+	return c.Authorize(c.UserID, sessionID)
 }
 
 func NewClient(hub *Hub, conn *websocket.Conn, userID string) *Client {
@@ -64,6 +79,13 @@ func (c *Client) ReadPump(ctx context.Context) {
 
 		switch msg.Type {
 		case TypeJoin:
+			// Gate the heavy-event subscription on session membership (KTD14):
+			// without this, any authenticated user could join an arbitrary
+			// session and receive its AgentRunEvent stream.
+			if !c.authorized(msg.SessionID) {
+				slog.Warn("rejected join: not a session member", "userID", c.UserID, "sessionID", msg.SessionID)
+				continue
+			}
 			c.hub.Subscribe(c, msg.SessionID)
 			if c.OnJoin != nil {
 				c.OnJoin(c, msg.SessionID)
@@ -76,6 +98,18 @@ func (c *Client) ReadPump(ctx context.Context) {
 		case TypeMarkRead:
 			if c.OnMarkRead != nil {
 				c.OnMarkRead(c, msg.SessionID)
+			}
+		case TypeSteer:
+			if !c.authorized(msg.SessionID) {
+				slog.Warn("rejected steer: not a session member", "userID", c.UserID, "sessionID", msg.SessionID)
+				continue
+			}
+			text := msg.Message
+			if len(text) > MaxSteerLen {
+				text = text[:MaxSteerLen]
+			}
+			if c.OnSteer != nil {
+				c.OnSteer(c, msg.SessionID, msg.AgentID, text)
 			}
 		default:
 			slog.Warn("unknown message type", "type", msg.Type, "userID", c.UserID)
