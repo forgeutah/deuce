@@ -17,15 +17,15 @@ INSERT INTO session_event_seq (session_id, next_seq)
 VALUES ($1, 2)
 ON CONFLICT (session_id)
 DO UPDATE SET next_seq = session_event_seq.next_seq + 1
-RETURNING next_seq - 1 AS seq
+RETURNING (next_seq - 1)::bigint AS seq
 `
 
 // Allocate the next per-session event seq, creating the counter row on first
 // use. Returns the allocated value; the stored next_seq is left pointing at the
 // following value. Run inside the same tx as the state write it stamps (KTD6).
-func (q *Queries) AllocateEventSeq(ctx context.Context, sessionID uuid.UUID) (int32, error) {
+func (q *Queries) AllocateEventSeq(ctx context.Context, sessionID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, allocateEventSeq, sessionID)
-	var seq int32
+	var seq int64
 	err := row.Scan(&seq)
 	return seq, err
 }

@@ -6,7 +6,7 @@ INSERT INTO session_event_seq (session_id, next_seq)
 VALUES ($1, 2)
 ON CONFLICT (session_id)
 DO UPDATE SET next_seq = session_event_seq.next_seq + 1
-RETURNING next_seq - 1 AS seq;
+RETURNING (next_seq - 1)::bigint AS seq;
 
 -- name: PeekEventSeq :one
 -- Highest allocated seq for a session (next_seq - 1), or 0 if none. Used as the
