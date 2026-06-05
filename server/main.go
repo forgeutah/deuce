@@ -204,6 +204,10 @@ func main() {
 		slog.Error("reconciler shutdown error", "error", err)
 	}
 
+	// Stop the Pi runtime + supervisor (no-op in legacy claude mode), tearing
+	// down in-container agent processes within the shared drain window.
+	srv.ShutdownAgents(shutdownCtx)
+
 	// Drain any workspace lifecycle goroutines (Start/Stop/Rebuild/Delete)
 	// the handler has in flight. Without this, a devpod CLI call kicked off
 	// just before SIGTERM would keep running past the shutdown window and

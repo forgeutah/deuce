@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/forgeutah/deuce/server/internal/agent"
+	"github.com/forgeutah/deuce/server/internal/agent/pirun"
 	"github.com/forgeutah/deuce/server/internal/auth"
 	"github.com/forgeutah/deuce/server/internal/config"
 	db "github.com/forgeutah/deuce/server/internal/db"
@@ -33,6 +35,22 @@ type Server struct {
 	// handler is captured at Router() time so main.go can drain the
 	// handler's tracked workspace-action goroutines during shutdown.
 	handler *handler.Handler
+
+	// piRuntime / piSupervisor are set when the Pi harness is active
+	// (DEUCE_AGENT_HARNESS=pi); main.go drains them via ShutdownAgents.
+	piRuntime    *agent.Runtime
+	piSupervisor *pirun.Supervisor
+}
+
+// ShutdownAgents stops the Pi runtime and supervisor (no-op in legacy mode).
+// Called from main.go's shutdown drain.
+func (s *Server) ShutdownAgents(ctx context.Context) {
+	if s.piRuntime != nil {
+		s.piRuntime.Shutdown()
+	}
+	if s.piSupervisor != nil {
+		_ = s.piSupervisor.Shutdown(ctx)
+	}
 }
 
 // New constructs a Server. version is the build-injected version string
@@ -137,6 +155,27 @@ func (s *Server) Router() http.Handler {
 	h := handler.New(s.queries, s.pool, s.hub, s.cfg.GitHubToken, wm, tm, exec, aq, s.cfg.WSAllowedOriginList(), s.cfg.PublicHostname, s.cfg.SSHListenAddr)
 	if s.sshAvailable != nil {
 		h.SetSSHAvailable(s.sshAvailable)
+	}
+
+	// Agent harness selection (KTD11). Default "pi": run boot recovery to
+	// completion BEFORE the runtime starts accepting work (KTD10 happens-before),
+	// then wire the runtime into the handler. Legacy "claude" keeps the executor.
+	if s.cfg.AgentHarness == "pi" {
+		if err := handler.RecoverStuckTasks(context.Background(), s.queries); err != nil {
+			// Abort boot: serving with crash-stuck tasks would report them live
+			// in snapshots forever (KTD10 retry-then-abort).
+			panic(fmt.Sprintf("pi harness boot recovery failed: %v", err))
+		}
+		launcher := pirun.NewDevpodLauncher(wm, s.cfg.PiProvider, s.cfg.PiModel)
+		sup := pirun.NewSupervisor(launcher, s.cfg.AnthropicAPIKey)
+		rt := agent.NewRuntime(agent.NewDBStore(s.pool, s.queries), sup, s.hub)
+		rt.Start()
+		h.SetRuntime(rt)
+		s.piSupervisor = sup
+		s.piRuntime = rt
+		slog.Info("agent harness: pi")
+	} else {
+		slog.Info("agent harness: claude (legacy)")
 	}
 	s.handler = h
 

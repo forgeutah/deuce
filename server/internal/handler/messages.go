@@ -171,16 +171,19 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Handle /stop command
 	if strings.TrimSpace(req.Content) == "/stop" || strings.HasSuffix(strings.TrimSpace(req.Content), " stop") {
-		if h.agentQueue != nil {
+		if h.runtime != nil {
+			h.runtime.CancelSession(r.Context(), sessionID.String())
+		} else if h.agentQueue != nil {
 			h.agentQueue.Cancel(sessionID.String())
 		}
 		writeJSON(w, http.StatusCreated, resp)
 		return
 	}
 
-	// Process agent mentions via the execution queue
-	if len(req.Mentions) > 0 && h.agentQueue != nil && h.executor != nil {
-		// Check workspace status first
+	// Process agent mentions: route through the Pi runtime when enabled,
+	// otherwise the legacy executor queue (DEUCE_AGENT_HARNESS, KTD11).
+	agentsEnabled := h.runtime != nil || (h.agentQueue != nil && h.executor != nil)
+	if len(req.Mentions) > 0 && agentsEnabled {
 		session, err := h.queries.GetSession(r.Context(), sessionID)
 		if err == nil {
 			switch session.WorkspaceStatus {
@@ -199,6 +202,21 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 						continue
 					}
 
+					if h.runtime != nil {
+						if _, err := h.runtime.Enqueue(r.Context(), agentpkg.EnqueueParams{
+							SessionID:       sessionID.String(),
+							AgentID:         agentID.String(),
+							RequestedBy:     userID.String(),
+							AnchorMessageID: msg.ID.String(),
+							Prompt:          req.Content,
+							WorkspaceID:     session.Name,
+						}); err != nil {
+							slog.Error("failed to enqueue agent task", "error", err)
+							h.postSystemMessage(sessionID, "Could not start the agent. Please try again.")
+						}
+						continue
+					}
+
 					task := agentpkg.Task{
 						SessionID: sessionID.String(),
 						AgentID:   agentID.String(),
@@ -206,7 +224,6 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 						Prompt:    req.Content,
 						Callback:  func(t agentpkg.Task) { h.executeAgent(t, session.Name) },
 					}
-
 					if err := h.agentQueue.Enqueue(task); err != nil {
 						h.postSystemMessage(sessionID, "Agent queue is full. Please wait for current work to complete.")
 					}

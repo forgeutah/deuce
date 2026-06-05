@@ -368,6 +368,21 @@ func (r *Runtime) terminalLocked(ctx context.Context, key pirun.Key, taskID, sta
 	r.promoteLocked(ctx, key)
 }
 
+// CancelSession cancels every running task in a session (agent-less /stop, R21).
+func (r *Runtime) CancelSession(ctx context.Context, sessionID string) {
+	r.mu.Lock()
+	var keys []pirun.Key
+	for k := range r.running {
+		if k.SessionID == sessionID {
+			keys = append(keys, k)
+		}
+	}
+	r.mu.Unlock()
+	for _, k := range keys {
+		r.Cancel(ctx, k)
+	}
+}
+
 // Cancel cancels the running task for a key (/stop targeting an agent, R21).
 func (r *Runtime) Cancel(ctx context.Context, key pirun.Key) {
 	unlock := r.keys.lock(key)

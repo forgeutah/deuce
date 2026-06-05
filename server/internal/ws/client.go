@@ -165,7 +165,7 @@ func marshalJSON(v any) ([]byte, error) {
 // cross-origin browser upgrades are denied. Callers that want a real
 // allow-list must configure at least one pattern — config.Validate refuses
 // to start the server in forge-proxy mode with an empty list.
-func ServeWS(hub *Hub, w http.ResponseWriter, r *http.Request, userID string, originPatterns []string) {
+func ServeWS(hub *Hub, w http.ResponseWriter, r *http.Request, userID string, originPatterns []string, configure func(*Client)) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		OriginPatterns: originPatterns,
 	})
@@ -175,6 +175,11 @@ func ServeWS(hub *Hub, w http.ResponseWriter, r *http.Request, userID string, or
 	}
 
 	client := NewClient(hub, conn, userID)
+	// Wire per-connection callbacks (membership gate, steer routing, mark-read)
+	// before the client is registered so no event races an unconfigured client.
+	if configure != nil {
+		configure(client)
+	}
 	hub.register <- client
 
 	ctx := r.Context()

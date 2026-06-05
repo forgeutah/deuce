@@ -42,6 +42,14 @@ type Config struct {
 	DevPodProvider  string `env:"DEVPOD_PROVIDER" envDefault:"docker"`
 	AnthropicAPIKey string `env:"ANTHROPIC_API_KEY" envDefault:""`
 
+	// AgentHarness selects the agent backend: "pi" (default, Pi RPC) or
+	// "claude" (the legacy claude -p executor, kept one release as an emergency
+	// rollback — KTD11). PiProvider/PiModel configure the Pi backend; v1 runs
+	// Claude models through Pi.
+	AgentHarness string `env:"DEUCE_AGENT_HARNESS" envDefault:"pi"`
+	PiProvider   string `env:"DEUCE_PI_PROVIDER" envDefault:"anthropic"`
+	PiModel      string `env:"DEUCE_PI_MODEL" envDefault:"claude-haiku-4-5"`
+
 	AuthMode string `env:"DEUCE_AUTH_MODE" envDefault:"dev"`
 
 	// Unified proxy-mode configuration. No defaults — operators wire each
@@ -65,12 +73,12 @@ type Config struct {
 	// entirely; HTTP keeps serving and /api/sessions/:id/vscode-uri
 	// returns 503 SSH_UNAVAILABLE. The host key is generated on first
 	// boot if missing; persist the directory across deploys.
-	SSHListenAddr     string `env:"DEUCE_SSH_LISTEN_ADDR" envDefault:":2222"`
-	SSHHostKeyPath    string `env:"DEUCE_SSH_HOST_KEY_PATH" envDefault:""`
-	SSHHandshakeTimeoutSec int `env:"DEUCE_SSH_HANDSHAKE_TIMEOUT_SEC" envDefault:"10"`
-	SSHMaxHandshakesPerIP  int `env:"DEUCE_SSH_MAX_HANDSHAKES_PER_IP" envDefault:"8"`
-	SSHMaxChannelsPerConn  int `env:"DEUCE_SSH_MAX_CHANNELS_PER_CONN" envDefault:"8"`
-	SSHGoroutineCap        int `env:"DEUCE_SSH_GOROUTINE_CAP" envDefault:"4000"`
+	SSHListenAddr          string `env:"DEUCE_SSH_LISTEN_ADDR" envDefault:":2222"`
+	SSHHostKeyPath         string `env:"DEUCE_SSH_HOST_KEY_PATH" envDefault:""`
+	SSHHandshakeTimeoutSec int    `env:"DEUCE_SSH_HANDSHAKE_TIMEOUT_SEC" envDefault:"10"`
+	SSHMaxHandshakesPerIP  int    `env:"DEUCE_SSH_MAX_HANDSHAKES_PER_IP" envDefault:"8"`
+	SSHMaxChannelsPerConn  int    `env:"DEUCE_SSH_MAX_CHANNELS_PER_CONN" envDefault:"8"`
+	SSHGoroutineCap        int    `env:"DEUCE_SSH_GOROUTINE_CAP" envDefault:"4000"`
 
 	// PublicHostname is the externally-reachable hostname embedded in
 	// the vscode:// URI returned by /api/sessions/:id/vscode-uri.
