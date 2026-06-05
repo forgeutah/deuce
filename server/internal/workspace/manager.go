@@ -433,3 +433,71 @@ func (m *Manager) InstallTools(ctx context.Context, workspaceID string, logFn Lo
 	slog.Info("claude code installed successfully", "workspace", workspaceID)
 	return nil
 }
+
+// InstallPi installs the Pi coding agent (pi.dev) inside the DevPod workspace
+// using its standalone installer (https://pi.dev/install.sh) — a single
+// curl-piped script, no Node/npm required, mirroring InstallTools. Pi is the
+// agent harness in Topology A; the supervisor launches it as `pi --mode rpc`.
+// Output is streamed line-by-line to logFn (if non-nil). Non-fatal: a workspace
+// without Pi is still usable, just without agent support (surfaced to the
+// session per R3 rather than failing the workspace).
+func (m *Manager) InstallPi(ctx context.Context, workspaceID string, logFn LogFunc) error {
+	if logFn != nil {
+		logFn("Checking for Pi installation...")
+	}
+
+	// Already installed?
+	checkCmd := m.ExecInWorkspace(ctx, workspaceID, ClaudePathPrefix+"pi --version")
+	if output, err := checkCmd.CombinedOutput(); err == nil {
+		version := strings.TrimSpace(string(output))
+		slog.Info("pi already installed", "workspace", workspaceID, "version", version)
+		if logFn != nil {
+			logFn(fmt.Sprintf("Pi already installed: %s", version))
+		}
+		return nil
+	}
+
+	if logFn != nil {
+		logFn("Installing Pi...")
+	}
+	slog.Info("installing pi in workspace", "workspace", workspaceID)
+
+	installCmd := m.ExecInWorkspace(ctx, workspaceID, "curl -fsSL https://pi.dev/install.sh | sh")
+	stdout, err := installCmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("stdout pipe: %w", err)
+	}
+	installCmd.Stderr = installCmd.Stdout
+
+	if err := installCmd.Start(); err != nil {
+		if logFn != nil {
+			logFn("WARNING: Failed to install Pi (curl may not be available in this devcontainer)")
+		}
+		slog.Warn("failed to start pi install", "workspace", workspaceID, "error", err)
+		return nil // Non-fatal
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		slog.Debug("pi install output", "workspace", workspaceID, "line", line)
+		if logFn != nil {
+			logFn(line)
+		}
+	}
+
+	if err := installCmd.Wait(); err != nil {
+		if logFn != nil {
+			logFn("WARNING: Pi installation failed — agents will not be available")
+		}
+		slog.Warn("pi install failed", "workspace", workspaceID, "error", err)
+		return nil // Non-fatal
+	}
+
+	if logFn != nil {
+		logFn("Pi installed successfully")
+	}
+	slog.Info("pi installed successfully", "workspace", workspaceID)
+	return nil
+}
