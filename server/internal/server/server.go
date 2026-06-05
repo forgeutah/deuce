@@ -171,6 +171,7 @@ func (s *Server) Router() http.Handler {
 				r.Get("/messages", h.ListMessages)
 				r.Post("/messages", h.SendMessage)
 				r.Get("/activities", h.ListActivities)
+				r.Get("/agent-runs", h.AgentRunsSnapshot)
 				r.Get("/files", h.ListFiles)
 				r.Get("/files/content", h.GetFileContent)
 				r.Get("/vscode-uri", h.GetSessionVSCodeURI)
