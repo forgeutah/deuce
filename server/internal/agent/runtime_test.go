@@ -202,22 +202,45 @@ type tHandle struct {
 	inR, outR *io.PipeReader
 	inW, outW *io.PipeWriter
 	stopOnce  sync.Once
+	cmds      chan map[string]any
 }
 
 func newTHandle() *tHandle {
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
-	h := &tHandle{inR: inR, inW: inW, outR: outR, outW: outW}
+	h := &tHandle{inR: inR, inW: inW, outR: outR, outW: outW, cmds: make(chan map[string]any, 32)}
 	go func() {
 		sc := bufio.NewScanner(inR)
 		for sc.Scan() {
 			var m map[string]any
-			if json.Unmarshal(sc.Bytes(), &m) == nil && m["type"] == "get_state" {
+			if json.Unmarshal(sc.Bytes(), &m) != nil {
+				continue
+			}
+			if m["type"] == "get_state" {
 				_, _ = outW.Write([]byte(`{"type":"response","command":"get_state","success":true}` + "\n"))
+			}
+			select {
+			case h.cmds <- m:
+			default:
 			}
 		}
 	}()
 	return h
+}
+
+func (h *tHandle) waitCmd(t *testing.T, typ string) map[string]any {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case m := <-h.cmds:
+			if m["type"] == typ {
+				return m
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for %q command", typ)
+		}
+	}
 }
 
 func (h *tHandle) Stdin() io.WriteCloser { return h.inW }
@@ -376,6 +399,79 @@ func TestTerminalIsIdempotent(t *testing.T) {
 	}
 	if store.state(task) != StateDone {
 		t.Errorf("task state = %q, want done (not overwritten by exit)", store.state(task))
+	}
+}
+
+func TestRouteFeedsRunningRun(t *testing.T) {
+	rt, _, bc, lr := newTestRuntime(t)
+	ctx := context.Background()
+	rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "go", WorkspaceID: "ws"})
+	bc.waitFor(t, ws.TypeTaskStarted, 1)
+
+	res, err := rt.RouteOrEnqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "use staging"})
+	if err != nil || res != RouteFed {
+		t.Fatalf("RouteOrEnqueue = (%v,%v), want (RouteFed,nil)", res, err)
+	}
+	m := lr.handle(t, 0).waitCmd(t, "steer")
+	if m["message"] != "use staging" {
+		t.Errorf("steer message = %v, want 'use staging'", m["message"])
+	}
+}
+
+func TestRouteAnswersAwaitingInput(t *testing.T) {
+	rt, store, bc, lr := newTestRuntime(t)
+	ctx := context.Background()
+	task, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "go", WorkspaceID: "ws"})
+	bc.waitFor(t, ws.TypeTaskStarted, 1)
+	h := lr.handle(t, 0)
+
+	h.push(`{"type":"extension_ui_request","id":"ui-1","method":"input","params":{"prompt":"which env?"}}`)
+	bc.waitFor(t, ws.TypeTaskAwaitingInput, 1)
+	if store.state(task) != StateAwaitingInput {
+		t.Fatalf("state = %q, want awaiting_input", store.state(task))
+	}
+
+	res, err := rt.RouteOrEnqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "prod"})
+	if err != nil || res != RouteFed {
+		t.Fatalf("RouteOrEnqueue = (%v,%v), want RouteFed", res, err)
+	}
+	m := h.waitCmd(t, "extension_ui_response")
+	if m["id"] != "ui-1" || m["response"] != "prod" {
+		t.Errorf("extension_ui_response = %v, want id=ui-1 response=prod", m)
+	}
+	if store.state(task) != StateRunning {
+		t.Errorf("state after answer = %q, want running", store.state(task))
+	}
+}
+
+func TestRouteEnqueuesWhenIdle(t *testing.T) {
+	rt, store, bc, _ := newTestRuntime(t)
+	ctx := context.Background()
+	res, err := rt.RouteOrEnqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "brand new", WorkspaceID: "ws"})
+	if err != nil || res != RouteEnqueued {
+		t.Fatalf("RouteOrEnqueue idle = (%v,%v), want RouteEnqueued", res, err)
+	}
+	bc.waitFor(t, ws.TypeTaskStarted, 1)
+	// Exactly one task exists and it is running (promoted because idle).
+	running, ok, _ := store.RunningTask(ctx, "s1", "a1")
+	if !ok || store.state(running) != StateRunning {
+		t.Errorf("expected a running task after idle enqueue")
+	}
+}
+
+func TestAwaitingCeilingFailsTask(t *testing.T) {
+	rt, store, bc, lr := newTestRuntime(t)
+	rt.awaitTimeout = 60 * time.Millisecond // ceiling for the test (same package)
+	ctx := context.Background()
+	task, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "go", WorkspaceID: "ws"})
+	bc.waitFor(t, ws.TypeTaskStarted, 1)
+
+	lr.handle(t, 0).push(`{"type":"extension_ui_request","id":"ui-1","params":{"prompt":"?"}}`)
+	bc.waitFor(t, ws.TypeTaskAwaitingInput, 1)
+	// No answer → ceiling fails the task and frees the lane.
+	bc.waitFor(t, ws.TypeTaskCompleted, 1)
+	if store.state(task) != StateFailed {
+		t.Errorf("state = %q, want failed after awaiting ceiling", store.state(task))
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/forgeutah/deuce/server/internal/agent/pirun"
 	"github.com/forgeutah/deuce/server/internal/ws"
@@ -27,30 +28,60 @@ type Runtime struct {
 
 	keys keyedMutex // per-(session,agent) critical sections (KTD9 TOCTOU)
 
-	mu        sync.Mutex
-	running   map[pirun.Key]string         // current running/awaiting task id per key
-	workspace map[pirun.Key]string         // workspace id per key, for relaunch
-	consumers map[pirun.Key]*pirun.Process // process a consumer goroutine is attached to
-	replies   map[string]*strings.Builder  // accumulated assistant reply per task id
+	mu         sync.Mutex
+	running    map[pirun.Key]string         // current running/awaiting task id per key
+	workspace  map[pirun.Key]string         // workspace id per key, for relaunch
+	consumers  map[pirun.Key]*pirun.Process // process a consumer goroutine is attached to
+	replies    map[string]*strings.Builder  // accumulated assistant reply per task id
+	pendingReq map[string]string            // task id → pending extension_ui_request id
+	timers     map[string]*taskTimers       // per-task active-work / awaiting-input timers
+
+	activeTimeout time.Duration // active-work budget (suspended during awaiting_input)
+	awaitTimeout  time.Duration // ceiling on an unanswered awaiting_input task
 
 	wg     sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
+// RouteResult reports how a drawer reply was handled.
+type RouteResult int
+
+const (
+	// RouteFed means the reply was delivered to a live run (steer or
+	// extension_ui_response) — no new task card (R15/R17).
+	RouteFed RouteResult = iota
+	// RouteEnqueued means the agent was idle, so a new task was created (R19).
+	RouteEnqueued
+)
+
+type taskTimers struct {
+	active *time.Timer
+	await  *time.Timer
+}
+
+const (
+	defaultActiveTimeout = 10 * time.Minute
+	defaultAwaitTimeout  = 30 * time.Minute
+)
+
 // NewRuntime builds the runtime. Call Start to begin consuming process exits.
 func NewRuntime(store Store, sup *pirun.Supervisor, bc Broadcaster) *Runtime {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Runtime{
-		store:     store,
-		sup:       sup,
-		bc:        bc,
-		running:   make(map[pirun.Key]string),
-		workspace: make(map[pirun.Key]string),
-		consumers: make(map[pirun.Key]*pirun.Process),
-		replies:   make(map[string]*strings.Builder),
-		ctx:       ctx,
-		cancel:    cancel,
+		store:         store,
+		sup:           sup,
+		bc:            bc,
+		running:       make(map[pirun.Key]string),
+		workspace:     make(map[pirun.Key]string),
+		consumers:     make(map[pirun.Key]*pirun.Process),
+		replies:       make(map[string]*strings.Builder),
+		pendingReq:    make(map[string]string),
+		timers:        make(map[string]*taskTimers),
+		activeTimeout: defaultActiveTimeout,
+		awaitTimeout:  defaultAwaitTimeout,
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 }
 
@@ -84,6 +115,17 @@ func (r *Runtime) Shutdown() {
 // Enqueue creates a task and promotes it if the agent is idle. The server
 // scheduler is the source of truth for order and promotion (R14).
 func (r *Runtime) Enqueue(ctx context.Context, p EnqueueParams) (string, error) {
+	taskID, err := r.createQueued(ctx, p)
+	if err != nil {
+		return "", err
+	}
+	r.promote(ctx, pirun.Key{SessionID: p.SessionID, AgentID: p.AgentID})
+	return taskID, nil
+}
+
+// createQueued persists a queued task, records the workspace, and broadcasts
+// task_enqueued. It does not promote — callers decide the locking context.
+func (r *Runtime) createQueued(ctx context.Context, p EnqueueParams) (string, error) {
 	taskID, seq, position, err := r.store.CreateQueuedTask(ctx, p)
 	if err != nil {
 		return "", err
@@ -92,14 +134,58 @@ func (r *Runtime) Enqueue(ctx context.Context, p EnqueueParams) (string, error) 
 	r.mu.Lock()
 	r.workspace[key] = p.WorkspaceID
 	r.mu.Unlock()
-
 	r.broadcastTask(ws.TypeTaskEnqueued, ws.TaskEventPayload{
 		Seq: seq, TaskID: taskID, AgentID: p.AgentID, RequestedBy: p.RequestedBy,
 		AnchorMessageID: p.AnchorMessageID, Prompt: p.Prompt, State: StateQueued, Position: position,
 	}, p.SessionID)
-
-	r.promote(ctx, key)
 	return taskID, nil
+}
+
+// RouteOrEnqueue delivers a drawer reply atomically with the run's state, under
+// the per-key lock (KTD9, closing the TOCTOU window). If the task is
+// awaiting_input it answers via extension_ui_response; if merely running it
+// steers; if idle/terminal it enqueues a new task (R15/R16/R17/R19).
+func (r *Runtime) RouteOrEnqueue(ctx context.Context, p EnqueueParams) (RouteResult, error) {
+	key := pirun.Key{SessionID: p.SessionID, AgentID: p.AgentID}
+	unlock := r.keys.lock(key)
+	defer unlock()
+
+	taskID, ok := r.currentTask(key)
+	if ok {
+		state, sok, err := r.store.TaskState(ctx, taskID)
+		if err != nil {
+			return 0, err
+		}
+		if sok && state == StateAwaitingInput {
+			// Answer the agent's blocking question (KTD15).
+			reqID := r.pendingRequest(taskID)
+			if err := r.sup.Send(key, pirun.ExtensionUIResponse{ID: reqID, Response: p.Prompt}); err == nil {
+				seq, rerr := r.store.ResolveAwaitingInput(ctx, key.SessionID, taskID)
+				if rerr == nil {
+					r.clearPending(taskID)
+					r.exitAwaiting(key, taskID)
+					r.broadcastTask(ws.TypeTaskStarted, ws.TaskEventPayload{
+						Seq: seq, TaskID: taskID, AgentID: key.AgentID, State: StateRunning,
+					}, key.SessionID)
+				}
+				return RouteFed, nil
+			}
+			// Fall through to steer if the response could not be delivered.
+		}
+		if sok && (state == StateRunning || state == StateAwaitingInput) {
+			if err := r.sup.Send(key, pirun.Steer{Message: p.Prompt}); err == nil {
+				return RouteFed, nil
+			}
+			// Process gone between check and send — fall through to enqueue.
+		}
+	}
+
+	// Idle / terminal / delivery failed: enqueue a new task and promote.
+	if _, err := r.createQueued(ctx, p); err != nil {
+		return 0, err
+	}
+	r.promoteLocked(ctx, key)
+	return RouteEnqueued, nil
 }
 
 // promote takes the per-key lock and promotes the next queued task if the agent
@@ -153,7 +239,9 @@ func (r *Runtime) promoteLocked(ctx context.Context, key pirun.Key) {
 	if err := p.Send(pirun.Prompt{Message: prompt, ID: taskID}); err != nil {
 		slog.Error("runtime: send prompt", "key", key.String(), "error", err)
 		r.terminalLocked(ctx, key, taskID, StateFailed, "Failed to send prompt to agent.")
+		return
 	}
+	r.startActive(key, taskID)
 }
 
 // attachConsumer starts a per-process event-translation goroutine if one is not
@@ -226,6 +314,8 @@ func (r *Runtime) translate(key pirun.Key, ev pirun.Event) {
 			slog.Error("runtime: set awaiting input", "task", taskID, "error", err)
 			return
 		}
+		r.setPending(taskID, ev.RequestID)
+		r.enterAwaiting(key, taskID) // suspend active timeout, start ceiling (KTD8)
 		r.broadcastTask(ws.TypeTaskAwaitingInput, ws.TaskEventPayload{
 			Seq: seq, TaskID: taskID, AgentID: key.AgentID, State: StateAwaitingInput, PendingQuestion: ev.Prompt,
 		}, key.SessionID)
@@ -267,6 +357,8 @@ func (r *Runtime) terminalLocked(ctx context.Context, key pirun.Key, taskID, sta
 		slog.Error("runtime: finish task", "task", taskID, "state", state, "error", err)
 		return
 	}
+	r.stopTimers(taskID)
+	r.clearPending(taskID)
 	r.clearRunning(key, taskID)
 	r.broadcastTask(ws.TypeTaskCompleted, ws.TaskEventPayload{
 		Seq: seq, TaskID: taskID, AgentID: key.AgentID, State: state, Status: state, Reply: reply,
@@ -332,6 +424,109 @@ func (r *Runtime) takeReply(taskID string) string {
 		return ""
 	}
 	return b.String()
+}
+
+func (r *Runtime) setPending(taskID, reqID string) {
+	r.mu.Lock()
+	r.pendingReq[taskID] = reqID
+	r.mu.Unlock()
+}
+
+func (r *Runtime) pendingRequest(taskID string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.pendingReq[taskID]
+}
+
+func (r *Runtime) clearPending(taskID string) {
+	r.mu.Lock()
+	delete(r.pendingReq, taskID)
+	r.mu.Unlock()
+}
+
+// failTaskAsync fails a task from a timer callback, but only if it is still the
+// key's current task (terminalLocked is idempotent, so a late timer is safe).
+func (r *Runtime) failTaskAsync(key pirun.Key, taskID, reply string) {
+	unlock := r.keys.lock(key)
+	defer unlock()
+	if cur, ok := r.currentTask(key); ok && cur == taskID {
+		r.terminalLocked(r.ctx, key, taskID, StateFailed, reply)
+	}
+}
+
+// startActive starts the active-work timeout for a running task.
+func (r *Runtime) startActive(key pirun.Key, taskID string) {
+	if r.activeTimeout <= 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	tt := r.timerFor(taskID)
+	if tt.active != nil {
+		tt.active.Stop()
+	}
+	tt.active = time.AfterFunc(r.activeTimeout, func() { r.failTaskAsync(key, taskID, "Agent timed out.") })
+}
+
+// enterAwaiting suspends the active-work timeout and starts the awaiting-input
+// ceiling so an unanswered question cannot wedge the agent forever (KTD8).
+func (r *Runtime) enterAwaiting(key pirun.Key, taskID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	tt := r.timerFor(taskID)
+	if tt.active != nil {
+		tt.active.Stop()
+		tt.active = nil
+	}
+	if r.awaitTimeout > 0 {
+		if tt.await != nil {
+			tt.await.Stop()
+		}
+		tt.await = time.AfterFunc(r.awaitTimeout, func() {
+			r.failTaskAsync(key, taskID, "No response to the agent's question.")
+		})
+	}
+}
+
+// exitAwaiting cancels the ceiling and resumes the active-work timeout.
+func (r *Runtime) exitAwaiting(key pirun.Key, taskID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	tt := r.timers[taskID]
+	if tt == nil {
+		return
+	}
+	if tt.await != nil {
+		tt.await.Stop()
+		tt.await = nil
+	}
+	if r.activeTimeout > 0 {
+		tt.active = time.AfterFunc(r.activeTimeout, func() { r.failTaskAsync(key, taskID, "Agent timed out.") })
+	}
+}
+
+func (r *Runtime) stopTimers(taskID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if tt := r.timers[taskID]; tt != nil {
+		if tt.active != nil {
+			tt.active.Stop()
+		}
+		if tt.await != nil {
+			tt.await.Stop()
+		}
+		delete(r.timers, taskID)
+	}
+}
+
+// timerFor returns (creating if needed) the timer set for a task. Caller holds r.mu.
+func (r *Runtime) timerFor(taskID string) *taskTimers {
+	tt := r.timers[taskID]
+	if tt == nil {
+		tt = &taskTimers{}
+		r.timers[taskID] = tt
+	}
+	return tt
 }
 
 func (r *Runtime) broadcastTask(typ string, p ws.TaskEventPayload, sessionID string) {
