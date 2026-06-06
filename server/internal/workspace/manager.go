@@ -447,14 +447,17 @@ func (m *Manager) InstallPi(ctx context.Context, workspaceID string, logFn LogFu
 		logFn("Checking for Pi installation...")
 	}
 
-	// Already installed?
-	checkCmd := m.ExecInWorkspace(ctx, workspaceID, ClaudePathPrefix+"pi --version")
+	// Already installed? Check via a login shell so the npm-global bin (where
+	// pi.dev/install.sh puts the binary, added to the profile) is on PATH —
+	// ClaudePathPrefix (~/.local/bin) alone would miss it and force a reinstall.
+	checkCmd := m.ExecInWorkspace(ctx, workspaceID, piLoginShell("pi --version"))
 	if output, err := checkCmd.CombinedOutput(); err == nil {
 		version := strings.TrimSpace(string(output))
 		slog.Info("pi already installed", "workspace", workspaceID, "version", version)
 		if logFn != nil {
 			logFn(fmt.Sprintf("Pi already installed: %s", version))
 		}
+		m.symlinkPi(ctx, workspaceID)
 		return nil
 	}
 
@@ -500,7 +503,26 @@ func (m *Manager) InstallPi(ctx context.Context, workspaceID string, logFn LogFu
 		logFn("Pi installed successfully")
 	}
 	slog.Info("pi installed successfully", "workspace", workspaceID)
+	m.symlinkPi(ctx, workspaceID)
 	return nil
+}
+
+// piLoginShell wraps a command in a login shell with the npm-global bin and
+// ~/.local/bin prepended to PATH, so pi is found whether the installer updated
+// the profile or not. `devpod ssh --command` runs a non-interactive shell that
+// would otherwise miss the npm-global location entirely.
+func piLoginShell(inner string) string {
+	return `bash -lc 'export PATH="$HOME/.local/bin:$(npm config get prefix 2>/dev/null)/bin:$PATH"; ` + inner + `'`
+}
+
+// symlinkPi best-effort symlinks the resolved pi binary into ~/.local/bin so the
+// agent launcher finds it deterministically. Non-fatal.
+func (m *Manager) symlinkPi(ctx context.Context, workspaceID string) {
+	cmd := m.ExecInWorkspace(ctx, workspaceID,
+		piLoginShell(`p="$(command -v pi || true)"; if [ -n "$p" ]; then mkdir -p "$HOME/.local/bin" && ln -sf "$p" "$HOME/.local/bin/pi"; fi`))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		slog.Warn("pi symlink failed", "workspace", workspaceID, "error", err, "output", strings.TrimSpace(string(out)))
+	}
 }
 
 // InstallPiExtension writes a Pi extension file to the container's auto-discovery

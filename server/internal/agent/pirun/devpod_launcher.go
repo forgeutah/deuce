@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -36,11 +37,15 @@ func NewDevpodLauncher(wm *workspace.Manager, provider, model string) *DevpodLau
 // command is prefixed with workspace.ClaudePathPrefix-style PATH handling so the
 // pi binary on the user's local bin is found in a non-interactive shell.
 func (l *DevpodLauncher) Launch(ctx context.Context, workspaceID string, env []string) (Handle, error) {
-	args := []string{"pi", "--mode", "rpc", "--provider", l.provider}
-	if l.model != "" {
-		args = append(args, "--model", l.model)
-	}
-	piCmd := workspace.ClaudePathPrefix + join(args)
+	inner := join(append([]string{"pi", "--mode", "rpc", "--provider", l.provider}, modelArgs(l.model)...))
+	// Run pi through a login shell so its install location is on PATH. The
+	// pi.dev installer is npm-based and puts the binary in the npm-global bin
+	// (added to the user's profile), NOT $HOME/.local/bin — and a
+	// `devpod ssh --command` shell is non-interactive and does not source the
+	// profile. The fallback PATH prefix also covers the common npm-global and
+	// ~/.local/bin (our InstallPi symlink target) locations in case the profile
+	// wasn't updated. `exec` keeps pi as the process group leader for signaling.
+	piCmd := `bash -lc 'export PATH="$HOME/.local/bin:$(npm config get prefix 2>/dev/null)/bin:$PATH"; exec ` + inner + `'`
 
 	cmd := l.wm.ExecInWorkspace(ctx, workspaceID, piCmd, env...)
 	// Setpgid so Stop can signal the whole process group, reaching the devpod
@@ -64,17 +69,29 @@ func (l *DevpodLauncher) Launch(ctx context.Context, workspaceID string, env []s
 		return nil, fmt.Errorf("start pi: %w", err)
 	}
 
-	// Drain stderr to the log so it never blocks the child and surfaces errors.
+	h := &devpodHandle{cmd: cmd, stdin: stdin, stdout: stdout, done: make(chan struct{})}
+
+	// Drain stderr into a bounded ring buffer AND the log (Warn, so a failed
+	// launch — e.g. "pi: command not found" or "Node.js ... required" — is
+	// visible next to the handshake error and retrievable via Stderr()).
 	go func() {
 		sc := bufio.NewScanner(stderr)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for sc.Scan() {
-			slog.Debug("pi stderr", "workspace", workspaceID, "line", sc.Text())
+			line := sc.Text()
+			slog.Warn("pi stderr", "workspace", workspaceID, "line", line)
+			h.recordStderr(line)
 		}
 	}()
 
-	h := &devpodHandle{cmd: cmd, stdin: stdin, stdout: stdout, done: make(chan struct{})}
 	return h, nil
+}
+
+func modelArgs(model string) []string {
+	if model == "" {
+		return nil
+	}
+	return []string{"--model", model}
 }
 
 type devpodHandle struct {
@@ -85,10 +102,31 @@ type devpodHandle struct {
 	done     chan struct{}
 	waitErr  error
 	waitOnce sync.Once
+
+	stderrMu  sync.Mutex
+	stderrBuf []string // last few stderr lines, for diagnostics
 }
 
 func (h *devpodHandle) Stdin() io.WriteCloser { return h.stdin }
 func (h *devpodHandle) Stdout() io.Reader     { return h.stdout }
+
+func (h *devpodHandle) recordStderr(line string) {
+	h.stderrMu.Lock()
+	defer h.stderrMu.Unlock()
+	h.stderrBuf = append(h.stderrBuf, line)
+	if len(h.stderrBuf) > 10 {
+		h.stderrBuf = h.stderrBuf[len(h.stderrBuf)-10:]
+	}
+}
+
+// Stderr returns the most recent stderr lines from the Pi process, joined — used
+// to enrich launch/handshake failure messages. Satisfies the optional
+// stderrReporter interface the supervisor checks.
+func (h *devpodHandle) Stderr() string {
+	h.stderrMu.Lock()
+	defer h.stderrMu.Unlock()
+	return strings.Join(h.stderrBuf, "; ")
+}
 
 // Wait reaps the process with cmd.Process.Wait() — NOT cmd.Wait() — so the
 // stdout pipe is not closed under the pump mid-stream (the truncation bug fixed

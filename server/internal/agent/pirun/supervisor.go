@@ -31,6 +31,12 @@ type Handle interface {
 	Wait() error
 }
 
+// stderrReporter is optionally implemented by a Handle to surface recent
+// process stderr in launch/handshake failure messages.
+type stderrReporter interface {
+	Stderr() string
+}
+
 // Launcher starts a Pi RPC process for a workspace. It is the single shell-out
 // seam, mirroring workspace.commandRunner / sshproxy.resolveContainerHook so
 // the supervisor is testable without a container.
@@ -212,8 +218,14 @@ func (s *Supervisor) Ensure(ctx context.Context, key Key, workspaceID, sessionPa
 	go s.pump(p)
 
 	if err := s.handshake(ctx, p); err != nil {
+		detail := ""
+		if rep, ok := h.(stderrReporter); ok {
+			if se := rep.Stderr(); se != "" {
+				detail = " (pi stderr: " + se + ")"
+			}
+		}
 		s.Stop(key)
-		return nil, fmt.Errorf("pirun: readiness handshake %s: %w", key, err)
+		return nil, fmt.Errorf("pirun: readiness handshake %s: %w%s", key, err, detail)
 	}
 	if sessionPath != "" {
 		if err := p.Send(SwitchSession{SessionPath: sessionPath}); err != nil {
