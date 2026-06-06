@@ -1,7 +1,7 @@
 ---
 title: "feat: Pi harness integration for Super Threads"
 type: feat
-status: active
+status: completed
 date: 2026-06-03
 deepened: 2026-06-03
 origin: docs/brainstorms/2026-06-03-pi-harness-integration-requirements.md
