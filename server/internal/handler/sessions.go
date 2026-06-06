@@ -13,7 +13,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/forgeutah/deuce/server/internal/agent/pirun/extension"
 	db "github.com/forgeutah/deuce/server/internal/db"
 	"github.com/forgeutah/deuce/server/internal/ws"
 )
@@ -497,19 +496,10 @@ func (h *Handler) startWorkspace(sessionID uuid.UUID, workspaceID, repoURL strin
 		slog.Error("workspace creation failed", "sessionID", sessionID, "error", err)
 		newStatus = "failed"
 	} else {
-		// Install the agent harnesses after workspace creation succeeds. Both
-		// are non-fatal and installed regardless of DEUCE_AGENT_HARNESS so the
-		// toggle (KTD11) can switch without re-provisioning: Claude Code for the
-		// legacy fallback, Pi + the ask-user extension for the default path.
-		if installErr := h.workspaces.InstallTools(ctx, workspaceID, logFn); installErr != nil {
-			slog.Warn("claude code installation failed", "sessionID", sessionID, "error", installErr)
-		}
-		if installErr := h.workspaces.InstallPi(ctx, workspaceID, logFn); installErr != nil {
-			slog.Warn("pi installation failed", "sessionID", sessionID, "error", installErr)
-		}
-		if installErr := h.workspaces.InstallPiExtension(ctx, workspaceID, extension.AskUserFilename, extension.AskUser, logFn); installErr != nil {
-			slog.Warn("pi extension installation failed", "sessionID", sessionID, "error", installErr)
-		}
+		// Install the agent harnesses (Claude fallback + Pi + ask-user
+		// extension) after workspace creation. Idempotent and non-fatal; the
+		// same helper runs on every start/rebuild so older containers migrate.
+		h.provisionAgentTools(ctx, workspaceID, logFn)
 		newStatus = "ready"
 	}
 
