@@ -3,6 +3,7 @@ package workspace
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -499,5 +500,31 @@ func (m *Manager) InstallPi(ctx context.Context, workspaceID string, logFn LogFu
 		logFn("Pi installed successfully")
 	}
 	slog.Info("pi installed successfully", "workspace", workspaceID)
+	return nil
+}
+
+// InstallPiExtension writes a Pi extension file to the container's auto-discovery
+// path (~/.pi/agent/extensions/<filename>) so Pi loads it on launch. Content is
+// base64-encoded over the wire to avoid any shell-quoting hazards. Non-fatal:
+// without the extension, agents simply lose the ask-user (awaiting-input)
+// capability rather than failing the workspace.
+func (m *Manager) InstallPiExtension(ctx context.Context, workspaceID, filename, content string, logFn LogFunc) error {
+	encoded := base64.StdEncoding.EncodeToString([]byte(content))
+	cmd := fmt.Sprintf(
+		`mkdir -p "$HOME/.pi/agent/extensions" && printf %%s '%s' | base64 -d > "$HOME/.pi/agent/extensions/%s"`,
+		encoded, filename,
+	)
+	out, err := m.ExecInWorkspace(ctx, workspaceID, cmd).CombinedOutput()
+	if err != nil {
+		if logFn != nil {
+			logFn("WARNING: failed to install Pi ask-user extension")
+		}
+		slog.Warn("pi extension install failed", "workspace", workspaceID, "error", err, "output", strings.TrimSpace(string(out)))
+		return nil // Non-fatal
+	}
+	if logFn != nil {
+		logFn(fmt.Sprintf("Pi extension installed: %s", filename))
+	}
+	slog.Info("pi extension installed", "workspace", workspaceID, "filename", filename)
 	return nil
 }
