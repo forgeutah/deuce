@@ -10,7 +10,16 @@ import type {
   TabType,
   FileNode,
   User,
+  TaskEventPayload,
+  ActionEventPayload,
 } from "@/types";
+import {
+  type SessionAgentRuns,
+  type AgentRunEventType,
+  emptyAgentRuns,
+  applyEvent,
+  applySnapshot,
+} from "@/stores/agent-runs";
 
 interface SessionState {
   // Data
@@ -24,6 +33,8 @@ interface SessionState {
   thinkingAgents: Record<string, string[]>;
   workspaceLogs: Record<string, string[]>;
   agentOutput: Record<string, { agentId: string; content: string; contentType: string }[]>;
+  // Super Threads: per-session reduced agent-run (task/action) state.
+  agentRuns: Record<string, SessionAgentRuns>;
 
   // UI state
   activeSessionId: string | null;
@@ -51,6 +62,12 @@ interface SessionState {
   appendWorkspaceLog: (sessionId: string, line: string) => void;
   appendAgentOutput: (sessionId: string, output: { agentId: string; content: string; contentType: string }) => void;
   clearAgentOutput: (sessionId: string) => void;
+  applyAgentRunEvent: (
+    sessionId: string,
+    type: AgentRunEventType,
+    payload: TaskEventPayload | ActionEventPayload,
+  ) => void;
+  fetchAgentRuns: (sessionId: string) => Promise<void>;
   setShowLogs: (show: boolean) => void;
   addSession: (session: Session) => void;
   updateWorkspaceStatus: (
@@ -84,6 +101,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   thinkingAgents: {},
   workspaceLogs: {},
   agentOutput: {},
+  agentRuns: {},
 
   activeSessionId: null,
   activeTabMap: {},
@@ -272,6 +290,30 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set((state) => ({
       agentOutput: { ...state.agentOutput, [sessionId]: [] },
     })),
+
+  applyAgentRunEvent: (sessionId, type, payload) => {
+    const prev = get().agentRuns[sessionId] ?? emptyAgentRuns();
+    const { state: next, needsResync } = applyEvent(prev, type, payload);
+    set((state) => ({
+      agentRuns: { ...state.agentRuns, [sessionId]: next },
+    }));
+    // A seq gap means an event was dropped (slow client / crash window) —
+    // refetch the snapshot to reconcile (R10, mandatory recovery).
+    if (needsResync) {
+      void get().fetchAgentRuns(sessionId);
+    }
+  },
+
+  fetchAgentRuns: async (sessionId) => {
+    try {
+      const snapshot = await api.getAgentRuns(sessionId);
+      set((state) => ({
+        agentRuns: { ...state.agentRuns, [sessionId]: applySnapshot(snapshot) },
+      }));
+    } catch (err) {
+      console.error("failed to fetch agent runs snapshot", err);
+    }
+  },
 
   setShowLogs: (show) => set({ showLogs: show }),
 

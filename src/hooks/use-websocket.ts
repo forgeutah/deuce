@@ -1,6 +1,13 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useSessionStore } from "@/stores/session-store";
-import type { AgentStatus, Message, ActivityItem } from "@/types";
+import type {
+  AgentStatus,
+  Message,
+  ActivityItem,
+  TaskEventPayload,
+  ActionEventPayload,
+} from "@/types";
+import { isAgentRunEvent } from "@/stores/agent-runs";
 import { api } from "@/lib/api";
 
 interface ServerMessage {
@@ -166,6 +173,22 @@ export function useWebSocket() {
           );
           break;
         }
+
+        default: {
+          // Super Threads AgentRunEvent family (task_*/action_*): apply by seq
+          // to the per-session reduced state; the reducer self-heals seq gaps
+          // by refetching the snapshot.
+          if (isAgentRunEvent(msg.type)) {
+            useSessionStore
+              .getState()
+              .applyAgentRunEvent(
+                msg.sessionId,
+                msg.type,
+                msg.payload as TaskEventPayload | ActionEventPayload,
+              );
+          }
+          break;
+        }
       }
     },
     [addMessage, updateAgentStatus, setThinkingAgent, clearThinkingAgent, addActivity, appendWorkspaceLog, appendAgentOutput, clearAgentOutput],
@@ -263,7 +286,9 @@ export function useWebSocket() {
       );
     }
 
-    // Join new session
+    // Join new session, then fetch the agent-run snapshot. Subscribe BEFORE
+    // the snapshot fetch so any event broadcast during the fetch is applied
+    // (or self-healed via gap detection) rather than dropped (R9 ordering).
     if (activeSessionId) {
       ws.send(
         JSON.stringify({ type: "join", sessionId: activeSessionId }),
@@ -271,8 +296,23 @@ export function useWebSocket() {
       ws.send(
         JSON.stringify({ type: "mark_read", sessionId: activeSessionId }),
       );
+      void useSessionStore.getState().fetchAgentRuns(activeSessionId);
     }
 
     activeSessionRef.current = activeSessionId;
   }, [activeSessionId]);
+
+  // sendSteer delivers a drawer reply to a live agent run (feed/answer) or, if
+  // the agent is idle, enqueues a new task server-side (R15/R19). The server
+  // also posts the reply to the channel for shared visibility.
+  const sendSteer = useCallback(
+    (sessionId: string, agentId: string, message: string) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: "steer", sessionId, agentId, message }));
+    },
+    [],
+  );
+
+  return { sendSteer };
 }

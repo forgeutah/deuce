@@ -1,6 +1,7 @@
 import type {
   ActivityItem,
   Agent,
+  AgentRunSnapshot,
   FileContentResponse,
   FileNode,
   Message,
@@ -182,6 +183,12 @@ export const api = {
 
   listActivities: (sessionId: string, limit = 20) =>
     request<ActivityItem[]>(`/sessions/${sessionId}/activities?limit=${limit}`),
+
+  // Super Threads snapshot: current task+action state + latestSeq (R9). The
+  // client subscribes over WS first, then fetches this, then applies live
+  // events with seq > latestSeq.
+  getAgentRuns: (sessionId: string) =>
+    request<AgentRunSnapshot>(`/sessions/${sessionId}/agent-runs`),
 
   updateSessionAgents: (sessionId: string, agentIds: string[]) =>
     request<Agent[]>(`/sessions/${sessionId}/agents`, {
