@@ -48,8 +48,12 @@ type Exit struct {
 
 const (
 	defaultReadinessTimeout = 15 * time.Second
-	defaultIdleTimeout      = 10 * time.Minute // replaces the old queue workerIdleTimeout
-	stopGrace               = 5 * time.Second
+	// defaultIdleTimeout must exceed the runtime's longest task timeout (the
+	// awaiting-input ceiling, 30m) so a process holding a live-but-silent task
+	// (an unanswered question) is never reaped out from under it; genuinely idle
+	// processes (no active task) are still freed.
+	defaultIdleTimeout = 35 * time.Minute
+	stopGrace          = 5 * time.Second
 )
 
 // ErrSupervisorClosed is returned by Ensure/Send after Shutdown.
@@ -72,8 +76,6 @@ type Process struct {
 	idleTimer    *time.Timer
 	idleDuration time.Duration
 
-	exitedCh chan struct{}
-	exitErr  error
 	exitOnce sync.Once
 }
 
@@ -181,7 +183,6 @@ func (s *Supervisor) Ensure(ctx context.Context, key Key, workspaceID, sessionPa
 		Key:          key,
 		h:            h,
 		events:       make(chan Event, 256),
-		exitedCh:     make(chan struct{}),
 		idleDuration: s.idleTimeout,
 	}
 	if s.idleTimeout > 0 {
@@ -264,10 +265,8 @@ func (s *Supervisor) pump(p *Process) {
 	// variant — the pump has already drained, KTD4) and signal exit exactly once.
 	exitErr := p.h.Wait()
 	p.exitOnce.Do(func() {
-		p.exitErr = exitErr
 		p.stopIdle()
 		close(p.events)
-		close(p.exitedCh)
 	})
 
 	s.mu.Lock()

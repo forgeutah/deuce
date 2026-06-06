@@ -89,6 +89,14 @@ GITHUB_TOKEN=          # GitHub PAT for repo listing (optional)
 DEVPOD_BIN=devpod      # DevPod binary path
 DEVPOD_PROVIDER=       # DevPod provider (empty = default)
 
+# Agent harness. "pi" (default) runs Pi (pi.dev) in --mode rpc inside each
+# session's DevPod container, driven over a persistent JSONL channel. "claude"
+# is the legacy claude -p executor, kept as an emergency rollback. PiProvider/
+# PiModel select the Pi backend (v1 runs Claude models through Pi).
+DEUCE_AGENT_HARNESS=pi
+DEUCE_PI_PROVIDER=anthropic
+DEUCE_PI_MODEL=claude-haiku-4-5
+
 # Auth mode (default "dev"; set to "proxy" when running behind a header-trust
 # reverse proxy like forge-proxy or Tailscale Serve). The literal value
 # "forge-proxy" is rejected with a migration hint — use "proxy" with the

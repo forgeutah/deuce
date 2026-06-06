@@ -265,6 +265,12 @@ func (l *tLauncher) Launch(context.Context, string, []string) (pirun.Handle, err
 	return h, nil
 }
 
+func (l *tLauncher) count() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.hs)
+}
+
 func (l *tLauncher) handle(t *testing.T, i int) *tHandle {
 	t.Helper()
 	deadline := time.After(3 * time.Second)
@@ -399,6 +405,32 @@ func TestTerminalIsIdempotent(t *testing.T) {
 	}
 	if store.state(task) != StateDone {
 		t.Errorf("task state = %q, want done (not overwritten by exit)", store.state(task))
+	}
+}
+
+func TestCancelPromotesNextOntoFreshProcess(t *testing.T) {
+	rt, store, bc, lr := newTestRuntime(t)
+	ctx := context.Background()
+	t1, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "first", WorkspaceID: "ws"})
+	bc.waitFor(t, ws.TypeTaskStarted, 1)
+	t2, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "second", WorkspaceID: "ws"})
+	if store.state(t2) != StateQueued {
+		t.Fatalf("t2 state = %q, want queued", store.state(t2))
+	}
+
+	// /stop the agent: t1 is cancelled, its process torn down, and t2 promoted
+	// onto a FRESH process (not the one being killed — the bug this guards).
+	rt.Cancel(ctx, pirun.Key{SessionID: "s1", AgentID: "a1"})
+	bc.waitFor(t, ws.TypeTaskStarted, 2)
+
+	if store.state(t1) != StateCancelled {
+		t.Errorf("t1 state = %q, want cancelled", store.state(t1))
+	}
+	if store.state(t2) != StateRunning {
+		t.Errorf("t2 state = %q, want running after cancel-promote", store.state(t2))
+	}
+	if lr.count() < 2 {
+		t.Errorf("expected a fresh process launched for t2, launches = %d", lr.count())
 	}
 }
 

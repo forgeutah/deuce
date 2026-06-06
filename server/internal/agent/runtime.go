@@ -160,10 +160,15 @@ func (r *Runtime) RouteOrEnqueue(ctx context.Context, p EnqueueParams) (RouteRes
 			// Answer the agent's blocking question (KTD15).
 			reqID := r.pendingRequest(taskID)
 			if err := r.sup.Send(key, pirun.ExtensionUIResponse{ID: reqID, Response: p.Prompt}); err == nil {
+				// The run has resumed in-process — always tear down the awaiting
+				// ceiling and pending state so it can't later fail a live task,
+				// even if the DB resolve below fails (the next event reconciles).
+				r.clearPending(taskID)
+				r.exitAwaiting(key, taskID)
 				seq, rerr := r.store.ResolveAwaitingInput(ctx, key.SessionID, taskID)
-				if rerr == nil {
-					r.clearPending(taskID)
-					r.exitAwaiting(key, taskID)
+				if rerr != nil {
+					slog.Error("runtime: resolve awaiting input", "task", taskID, "error", rerr)
+				} else {
 					r.broadcastTask(ws.TypeTaskStarted, ws.TaskEventPayload{
 						Seq: seq, TaskID: taskID, AgentID: key.AgentID, State: StateRunning,
 					}, key.SessionID)
@@ -232,13 +237,15 @@ func (r *Runtime) promoteLocked(ctx context.Context, key pirun.Key) {
 	p, err := r.sup.Ensure(ctx, key, wsID, "")
 	if err != nil {
 		slog.Error("runtime: ensure pi process", "key", key.String(), "error", err)
-		r.terminalLocked(ctx, key, taskID, StateFailed, "Agent process could not start.")
+		// promote=false: we are inside promoteLocked, don't recurse. teardown=true
+		// so the next queued task is promoted by the resulting process-exit.
+		r.finalizeLocked(ctx, key, taskID, StateFailed, "Agent process could not start.", false, true)
 		return
 	}
 	r.attachConsumer(key, p)
 	if err := p.Send(pirun.Prompt{Message: prompt, ID: taskID}); err != nil {
 		slog.Error("runtime: send prompt", "key", key.String(), "error", err)
-		r.terminalLocked(ctx, key, taskID, StateFailed, "Failed to send prompt to agent.")
+		r.finalizeLocked(ctx, key, taskID, StateFailed, "Failed to send prompt to agent.", false, true)
 		return
 	}
 	r.startActive(key, taskID)
@@ -321,7 +328,9 @@ func (r *Runtime) translate(key pirun.Key, ev pirun.Event) {
 		}, key.SessionID)
 	case pirun.KindRunCompleted:
 		unlock := r.keys.lock(key)
-		r.terminalLocked(ctx, key, taskID, StateDone, r.takeReply(taskID))
+		// Pi finished cleanly: reuse the live process for the next task (promote
+		// inline), no teardown.
+		r.finalizeLocked(ctx, key, taskID, StateDone, r.takeReply(taskID), true, false)
 		unlock()
 	}
 }
@@ -332,18 +341,34 @@ func (r *Runtime) handleExit(ex pirun.Exit) {
 	defer unlock()
 	taskID, ok := r.currentTask(ex.Key)
 	if !ok {
+		// No task bound to this process (e.g. it was torn down by a cancel/
+		// timeout that already finalized the task). Promote the next queued task
+		// onto a fresh process now that this one is fully gone.
+		r.promoteLocked(r.ctx, ex.Key)
 		return
 	}
 	reply := "Agent process exited unexpectedly."
 	if ex.Err == nil {
 		reply = "" // clean exit with no run completion still terminates the task
 	}
-	r.terminalLocked(r.ctx, ex.Key, taskID, StateFailed, reply)
+	// The process is already dead and removed; promote the next onto a fresh
+	// process (promote=true), no teardown needed.
+	r.finalizeLocked(r.ctx, ex.Key, taskID, StateFailed, reply, true, false)
 }
 
-// terminalLocked performs an idempotent terminal transition and promotes the
-// next queued task. Assumes the per-key lock is held (KTD12).
-func (r *Runtime) terminalLocked(ctx context.Context, key pirun.Key, taskID, state, reply string) {
+// finalizeLocked performs an idempotent terminal transition. Assumes the per-key
+// lock is held (KTD12).
+//
+//   - teardown: tear down the task's Pi process (KTD6a) — set for cancel/timeout/
+//     failed-start where the live process must not outlive its task. Promotion of
+//     the next task is then deferred to the resulting process-exit (handleExit),
+//     which runs after the supervisor has fully removed the dead process, so the
+//     next task launches on a fresh process rather than racing the dying one.
+//   - promote: promote the next queued task inline (set for the Pi-`done` and
+//     crash paths, where the process is reused or already gone). The promoted
+//     task's task_started is broadcast BEFORE this task's task_completed so the
+//     UI never observes idle-with-queued (AE4/R13).
+func (r *Runtime) finalizeLocked(ctx context.Context, key pirun.Key, taskID, state, reply string, promote, teardown bool) {
 	cur, ok, err := r.store.TaskState(ctx, taskID)
 	if err != nil {
 		slog.Error("runtime: task-state lookup", "task", taskID, "error", err)
@@ -360,12 +385,15 @@ func (r *Runtime) terminalLocked(ctx context.Context, key pirun.Key, taskID, sta
 	r.stopTimers(taskID)
 	r.clearPending(taskID)
 	r.clearRunning(key, taskID)
+	if teardown {
+		r.sup.Stop(key) // KTD6a: no live, file-mutating process outlives its task
+	}
+	if promote {
+		r.promoteLocked(ctx, key)
+	}
 	r.broadcastTask(ws.TypeTaskCompleted, ws.TaskEventPayload{
 		Seq: seq, TaskID: taskID, AgentID: key.AgentID, State: state, Status: state, Reply: reply,
 	}, key.SessionID)
-	// Promote the next queued task in the same critical section so the UI never
-	// shows idle-with-queued (AE4/R13).
-	r.promoteLocked(ctx, key)
 }
 
 // CancelSession cancels every running task in a session (agent-less /stop, R21).
@@ -383,16 +411,16 @@ func (r *Runtime) CancelSession(ctx context.Context, sessionID string) {
 	}
 }
 
-// Cancel cancels the running task for a key (/stop targeting an agent, R21).
+// Cancel cancels the running task for a key (/stop targeting an agent, R21). It
+// tears down the task's Pi process (teardown=true); the resulting process-exit
+// promotes the next queued task onto a fresh process — avoiding the bug where
+// promoting inline would launch the next task onto the process we then kill.
 func (r *Runtime) Cancel(ctx context.Context, key pirun.Key) {
 	unlock := r.keys.lock(key)
+	defer unlock()
 	taskID, ok := r.currentTask(key)
 	if ok {
-		r.terminalLocked(ctx, key, taskID, StateCancelled, "Cancelled by user.")
-	}
-	unlock()
-	if ok {
-		r.sup.Stop(key) // tear down the Pi process so it stops emitting (KTD6a)
+		r.finalizeLocked(ctx, key, taskID, StateCancelled, "Cancelled by user.", false, true)
 	}
 }
 
@@ -465,7 +493,9 @@ func (r *Runtime) failTaskAsync(key pirun.Key, taskID, reply string) {
 	unlock := r.keys.lock(key)
 	defer unlock()
 	if cur, ok := r.currentTask(key); ok && cur == taskID {
-		r.terminalLocked(r.ctx, key, taskID, StateFailed, reply)
+		// Timeout: the live process is stuck — tear it down; the resulting exit
+		// promotes the next queued task.
+		r.finalizeLocked(r.ctx, key, taskID, StateFailed, reply, false, true)
 	}
 }
 
