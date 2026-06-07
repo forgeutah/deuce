@@ -251,4 +251,3 @@ func TestRunMigrationsAgainst_RequiresDialect(t *testing.T) {
 		t.Error("gamma table should exist after applying fstest fixture")
 	}
 }
-

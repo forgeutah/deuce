@@ -28,17 +28,17 @@ func TestValidContainerName_AcceptsLegitimateNames(t *testing.T) {
 // produces a payload, the regex blocks it from reaching `docker exec` argv.
 func TestValidContainerName_RejectsHostileInputs(t *testing.T) {
 	invalid := []string{
-		"",                  // empty
-		"-leading-dash",     // leading dash
-		"--privileged",      // flag-shaped
-		"-v/:/host",         // mount-flag shaped
-		"name with space",   // shell-meta
-		"name;rm -rf /",     // shell-meta
-		"name`hostile`",     // shell-meta
-		"name$(hostile)",    // shell-meta
-		"name\nrunfile",     // embedded newline
-		"a:b",               // colon
-		"a/b",               // slash
+		"",                // empty
+		"-leading-dash",   // leading dash
+		"--privileged",    // flag-shaped
+		"-v/:/host",       // mount-flag shaped
+		"name with space", // shell-meta
+		"name;rm -rf /",   // shell-meta
+		"name`hostile`",   // shell-meta
+		"name$(hostile)",  // shell-meta
+		"name\nrunfile",   // embedded newline
+		"a:b",             // colon
+		"a/b",             // slash
 	}
 	for _, name := range invalid {
 		if validContainerName.MatchString(name) {

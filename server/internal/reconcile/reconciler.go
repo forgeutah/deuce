@@ -209,10 +209,11 @@ func (r *Reconciler) tick(ctx context.Context) error {
 // and we don't want to flip the row to a wrong value.
 //
 // Truth table:
-//   container in docker (running)        → ready
-//   container in docker (stopped/exited) → stopped
-//   no container BUT workspace.json      → stopped  (devpod knows about it)
-//   no container AND no workspace.json   → missing
+//
+//	container in docker (running)        → ready
+//	container in docker (stopped/exited) → stopped
+//	no container BUT workspace.json      → stopped  (devpod knows about it)
+//	no container AND no workspace.json   → missing
 func (r *Reconciler) deriveTruth(workspaceID string, containers map[string]workspace.ContainerState) (string, bool) {
 	uid, hasMeta, err := r.uids.WorkspaceUID(workspaceID)
 	if err != nil {

@@ -24,12 +24,12 @@ func TestValidateWorkspaceID_Accepts(t *testing.T) {
 func TestValidateWorkspaceID_Rejects(t *testing.T) {
 	for _, name := range []string{
 		"",
-		"-leading-dash",   // would be parsed as a flag by devpod
-		"--force",         // flag-shaped
+		"-leading-dash", // would be parsed as a flag by devpod
+		"--force",       // flag-shaped
 		"name with space",
 		"name/with/slash",
 		"name:with:colon",
-		"name;rm -rf /",   // shell-meta (defense in depth)
+		"name;rm -rf /", // shell-meta (defense in depth)
 		"name\nrunfile",
 		"name$(hostile)",
 		strings.Repeat("a", 65), // too long
@@ -70,9 +70,9 @@ func TestValidateRepoURL_RejectsBadSchemes(t *testing.T) {
 		"http://github.com/forgeutah/deuce", // http not allowed
 		"ftp://example.com/repo.git",
 		"javascript:alert(1)",
-		"git@",                // no host
-		"git@host",            // no colon
-		"git@host:",           // no path
+		"git@",      // no host
+		"git@host",  // no colon
+		"git@host:", // no path
 		"git@host with space:/repo",
 	} {
 		if err := validateRepoURL(raw); err == nil {

@@ -36,19 +36,19 @@ func TestValidateLoopbackDest_AcceptsLiterals(t *testing.T) {
 // so the rule MUST be tight.
 func TestValidateLoopbackDest_RejectsEverythingElse(t *testing.T) {
 	hostileHosts := []string{
-		"",                          // empty
-		"0.0.0.0",                   // INADDR_ANY — listening != loopback
-		"127.0.0.2",                 // technically loopback range but not the literal
-		"10.0.0.1",                  // RFC1918
-		"169.254.169.254",           // AWS / GCE metadata service
-		"example.com",               // any DNS name
-		"LOCALHOST",                 // uppercase rejected — exact match only
-		"localhost.localdomain",     // FQDN variant
-		"::ffff:127.0.0.1",          // IPv4-mapped IPv6 form
-		"[::1]",                     // bracketed (URL-style)
-		"127.0.0.1\nattacker.com",   // injection attempt
-		"127.0.0.1 attacker.com",    // injection attempt with space
-		"localhost; rm -rf /",       // shell metachar (defense-in-depth)
+		"",                        // empty
+		"0.0.0.0",                 // INADDR_ANY — listening != loopback
+		"127.0.0.2",               // technically loopback range but not the literal
+		"10.0.0.1",                // RFC1918
+		"169.254.169.254",         // AWS / GCE metadata service
+		"example.com",             // any DNS name
+		"LOCALHOST",               // uppercase rejected — exact match only
+		"localhost.localdomain",   // FQDN variant
+		"::ffff:127.0.0.1",        // IPv4-mapped IPv6 form
+		"[::1]",                   // bracketed (URL-style)
+		"127.0.0.1\nattacker.com", // injection attempt
+		"127.0.0.1 attacker.com",  // injection attempt with space
+		"localhost; rm -rf /",     // shell metachar (defense-in-depth)
 	}
 	for _, host := range hostileHosts {
 		if err := validateLoopbackDest(host, 8080); err == nil {

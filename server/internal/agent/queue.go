@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	queueBufferSize = 10
+	queueBufferSize   = 10
 	workerIdleTimeout = 10 * time.Minute
 )
 

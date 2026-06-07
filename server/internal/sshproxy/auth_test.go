@@ -227,7 +227,7 @@ func TestPublicKeyCallback_InvalidUsernamesRejectedBeforeDB(t *testing.T) {
 		"dc-" + strings.ToUpper(fx.sessionID.String()), // hex must be lowercase
 		"dc-" + fx.sessionID.String() + "\x00admin",    // NULL byte injection
 		"dc-" + fx.sessionID.String() + " ",            // trailing space
-		"dc-ｄｅｅｄ-0000-0000-0000-000000000000",            // full-width digits
+		"dc-ｄｅｅｄ-0000-0000-0000-000000000000",          // full-width digits
 	}
 	for _, u := range invalidUsernames {
 		meta := newMeta(u)
