@@ -221,3 +221,666 @@ button,
 .animate-fade-in-up {
   animation: fade-in-up 150ms ease-out;
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   Super Threads — inline anchored task cards + per-agent thread drawer.
+   Ported from docs/design/super-threads/.../queue.css with prototype
+   tokens (--bg, --fg-emphasis, …) remapped to the Deuce --color-* set.
+   The inline agent color rides in on the --ac custom property, set per
+   card/drawer from agent.color. Keyframes are st-prefixed to avoid
+   colliding with Tailwind's own (e.g. `spin`).
+   ══════════════════════════════════════════════════════════════════ */
+
+@keyframes st-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes st-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+@keyframes st-drawerin {
+  from {
+    transform: translateX(28px);
+    opacity: 0.4;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* ── State badge ──────────────────────────────────────────────── */
+.q-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border-radius: var(--radius-full);
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.q-badge.working {
+  color: var(--ac);
+  background: color-mix(in srgb, var(--ac) 16%, transparent);
+}
+.q-badge.queued {
+  color: var(--color-warning);
+  background: var(--color-warning-muted);
+}
+.q-badge.idle {
+  color: var(--color-success);
+  background: var(--color-success-muted);
+}
+.q-badge.failed {
+  color: var(--color-danger);
+  background: var(--color-danger-muted);
+}
+.q-badge .spin {
+  animation: st-spin 1.1s linear infinite;
+}
+
+/* ── typing dots ──────────────────────────────────────────────── */
+.tdot {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-full);
+  display: inline-block;
+  animation: typing-dots 1.4s ease-in-out infinite;
+}
+
+/* ── Inline anchored task card (one per @mention) ─────────────── */
+.tc {
+  margin: 8px 16px 10px 52px;
+  border: 1px solid var(--color-border-muted);
+  border-left: 3px solid var(--ac);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--ac) 7%, var(--color-background));
+  overflow: hidden;
+  cursor: pointer;
+  transition: opacity 0.35s ease, transform 0.35s ease, background 0.25s,
+    border-color 0.25s, box-shadow 0.15s;
+  transform-origin: top center;
+}
+.tc:hover {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ac) 32%, transparent);
+}
+.tc.done {
+  opacity: 0.5;
+  transform: scale(0.985);
+  background: transparent;
+  border-left-color: color-mix(in srgb, var(--ac) 45%, var(--color-border));
+}
+.tc.done:hover {
+  opacity: 0.9;
+}
+.tc.queued {
+  border-left-color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 6%, var(--color-background));
+}
+.tc.failed,
+.tc.cancelled {
+  border-left-color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 6%, var(--color-background));
+}
+
+.tc-hd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px 6px;
+}
+.tc-hd .nm {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-foreground-emphasis);
+}
+.tc-hd .role {
+  font-size: 11px;
+  color: var(--color-foreground-subtle);
+}
+.tc-hd .spacer {
+  margin-left: auto;
+}
+.tc-hd .chev {
+  color: var(--color-foreground-subtle);
+  display: flex;
+}
+
+.tc-live {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-foreground-muted);
+  border-top: 1px solid color-mix(in srgb, var(--ac) 14%, transparent);
+}
+.tc-live .pip {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--ac);
+  animation: st-pulse 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+.tc-live .tool {
+  color: var(--ac);
+  font-weight: 600;
+}
+.tc-live .arg {
+  color: var(--color-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tc-typing {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 11px 9px;
+}
+.tc-typing .lbl {
+  font-size: 11px;
+  color: var(--color-foreground-muted);
+  margin-left: 4px;
+}
+
+/* queued compact */
+.tc-q {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+}
+.tc-q .av {
+  opacity: 0.7;
+}
+.tc-q .info {
+  flex: 1;
+  min-width: 0;
+}
+.tc-q .l1 {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-warning);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.tc-q .l2 {
+  font-size: 12.5px;
+  color: var(--color-foreground);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tc-q .pos {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--color-warning);
+  background: var(--color-warning-muted);
+  border-radius: var(--radius-full);
+  padding: 3px 9px;
+}
+
+/* done chip */
+.tc-d {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 11px;
+}
+.tc-d .av {
+  opacity: 0.8;
+}
+.tc-d .ck {
+  display: flex;
+  color: var(--color-success);
+}
+.tc-d.failed .ck,
+.tc-d.cancelled .ck {
+  color: var(--color-danger);
+}
+.tc-d .l {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--color-foreground-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tc-d .l b {
+  color: var(--color-foreground);
+  font-weight: 600;
+}
+.tc-d .stat {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-success);
+  flex-shrink: 0;
+}
+
+/* ── Drawer: per-agent global thread ──────────────────────────── */
+.q-drawer {
+  width: 100%;
+  height: 100%;
+  border-left: 3px solid var(--ac);
+  background: var(--color-background);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  animation: st-drawerin 0.22s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.q-drawer-hd {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--color-border-muted);
+  border-top: 3px solid var(--ac);
+  background: color-mix(in srgb, var(--ac) 9%, var(--color-background));
+}
+.q-drawer-hd .nm {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-foreground-emphasis);
+}
+.q-drawer-hd .sub {
+  font-size: 11px;
+  color: var(--ac);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.q-drawer-hd .x {
+  margin-left: auto;
+  color: var(--color-foreground-muted);
+  background: transparent;
+  border: none;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.q-drawer-hd .x:hover {
+  background: var(--color-background-hover);
+  color: var(--color-foreground);
+}
+
+.q-thread {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 0;
+  min-height: 0;
+}
+.q-thread-foot {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-foreground-subtle);
+  text-align: center;
+  padding: 8px 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+}
+.q-thread-foot::before,
+.q-thread-foot::after {
+  content: "";
+  height: 1px;
+  width: 42px;
+  background: var(--color-border-muted);
+}
+
+.q-turn {
+  padding: 4px 14px 12px;
+  position: relative;
+}
+.q-turn + .q-turn {
+  border-top: 1px solid var(--color-border-muted);
+  padding-top: 12px;
+}
+.q-req {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+.q-req .hd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.q-req .nm {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-foreground-emphasis);
+}
+.q-req .ts {
+  font-size: 11px;
+  color: var(--color-foreground-subtle);
+}
+.q-req .bd {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-foreground);
+  padding-left: 32px;
+}
+.q-req .bd .mention {
+  color: var(--ac);
+  font-weight: 600;
+}
+
+/* Agent response reads like any other participant's message — avatar + name on
+   the header row, body aligned beneath it. No colored rail, no block indent. */
+.q-resp {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.q-resp .agent-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.q-resp .nm {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-foreground-emphasis);
+}
+.q-resp .ts {
+  font-size: 11px;
+  color: var(--color-foreground-subtle);
+}
+.q-resp .bd {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--color-foreground);
+  padding-left: 32px;
+}
+.q-resp .q-actions {
+  padding-left: 32px;
+}
+.q-resp .q-actsum {
+  margin-left: 32px;
+}
+.q-resp code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-foreground-emphasis);
+  background: var(--color-background-subtle);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.q-typingline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.q-typingline .lbl {
+  font-size: 12px;
+  color: var(--color-foreground-muted);
+}
+
+.q-queued-card {
+  margin-left: 32px;
+  border: 1px dashed color-mix(in srgb, var(--color-warning) 50%, var(--color-border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-warning) 6%, transparent);
+  padding: 9px 11px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.q-queued-card .av {
+  opacity: 0.6;
+}
+.q-queued-card .info {
+  flex: 1;
+  min-width: 0;
+}
+.q-queued-card .info .l1 {
+  font-size: 12px;
+  color: var(--color-warning);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.q-queued-card .info .l2 {
+  font-size: 11px;
+  color: var(--color-foreground-muted);
+  margin-top: 1px;
+}
+
+.q-pending-q {
+  margin-left: 32px;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 45%, var(--color-border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+  padding: 9px 11px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-foreground);
+}
+.q-pending-q .l1 {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-warning);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* drawer composer */
+.q-drawer-composer {
+  border-top: 1px solid var(--color-border-muted);
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--ac) 5%, var(--color-background));
+}
+.q-drawer-composer .row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.q-drawer-composer textarea {
+  flex: 1;
+  resize: none;
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--ac) 30%, var(--color-border-muted));
+  background: var(--color-background-input);
+  padding: 8px 11px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--color-foreground);
+  outline: none;
+  max-height: 100px;
+  line-height: 1.5;
+}
+.q-drawer-composer textarea:focus {
+  border-color: var(--ac);
+}
+.q-drawer-composer textarea::placeholder {
+  color: var(--color-foreground-subtle);
+}
+.q-drawer-composer .send {
+  height: 34px;
+  width: 34px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--ac);
+  color: #06121f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.q-drawer-composer .send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Action log (Claude Code-style) ───────────────────────────── */
+.q-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 5px;
+}
+.q-act {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.q-act-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-foreground);
+  line-height: 1.4;
+}
+.q-act-ic {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-foreground-subtle);
+}
+.q-act .tool {
+  color: var(--ac);
+  font-weight: 600;
+}
+.q-act .paren {
+  color: var(--color-foreground-subtle);
+}
+.q-act .arg {
+  color: var(--color-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.q-act .note {
+  color: var(--color-foreground-subtle);
+  margin-left: 6px;
+}
+.q-act-stat {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+}
+.q-act-stat.done {
+  color: var(--color-success);
+}
+.q-act-stat.error {
+  color: var(--color-danger);
+}
+.q-act-stat.run {
+  color: var(--ac);
+  animation: st-spin 1.1s linear infinite;
+}
+.q-act.think .q-act-row {
+  color: var(--color-foreground-muted);
+  font-style: italic;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+}
+.q-act.think .q-act-ic {
+  color: var(--color-purple);
+}
+
+.q-detail {
+  margin: 1px 0 3px 22px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--color-background-inset);
+}
+.q-detail .top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--color-border-muted);
+  background: var(--color-background-subtle);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--color-foreground-muted);
+}
+.q-detail .top .stat {
+  margin-left: auto;
+  color: var(--color-success);
+}
+.q-detail pre {
+  margin: 0;
+  padding: 7px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre;
+  overflow-x: auto;
+  color: var(--color-foreground);
+}
+.q-out {
+  margin: 1px 0 3px 22px;
+  padding: 7px 10px;
+  border: 1px solid var(--color-border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--color-background-inset);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  color: var(--color-foreground);
+}
+
+.q-actsum {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--color-foreground-muted);
+  cursor: pointer;
+  padding: 3px 0;
+  font-family: var(--font-mono);
+  user-select: none;
+}
+.q-actsum .ct {
+  color: var(--color-foreground);
+}
+.q-actsum .stat {
+  color: var(--color-success);
+}
+.q-actsum:hover {
+  color: var(--color-foreground);
+}

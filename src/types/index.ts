@@ -171,6 +171,10 @@ export interface AgentTask {
   pendingQuestion?: string;
   reply?: string;
   actions: AgentAction[];
+  // order is a client-only stable creation-order index assigned by the reducer
+  // (not sent by the server). Sorting on it keeps the drawer thread and queue
+  // positions chronological even as later events overwrite seq.
+  order?: number;
 }
 
 // AgentRunEvent payloads mirror Go ws.TaskEventPayload / ws.ActionEventPayload.

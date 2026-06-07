@@ -6,6 +6,8 @@ import {
 import { SessionSidebar } from "./SessionSidebar";
 import { CenterPanel } from "./CenterPanel";
 import { SummaryPanel } from "./SummaryPanel";
+import { ThreadDrawerPanel } from "@/components/super-threads/ThreadDrawerPanel";
+import { useSessionStore } from "@/stores/session-store";
 
 // Clear any stale cached panel layouts from localStorage
 for (const key of Object.keys(localStorage)) {
@@ -15,6 +17,11 @@ for (const key of Object.keys(localStorage)) {
 }
 
 export function AppShell() {
+  // When an agent thread is open, the right panel swaps the summary view for the
+  // Super Threads drawer (the drawer carries its own chrome + agent-colored
+  // border, so it replaces rather than stacks on the summary).
+  const threadOpen = useSessionStore((s) => s.openThread !== null);
+
   return (
     <ResizablePanelGroup orientation="horizontal" className="h-full">
       <ResizablePanel
@@ -36,9 +43,9 @@ export function AppShell() {
       <ResizablePanel
         defaultSize={25}
         minSize={15}
-        className="bg-background-subtle"
+        className={threadOpen ? undefined : "bg-background-subtle"}
       >
-        <SummaryPanel />
+        {threadOpen ? <ThreadDrawerPanel /> : <SummaryPanel />}
       </ResizablePanel>
     </ResizablePanelGroup>
   );

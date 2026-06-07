@@ -19,9 +19,10 @@ import type {
 export interface SessionAgentRuns {
   tasks: Record<string, AgentTask>; // by task id
   lastSeq: number; // highest applied event seq
+  nextOrder: number; // monotonic creation-order counter for stable sorting
 }
 
-export const emptyAgentRuns = (): SessionAgentRuns => ({ tasks: {}, lastSeq: 0 });
+export const emptyAgentRuns = (): SessionAgentRuns => ({ tasks: {}, lastSeq: 0, nextOrder: 0 });
 
 // The AgentRunEvent server message types (mirror ws/events.go constants).
 export const AGENT_RUN_EVENT_TYPES = [
@@ -50,10 +51,12 @@ export interface ApplyResult {
 // to the snapshot's latestSeq. Subsequent events apply only when seq > latestSeq.
 export function applySnapshot(snapshot: AgentRunSnapshot): SessionAgentRuns {
   const tasks: Record<string, AgentTask> = {};
-  for (const t of snapshot.tasks) {
-    tasks[t.id] = { ...t, actions: t.actions ?? [] };
-  }
-  return { tasks, lastSeq: snapshot.latestSeq };
+  // Snapshot tasks arrive in creation order; assign a stable order index so the
+  // drawer thread and queue positions stay chronological regardless of seq.
+  snapshot.tasks.forEach((t, i) => {
+    tasks[t.id] = { ...t, actions: t.actions ?? [], order: i };
+  });
+  return { tasks, lastSeq: snapshot.latestSeq, nextOrder: snapshot.tasks.length };
 }
 
 // applyEvent applies one AgentRunEvent. Events with seq <= lastSeq are ignored
@@ -71,13 +74,20 @@ export function applyEvent(
   const needsResync = prev.lastSeq > 0 && payload.seq > prev.lastSeq + 1;
 
   const tasks = { ...prev.tasks };
+  let nextOrder = prev.nextOrder;
   switch (type) {
     case "task_enqueued":
     case "task_started":
     case "task_awaiting_input":
     case "task_completed": {
       const p = payload as TaskEventPayload;
-      tasks[p.taskId] = reduceTask(tasks[p.taskId], type, p);
+      const existing = tasks[p.taskId];
+      // Stamp a stable creation-order index the first time a task is seen, so
+      // the drawer thread and queue positions stay chronological even as later
+      // events overwrite task.seq.
+      const order = existing?.order ?? nextOrder;
+      if (existing?.order === undefined) nextOrder += 1;
+      tasks[p.taskId] = { ...reduceTask(existing, type, p), order };
       break;
     }
     case "action_started":
@@ -91,7 +101,7 @@ export function applyEvent(
     }
   }
 
-  return { state: { tasks, lastSeq: payload.seq }, needsResync };
+  return { state: { tasks, lastSeq: payload.seq, nextOrder }, needsResync };
 }
 
 function reduceTask(
@@ -179,3 +189,57 @@ function reduceActions(
   };
   return merged;
 }
+
+// ---------------------------------------------------------------------------
+// Selectors — pure, derive view-model slices from SessionAgentRuns. These run
+// on every render, so they sort/group from the task map without mutating it.
+// ---------------------------------------------------------------------------
+
+// sessionTaskList returns all tasks in stable creation order.
+export function sessionTaskList(runs: SessionAgentRuns | undefined): AgentTask[] {
+  if (!runs) return [];
+  return Object.values(runs.tasks).sort(
+    (a, b) => (a.order ?? 0) - (b.order ?? 0),
+  );
+}
+
+// tasksByAnchor groups tasks under the chat message they were spawned from
+// (anchorMessageId). Tasks with no anchor are omitted — they render only in the
+// per-agent drawer thread, not inline beneath a message.
+export function tasksByAnchor(
+  runs: SessionAgentRuns | undefined,
+): Record<string, AgentTask[]> {
+  const out: Record<string, AgentTask[]> = {};
+  for (const task of sessionTaskList(runs)) {
+    if (!task.anchorMessageId) continue;
+    (out[task.anchorMessageId] ??= []).push(task);
+  }
+  return out;
+}
+
+// tasksForAgent returns one agent's tasks in chronological order — the drawer
+// thread.
+export function tasksForAgent(
+  runs: SessionAgentRuns | undefined,
+  agentId: string,
+): AgentTask[] {
+  return sessionTaskList(runs).filter((t) => t.agentId === agentId);
+}
+
+// queuePositions assigns a 1-based position to each queued task per agent, in
+// creation order. The server sends `position` on enqueue, but it goes stale
+// after promotions and is absent from snapshots — deriving it here keeps the
+// "#N in queue" label correct regardless. Keyed by task id.
+export function queuePositions(
+  runs: SessionAgentRuns | undefined,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  const perAgent: Record<string, number> = {};
+  for (const task of sessionTaskList(runs)) {
+    if (task.state !== "queued") continue;
+    perAgent[task.agentId] = (perAgent[task.agentId] ?? 0) + 1;
+    out[task.id] = perAgent[task.agentId];
+  }
+  return out;
+}
+

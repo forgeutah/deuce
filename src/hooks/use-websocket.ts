@@ -209,7 +209,12 @@ export function useWebSocket() {
       reconnectDelay.current = 1000;
       reconnectAttempts.current = 0;
 
-      // Re-join active session
+      // Re-join active session, then fetch its agent-run snapshot. This covers
+      // the initial page load / refresh: the active session is typically set
+      // BEFORE the socket finishes opening, so the join effect below early-
+      // returns without fetching. Without this fetch, inline task cards stay
+      // empty until the user switches channels. Subscribe before the fetch so
+      // any event during the round-trip is applied or gap-healed (R9).
       if (activeSessionRef.current) {
         ws.send(
           JSON.stringify({
@@ -217,6 +222,7 @@ export function useWebSocket() {
             sessionId: activeSessionRef.current,
           }),
         );
+        void useSessionStore.getState().fetchAgentRuns(activeSessionRef.current);
       }
     };
 
@@ -313,6 +319,16 @@ export function useWebSocket() {
     },
     [],
   );
+
+  // Register sendSteer into the store so the thread-drawer composer can steer
+  // agents without re-instantiating this hook (it's mounted once in App). The
+  // store forwards through store.steer(); clear the slot on unmount so a stale
+  // closure over a closed socket can't linger.
+  useEffect(() => {
+    const setSteerSender = useSessionStore.getState().setSteerSender;
+    setSteerSender(sendSteer);
+    return () => setSteerSender(null);
+  }, [sendSteer]);
 
   return { sendSteer };
 }

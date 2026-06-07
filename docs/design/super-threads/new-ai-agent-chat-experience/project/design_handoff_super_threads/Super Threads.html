@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Super Threads — Concepts</title>
+  <link rel="icon" type="image/png" href="assets/deuce-logo.png" />
+  <link rel="stylesheet" href="deuce-base.css" />
+  <link rel="stylesheet" href="super-thread.css" />
+  <style>
+    /* reasoning intro panel */
+    .intro{width:100%;height:100%;background:var(--bg);color:var(--fg);padding:30px 32px;
+      font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden}
+    .intro .kick{display:flex;align-items:center;gap:9px;margin-bottom:14px}
+    .intro .kick img{width:26px;height:26px;border-radius:6px}
+    .intro .kick b{font-size:14px;color:var(--fg-emphasis);font-weight:600}
+    .intro .kick span{font-size:11px;color:var(--fg-subtle);text-transform:uppercase;letter-spacing:.08em}
+    .intro h2{font-size:23px;line-height:1.25;color:var(--fg-emphasis);margin:0 0 12px;font-weight:600;letter-spacing:-.01em}
+    .intro p{font-size:13px;line-height:1.6;color:var(--fg-muted);margin:0 0 16px;max-width:60ch}
+    .intro .sys{display:flex;flex-direction:column;gap:9px;margin-top:2px}
+    .intro .row{display:flex;gap:10px;align-items:flex-start;font-size:12.5px;line-height:1.5;color:var(--fg)}
+    .intro .row .dot{width:8px;height:8px;border-radius:50%;margin-top:5px;flex-shrink:0}
+    .intro .row b{color:var(--fg-emphasis);font-weight:600}
+    .intro .foot{margin-top:auto;padding-top:16px;border-top:1px solid var(--border-muted);font-size:12px;color:var(--fg-subtle);line-height:1.55}
+    .intro .foot b{color:var(--accent)}
+    .mini-wrap{width:100%;height:100%;display:flex;flex-direction:column;background:var(--bg);overflow:hidden}
+    .mini-wrap .mh{display:flex;align-items:center;gap:7px;padding:9px 14px;border-bottom:1px solid var(--border-muted)}
+    .mini-wrap .mh .h{font-size:13px;font-weight:600;color:var(--fg-emphasis)}
+    .mini-wrap .mh .lucide{width:14px;height:14px;color:var(--fg-subtle)}
+    .mini-body{flex:1;overflow:hidden;padding:10px 0;display:flex;flex-direction:column;gap:2px}
+  </style>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <script type="module">
+    import { icons } from "https://cdn.jsdelivr.net/npm/lucide@latest/dist/esm/lucide.js";
+    window.LucideIcons = icons;
+    window.dispatchEvent(new Event("lucide-ready"));
+  </script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="deuce-shell.jsx"></script>
+  <script type="text/babel" src="concepts.jsx"></script>
+  <script type="text/babel">
+    const { Icon, AG } = window.STShell;
+    const C = window.STConcepts;
+    const AB = "#0D1117";
+
+    /* mini channel wrapper for collapsed-card variants */
+    function Mini({ children }) {
+      const { Av, Uav, mention } = window.STShell;
+      return (
+        <div className="mini-wrap">
+          <div className="mh"><Icon name="Hash" /><span className="h">auth-module</span></div>
+          <div className="mini-body">
+            <div className="st-msg"><div className="hd"><Uav seed="Clint" /><span className="nm">Clint Berry</span><span className="ts">2:04 PM</span></div>
+              <div className="bd">Kicking off the auth module — JWT validation with expiration checks.</div></div>
+            {children}
+            <div style={{ flex: 1 }} />
+          </div>
+        </div>
+      );
+    }
+
+    function Reasoning() {
+      return (
+        <div className="intro">
+          <div className="kick"><img src="assets/deuce-logo.png" alt="" /><b>Super Threads</b><span>Concept exploration</span></div>
+          <h2>@-mentioning an agent opens a focused “super thread” — its own channel-within-the-channel, wrapped in the agent’s color.</h2>
+          <p>When you’re not in it, a super thread collapses into a compact agent-colored card in the main channel: the last couple of messages tick by live, and a status line shows whether the agent is still working. Step in, and the thread opens with the agent’s live status and its diffs / results docked on the right.</p>
+          <div className="sys">
+            <div className="row"><span className="dot" style={{ background: AG.coder.color }} /><span><b>One focused at a time.</b> Other agents stay collapsed in the channel — Reviewer, Tester keep ticking in their own colors.</span></div>
+            <div className="row"><span className="dot" style={{ background: AG.reviewer.color }} /><span><b>Agents only.</b> Humans post in the shared channel; super threads are the AI-interaction surface.</span></div>
+            <div className="row"><span className="dot" style={{ background: AG.tester.color }} /><span><b>Work travels with the thread.</b> Live tool calls, current file, diffs and test results dock to the right of the open thread.</span></div>
+          </div>
+          <div className="foot">Scenario: <b>#auth-module</b> — Coder, Reviewer & Tester working in parallel. Section A explores the collapsed card; Section B explores where the open thread lives; Section C pushes a novel metaphor. Open any frame fullscreen with the ⤢ control. Pick a favorite and I’ll build it into a working prototype.</div>
+        </div>
+      );
+    }
+
+    function Canvas() {
+      const { DesignCanvas, DCSection, DCArtboard } = window;
+      return (
+        <DesignCanvas>
+          <DCSection id="start" title="Super Threads" subtitle="Focused @agent conversations inside a Deuce session — concept set">
+            <DCArtboard id="intro" label="The idea + the system" width={680} height={560} style={{ background: AB }}><Reasoning /></DCArtboard>
+          </DCSection>
+
+          <DCSection id="collapsed" title="A · Collapsed in the channel" subtitle="How a super thread looks when you're NOT in it — agent-colored, last messages ticking live, working signal">
+            <DCArtboard id="a1" label="A1 · Peek stack + live status (recommended)" width={520} height={470} style={{ background: AB }}>
+              <Mini><C.CardA agent={AG.coder} peeks={C.CODER_PEEKS} live={C.CODER_LIVE} working unread={3} /></Mini>
+            </DCArtboard>
+            <DCArtboard id="a2" label="A2 · Live console + activity sparkline" width={520} height={470} style={{ background: AB }}>
+              <Mini><C.CardB agent={AG.coder} last="Done — Validate() rejects expired tokens. Build passes." live={C.CODER_LIVE} sparks={[6,12,9,16,7,14,10,18,8,13,11,15,9,17,7,12]} /></Mini>
+            </DCArtboard>
+            <DCArtboard id="a3" label="A3 · Minimal bar (stacks densely)" width={520} height={470} style={{ background: AB }}>
+              <Mini>
+                <C.CardC agent={AG.coder} last="Done — build passes, validate.go +12 −3" working unread={3} />
+                <C.CardC agent={AG.reviewer} last="Reading the diff for edge cases…" working unread={2} />
+                <C.CardC agent={AG.tester} last="Tests written and passing — 4/4 green." working={false} unread={0} />
+              </Mini>
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection id="focused" title="B · Where the open thread lives" subtitle="Step into one super thread — others stay collapsed. Live work + diffs dock to the right.">
+            <DCArtboard id="b1" label="B1 · Drawer — thread + work slide in from the right" width={1280} height={780} style={{ background: AB }}><C.DrawerConcept /></DCArtboard>
+            <DCArtboard id="b2" label="B2 · Split — channel | thread, work in the far rail" width={1280} height={780} style={{ background: AB }}><C.SplitConcept /></DCArtboard>
+            <DCArtboard id="b3" label="B3 · Overlay — float over the dimmed channel" width={1280} height={780} style={{ background: AB }}><C.OverlayConcept /></DCArtboard>
+            <DCArtboard id="b4" label="B4 · Takeover — thread fills the center, breadcrumb back" width={1280} height={780} style={{ background: AB }}><C.TakeoverConcept /></DCArtboard>
+          </DCSection>
+
+          <DCSection id="novel" title="C · Novel metaphor — Tune in" subtitle="Each agent broadcasts a live “station”; its waveform is its activity. Tune into one to step inside its thread.">
+            <DCArtboard id="c1" label="C1 · Station board" width={1280} height={780} style={{ background: AB }}><C.StationConcept /></DCArtboard>
+          </DCSection>
+        </DesignCanvas>
+      );
+    }
+
+    function boot() { ReactDOM.createRoot(document.getElementById("root")).render(<Canvas />); }
+    if (window.LucideIcons) boot(); else window.addEventListener("lucide-ready", boot, { once: true });
+  </script>
+</body>
+</html>

@@ -41,6 +41,15 @@ interface SessionState {
   activeTabMap: Record<string, TabType>;
   showLogs: boolean;
   searchQuery: string;
+  // Super Threads: which agent's per-agent thread drawer is open (right panel).
+  // Null when no drawer is open. Reset whenever the active session changes.
+  openThread: { sessionId: string; agentId: string } | null;
+  // steerSender is registered by the WebSocket hook (use-websocket) so the
+  // store can forward steer/reply messages without ChatView needing its own
+  // socket. Null until the hook mounts.
+  steerSender:
+    | ((sessionId: string, agentId: string, message: string) => void)
+    | null;
 
   // Actions
   setActiveSession: (sessionId: string) => void;
@@ -68,6 +77,14 @@ interface SessionState {
     payload: TaskEventPayload | ActionEventPayload,
   ) => void;
   fetchAgentRuns: (sessionId: string) => Promise<void>;
+  openAgentThread: (sessionId: string, agentId: string) => void;
+  closeAgentThread: () => void;
+  setSteerSender: (
+    fn:
+      | ((sessionId: string, agentId: string, message: string) => void)
+      | null,
+  ) => void;
+  steer: (sessionId: string, agentId: string, message: string) => void;
   setShowLogs: (show: boolean) => void;
   addSession: (session: Session) => void;
   updateWorkspaceStatus: (
@@ -107,10 +124,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   activeTabMap: {},
   showLogs: false,
   searchQuery: "",
+  openThread: null,
+  steerSender: null,
 
   setActiveSession: (sessionId) => {
     set((state) => ({
       activeSessionId: sessionId,
+      // Switching channels closes any open agent-thread drawer — it belongs to
+      // the session it was opened from.
+      openThread:
+        state.openThread?.sessionId === sessionId ? state.openThread : null,
       sessions: state.sessions.map((s) =>
         s.id === sessionId ? { ...s, unreadCount: 0 } : s,
       ),
@@ -313,6 +336,22 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     } catch (err) {
       console.error("failed to fetch agent runs snapshot", err);
     }
+  },
+
+  openAgentThread: (sessionId, agentId) =>
+    set({ openThread: { sessionId, agentId } }),
+
+  closeAgentThread: () => set({ openThread: null }),
+
+  setSteerSender: (fn) => set({ steerSender: fn }),
+
+  steer: (sessionId, agentId, message) => {
+    const send = get().steerSender;
+    if (!send) {
+      console.warn("steer dropped: no WebSocket sender registered");
+      return;
+    }
+    send(sessionId, agentId, message);
   },
 
   setShowLogs: (show) => set({ showLogs: show }),
