@@ -89,9 +89,11 @@ func New(queries *db.Queries, pool *pgxpool.Pool, hub *ws.Hub, githubToken strin
 }
 
 // SetRuntime installs the Pi-harness runtime (KTD11). When set, SendMessage
-// routes agent mentions through it instead of the legacy executor queue.
+// routes agent mentions through it instead of the legacy executor queue, and the
+// runtime posts agent replies into the chat via postAgentReply.
 func (h *Handler) SetRuntime(rt *agent.Runtime) {
 	h.runtime = rt
+	rt.SetReplyPoster(h.postAgentReply)
 }
 
 // SetSSHAvailable installs a predicate that the vscode-uri endpoint checks

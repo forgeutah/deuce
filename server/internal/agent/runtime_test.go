@@ -408,6 +408,36 @@ func TestTerminalIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestReplyPosterReceivesReply(t *testing.T) {
+	rt, _, bc, lr := newTestRuntime(t)
+	var mu sync.Mutex
+	var got string
+	rt.SetReplyPoster(func(_, _, reply string) { mu.Lock(); got = reply; mu.Unlock() })
+
+	ctx := context.Background()
+	rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "hi", WorkspaceID: "ws"})
+	bc.waitFor(t, ws.TypeTaskStarted, 1)
+	h := lr.handle(t, 0)
+	h.push(`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hello there"}}`)
+	h.push(`{"type":"agent_end"}`)
+	bc.waitFor(t, ws.TypeTaskCompleted, 1)
+
+	deadline := time.After(2 * time.Second)
+	for {
+		mu.Lock()
+		g := got
+		mu.Unlock()
+		if g == "hello there" {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("replyPoster received %q, want 'hello there'", g)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
 func TestCancelPromotesNextOntoFreshProcess(t *testing.T) {
 	rt, store, bc, lr := newTestRuntime(t)
 	ctx := context.Background()

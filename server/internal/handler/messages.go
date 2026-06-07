@@ -244,6 +244,37 @@ func (h *Handler) StopAgent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// postAgentReply posts an agent's reply as a chat message and broadcasts it.
+// Wired into the Pi runtime (SetReplyPoster) so agent output shows in the
+// existing chat — the Super Threads task/action cards are a separate surface.
+func (h *Handler) postAgentReply(sessionID, agentID, reply string) {
+	sid, err := uuid.Parse(sessionID)
+	if err != nil {
+		return
+	}
+	aid, err := uuid.Parse(agentID)
+	if err != nil {
+		aid = uuid.Nil
+	}
+	ctx := context.Background()
+	msg, err := h.queries.CreateMessage(ctx, db.CreateMessageParams{
+		SessionID:         sid,
+		AuthorID:          aid,
+		AuthorType:        "agent",
+		Content:           reply,
+		ExpandableContent: nil,
+		Mentions:          []string{},
+		Status:            "sent",
+	})
+	if err != nil {
+		slog.Error("failed to post agent reply", "error", err)
+		return
+	}
+	_ = h.queries.UpdateSessionLastActivity(ctx, sid)
+	wsMsg, _ := ws.NewServerMessage(ws.TypeNewMessage, sessionID, toMessageResponse(msg))
+	h.hub.BroadcastToSession(sessionID, wsMsg, nil)
+}
+
 func (h *Handler) postSystemMessage(sessionID uuid.UUID, content string) {
 	msg, err := h.queries.CreateMessage(context.Background(), db.CreateMessageParams{
 		SessionID:         sessionID,

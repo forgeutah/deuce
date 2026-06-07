@@ -25,6 +25,10 @@ type Runtime struct {
 	store Store
 	sup   *pirun.Supervisor
 	bc    Broadcaster
+	// replyPoster, when set, posts an agent's terminal reply as a normal chat
+	// message so it shows in the existing chat UI (the Super Threads task/action
+	// cards are a separate, later surface). Wired by the handler layer.
+	replyPoster func(sessionID, agentID, reply string)
 
 	keys keyedMutex // per-(session,agent) critical sections (KTD9 TOCTOU)
 
@@ -85,6 +89,13 @@ func NewRuntime(store Store, sup *pirun.Supervisor, bc Broadcaster) *Runtime {
 	}
 }
 
+// SetReplyPoster installs a callback that posts an agent's terminal reply as a
+// chat message. Without it, agent output is only visible via the AgentRunEvent
+// stream (the Super Threads cards), not in the existing chat.
+func (r *Runtime) SetReplyPoster(fn func(sessionID, agentID, reply string)) {
+	r.replyPoster = fn
+}
+
 // Start launches the process-exit consumer (a supervisor exit fails the running
 // task and promotes the next, KTD12).
 func (r *Runtime) Start() {
@@ -119,6 +130,7 @@ func (r *Runtime) Enqueue(ctx context.Context, p EnqueueParams) (string, error) 
 	if err != nil {
 		return "", err
 	}
+	slog.Info("runtime: task enqueued", "session", p.SessionID, "agent", p.AgentID, "task", taskID, "workspace", p.WorkspaceID)
 	r.promote(ctx, pirun.Key{SessionID: p.SessionID, AgentID: p.AgentID})
 	return taskID, nil
 }
@@ -394,6 +406,19 @@ func (r *Runtime) finalizeLocked(ctx context.Context, key pirun.Key, taskID, sta
 	r.broadcastTask(ws.TypeTaskCompleted, ws.TaskEventPayload{
 		Seq: seq, TaskID: taskID, AgentID: key.AgentID, State: state, Status: state, Reply: reply,
 	}, key.SessionID)
+	slog.Info("runtime: task finalized", "key", key.String(), "task", taskID, "state", state, "replyLen", len(reply))
+	// Surface the result in the existing chat. For a done task with no streamed
+	// text (e.g. the model produced only tool calls, or the run errored without
+	// a reply), post a fallback so an @mention never silently produces nothing.
+	if r.replyPoster != nil {
+		msg := reply
+		if msg == "" && state == StateDone {
+			msg = "(The agent finished without a text response.)"
+		}
+		if msg != "" {
+			r.replyPoster(key.SessionID, key.AgentID, msg)
+		}
+	}
 }
 
 // CancelSession cancels every running task in a session (agent-less /stop, R21).
