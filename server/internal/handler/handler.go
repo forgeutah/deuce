@@ -18,14 +18,18 @@ import (
 )
 
 type Handler struct {
-	queries        *db.Queries
-	pool           *pgxpool.Pool
-	hub            *ws.Hub
-	githubToken    string
-	workspaces     *workspace.Manager
-	terminals      *terminal.Manager
-	executor       *agent.Executor
-	agentQueue     *agent.Queue
+	queries     *db.Queries
+	pool        *pgxpool.Pool
+	hub         *ws.Hub
+	githubToken string
+	workspaces  *workspace.Manager
+	terminals   *terminal.Manager
+	executor    *agent.Executor
+	agentQueue  *agent.Queue
+	// runtime is the Pi-harness engine (KTD11). Non-nil when
+	// DEUCE_AGENT_HARNESS=pi (default); nil in legacy "claude" mode, where the
+	// executor/agentQueue path runs instead. Installed via SetRuntime.
+	runtime        *agent.Runtime
 	wsOrigins      []string
 	publicHostname string
 	sshListenAddr  string
@@ -82,6 +86,14 @@ func New(queries *db.Queries, pool *pgxpool.Pool, hub *ws.Hub, githubToken strin
 		publicHostname: publicHostname,
 		sshListenAddr:  sshListenAddr,
 	}
+}
+
+// SetRuntime installs the Pi-harness runtime (KTD11). When set, SendMessage
+// routes agent mentions through it instead of the legacy executor queue, and the
+// runtime posts agent replies into the chat via postAgentReply.
+func (h *Handler) SetRuntime(rt *agent.Runtime) {
+	h.runtime = rt
+	rt.SetReplyPoster(h.postAgentReply)
 }
 
 // SetSSHAvailable installs a predicate that the vscode-uri endpoint checks

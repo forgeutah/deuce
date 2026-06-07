@@ -13,6 +13,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { api, ApiError } from "@/lib/api";
 import { useSessionStore } from "@/stores/session-store";
+import { tasksByAnchor, queuePositions } from "@/stores/agent-runs";
+import { AgentTaskCard } from "@/components/super-threads/AgentTaskCard";
 import type { Agent, Message, User, Session, WorkspaceStatus } from "@/types";
 
 function isWorkspaceLive(status: WorkspaceStatus | undefined): boolean {
@@ -287,8 +289,16 @@ function MessageBubble({
 }
 
 export function ChatView() {
-  const { activeSessionId, sessions, messages, thinkingAgents, agentOutput, addMessage } =
-    useSessionStore();
+  const {
+    activeSessionId,
+    sessions,
+    messages,
+    thinkingAgents,
+    agentOutput,
+    addMessage,
+    agentRuns,
+    openAgentThread,
+  } = useSessionStore();
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
@@ -308,6 +318,11 @@ export function ChatView() {
   const allParticipants = session
     ? [...session.agents, ...session.members]
     : [];
+
+  // Super Threads: inline task cards anchored to the message that spawned them.
+  const sessionRuns = activeSessionId ? agentRuns[activeSessionId] : undefined;
+  const cardsByAnchor = tasksByAnchor(sessionRuns);
+  const queuePos = queuePositions(sessionRuns);
 
   // Track whether user is near the bottom of the scroll area
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -420,13 +435,34 @@ export function ChatView() {
                     (p) => "email" in p && p.id === msg.authorId,
                   ) ?? session?.members.find((m) => m.id === msg.authorId);
 
+            const anchoredTasks = cardsByAnchor[msg.id] ?? [];
+
             return (
-              <MessageBubble
-                key={msg.id}
-                message={msg}
-                author={author}
-                showHeader={showHeader}
-              />
+              <div key={msg.id}>
+                <MessageBubble
+                  message={msg}
+                  author={author}
+                  showHeader={showHeader}
+                />
+                {anchoredTasks.map((task) => {
+                  const taskAgent = session?.agents.find(
+                    (a) => a.id === task.agentId,
+                  );
+                  if (!taskAgent) return null;
+                  return (
+                    <AgentTaskCard
+                      key={task.id}
+                      agent={taskAgent}
+                      task={task}
+                      queuePos={queuePos[task.id]}
+                      onOpen={() =>
+                        activeSessionId &&
+                        openAgentThread(activeSessionId, taskAgent.id)
+                      }
+                    />
+                  );
+                })}
+              </div>
             );
           })}
 

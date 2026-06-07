@@ -116,14 +116,14 @@ func TestEnvAllowed_AllowAndDeny(t *testing.T) {
 
 func TestFilterEnv_AllowlistAndDedup(t *testing.T) {
 	in := []envEntry{
-		{Name: "LD_PRELOAD", Value: "/tmp/x.so"},  // denied
-		{Name: "LANG", Value: "C"},                // allowed
-		{Name: "PATH", Value: "/root/bin"},        // denied
-		{Name: "VSCODE_IPC_HOOK", Value: "/x"},    // allowed (prefix)
-		{Name: "LC_ALL", Value: "C"},              // allowed (prefix)
-		{Name: "LANG", Value: "en_US.UTF-8"},      // override
-		{Name: "PYTHONPATH", Value: "/etc"},       // denied
-		{Name: "", Value: "v"},                    // denied (empty)
+		{Name: "LD_PRELOAD", Value: "/tmp/x.so"}, // denied
+		{Name: "LANG", Value: "C"},               // allowed
+		{Name: "PATH", Value: "/root/bin"},       // denied
+		{Name: "VSCODE_IPC_HOOK", Value: "/x"},   // allowed (prefix)
+		{Name: "LC_ALL", Value: "C"},             // allowed (prefix)
+		{Name: "LANG", Value: "en_US.UTF-8"},     // override
+		{Name: "PYTHONPATH", Value: "/etc"},      // denied
+		{Name: "", Value: "v"},                   // denied (empty)
 	}
 	got := filterEnv(in)
 	want := []string{

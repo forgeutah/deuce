@@ -1,6 +1,13 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useSessionStore } from "@/stores/session-store";
-import type { AgentStatus, Message, ActivityItem } from "@/types";
+import type {
+  AgentStatus,
+  Message,
+  ActivityItem,
+  TaskEventPayload,
+  ActionEventPayload,
+} from "@/types";
+import { isAgentRunEvent } from "@/stores/agent-runs";
 import { api } from "@/lib/api";
 
 interface ServerMessage {
@@ -166,6 +173,22 @@ export function useWebSocket() {
           );
           break;
         }
+
+        default: {
+          // Super Threads AgentRunEvent family (task_*/action_*): apply by seq
+          // to the per-session reduced state; the reducer self-heals seq gaps
+          // by refetching the snapshot.
+          if (isAgentRunEvent(msg.type)) {
+            useSessionStore
+              .getState()
+              .applyAgentRunEvent(
+                msg.sessionId,
+                msg.type,
+                msg.payload as TaskEventPayload | ActionEventPayload,
+              );
+          }
+          break;
+        }
       }
     },
     [addMessage, updateAgentStatus, setThinkingAgent, clearThinkingAgent, addActivity, appendWorkspaceLog, appendAgentOutput, clearAgentOutput],
@@ -186,7 +209,12 @@ export function useWebSocket() {
       reconnectDelay.current = 1000;
       reconnectAttempts.current = 0;
 
-      // Re-join active session
+      // Re-join active session, then fetch its agent-run snapshot. This covers
+      // the initial page load / refresh: the active session is typically set
+      // BEFORE the socket finishes opening, so the join effect below early-
+      // returns without fetching. Without this fetch, inline task cards stay
+      // empty until the user switches channels. Subscribe before the fetch so
+      // any event during the round-trip is applied or gap-healed (R9).
       if (activeSessionRef.current) {
         ws.send(
           JSON.stringify({
@@ -194,6 +222,7 @@ export function useWebSocket() {
             sessionId: activeSessionRef.current,
           }),
         );
+        void useSessionStore.getState().fetchAgentRuns(activeSessionRef.current);
       }
     };
 
@@ -263,7 +292,9 @@ export function useWebSocket() {
       );
     }
 
-    // Join new session
+    // Join new session, then fetch the agent-run snapshot. Subscribe BEFORE
+    // the snapshot fetch so any event broadcast during the fetch is applied
+    // (or self-healed via gap detection) rather than dropped (R9 ordering).
     if (activeSessionId) {
       ws.send(
         JSON.stringify({ type: "join", sessionId: activeSessionId }),
@@ -271,8 +302,33 @@ export function useWebSocket() {
       ws.send(
         JSON.stringify({ type: "mark_read", sessionId: activeSessionId }),
       );
+      void useSessionStore.getState().fetchAgentRuns(activeSessionId);
     }
 
     activeSessionRef.current = activeSessionId;
   }, [activeSessionId]);
+
+  // sendSteer delivers a drawer reply to a live agent run (feed/answer) or, if
+  // the agent is idle, enqueues a new task server-side (R15/R19). The server
+  // also posts the reply to the channel for shared visibility.
+  const sendSteer = useCallback(
+    (sessionId: string, agentId: string, message: string) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: "steer", sessionId, agentId, message }));
+    },
+    [],
+  );
+
+  // Register sendSteer into the store so the thread-drawer composer can steer
+  // agents without re-instantiating this hook (it's mounted once in App). The
+  // store forwards through store.steer(); clear the slot on unmount so a stale
+  // closure over a closed socket can't linger.
+  useEffect(() => {
+    const setSteerSender = useSessionStore.getState().setSteerSender;
+    setSteerSender(sendSteer);
+    return () => setSteerSender(null);
+  }, [sendSteer]);
+
+  return { sendSteer };
 }

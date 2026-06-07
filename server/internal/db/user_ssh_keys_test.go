@@ -53,8 +53,10 @@ func userSSHKeysFixture(t *testing.T) (*Queries, uuid.UUID, uuid.UUID, *fixtureC
 }
 
 type fixtureCleanup struct {
-	pool interface{ Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) }
-	ctx  context.Context
+	pool interface {
+		Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	}
+	ctx context.Context
 }
 
 // validFingerprint produces a unique-looking but format-valid SHA256

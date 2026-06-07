@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Super Threads — Concepts (print)</title>
+  <link rel="icon" type="image/png" href="assets/deuce-logo.png" />
+  <meta name="ext-resource-dependency" content="assets/deuce-logo.png" data-resource-id="logo" />
+  <meta name="ext-resource-dependency" content="https://api.dicebear.com/9.x/avataaars/svg?seed=Clint" data-resource-id="av_Clint" />
+  <template id="__bundler_thumbnail" data-bg-color="#0D1117">
+    <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
+      <rect width="1200" height="800" fill="#0D1117"/>
+      <rect x="360" y="250" width="480" height="300" rx="16" fill="#151B23" stroke="#3D444D" stroke-width="3"/>
+      <rect x="360" y="250" width="8" height="300" rx="4" fill="#58a6ff"/>
+      <circle cx="410" cy="300" r="18" fill="#58a6ff"/>
+      <rect x="446" y="290" width="150" height="16" rx="8" fill="#9198A1"/>
+      <rect x="400" y="350" width="380" height="12" rx="6" fill="#3D444D"/>
+      <rect x="400" y="380" width="300" height="12" rx="6" fill="#3D444D"/>
+      <circle cx="410" cy="470" r="7" fill="#58a6ff"/>
+      <circle cx="440" cy="470" r="7" fill="#58a6ff" opacity="0.6"/>
+      <circle cx="470" cy="470" r="7" fill="#58a6ff" opacity="0.3"/>
+    </svg>
+  </template>
+  <link rel="stylesheet" href="deuce-base.css" />
+  <link rel="stylesheet" href="super-thread.css" />
+  <style>
+    html,body{background:#f0eee9;margin:0}
+    .sheet{display:flex;flex-direction:column;align-items:center;gap:40px;padding:40px 0}
+    .page{width:1340px;background:#0D1117;border-radius:6px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.18);
+      display:flex;flex-direction:column}
+    .page-hd{padding:20px 28px 0;font-family:var(--font-sans)}
+    .page-hd .lbl{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--accent)}
+    .page-hd h2{font-size:22px;color:var(--fg-emphasis);margin:6px 0 2px;font-weight:600;letter-spacing:-.01em}
+    .page-hd p{font-size:13px;color:var(--fg-muted);margin:0}
+    .page-body{padding:20px 28px 28px}
+    .frame{width:1284px;height:780px;border:1px solid var(--border-muted);border-radius:8px;overflow:hidden;margin:0 auto}
+    .frame.tall{height:790px}
+    .cards-row{display:flex;gap:18px;justify-content:center}
+    .mini-col{width:420px}
+    .mini-frame{height:470px;border:1px solid var(--border-muted);border-radius:8px;overflow:hidden}
+    .mini-cap{font-size:12px;color:var(--fg-muted);font-family:var(--font-sans);margin:0 0 8px;text-align:center}
+    .mini-cap b{color:var(--fg-emphasis);font-weight:600}
+    /* intro */
+    .intro{width:100%;height:100%;background:var(--bg);color:var(--fg);padding:30px 32px;font-family:var(--font-sans);display:flex;flex-direction:column}
+    .intro .kick{display:flex;align-items:center;gap:9px;margin-bottom:14px}
+    .intro .kick img{width:26px;height:26px;border-radius:6px}
+    .intro .kick b{font-size:14px;color:var(--fg-emphasis);font-weight:600}
+    .intro .kick span{font-size:11px;color:var(--fg-subtle);text-transform:uppercase;letter-spacing:.08em}
+    .intro h2{font-size:24px;line-height:1.25;color:var(--fg-emphasis);margin:0 0 12px;font-weight:600;letter-spacing:-.01em}
+    .intro p{font-size:13.5px;line-height:1.6;color:var(--fg-muted);margin:0 0 16px;max-width:70ch}
+    .intro .sys{display:flex;flex-direction:column;gap:10px}
+    .intro .row{display:flex;gap:10px;align-items:flex-start;font-size:13px;line-height:1.5;color:var(--fg)}
+    .intro .row .dot{width:8px;height:8px;border-radius:50%;margin-top:5px;flex-shrink:0}
+    .intro .row b{color:var(--fg-emphasis);font-weight:600}
+    .intro .foot{margin-top:auto;padding-top:16px;border-top:1px solid var(--border-muted);font-size:12.5px;color:var(--fg-subtle);line-height:1.55}
+    .intro .foot b{color:var(--accent)}
+    .mini-wrap{width:100%;height:100%;display:flex;flex-direction:column;background:var(--bg)}
+    .mini-wrap .mh{display:flex;align-items:center;gap:7px;padding:9px 14px;border-bottom:1px solid var(--border-muted)}
+    .mini-wrap .mh .h{font-size:13px;font-weight:600;color:var(--fg-emphasis)}
+    .mini-wrap .mh .lucide{width:14px;height:14px;color:var(--fg-subtle)}
+    .mini-body{flex:1;overflow:hidden;padding:10px 0;display:flex;flex-direction:column;gap:2px}
+
+    @page { size: 1420px 920px; margin: 0; }
+    @media print {
+      html,body{background:#fff}
+      .sheet{padding:0;gap:0}
+      .page{border-radius:0;box-shadow:none;width:1420px;height:920px;justify-content:flex-start;
+        break-after:page;break-inside:avoid;page-break-after:always}
+      .page:last-child{break-after:auto;page-break-after:auto}
+      .frame,.mini-frame,.page{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+      *,*::before,*::after{
+        animation-delay:-99s !important;animation-duration:.001s !important;
+        animation-iteration-count:1 !important;animation-fill-mode:both !important;
+        animation-play-state:running !important;transition-duration:0s !important;
+      }
+    }
+  </style>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <script type="module">
+    import { icons } from "https://cdn.jsdelivr.net/npm/lucide@latest/dist/esm/lucide.js";
+    window.LucideIcons = icons;
+    window.dispatchEvent(new Event("lucide-ready"));
+  </script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" src="deuce-shell.bundle.jsx"></script>
+  <script type="text/babel" src="concepts.bundle.jsx"></script>
+  <script type="text/babel">
+    const { Icon, AG, Uav } = window.STShell;
+    const C = window.STConcepts;
+
+    function Page({ lbl, title, desc, children }) {
+      return (
+        <div className="page">
+          <div className="page-hd"><div className="lbl">{lbl}</div><h2>{title}</h2><p>{desc}</p></div>
+          <div className="page-body">{children}</div>
+        </div>
+      );
+    }
+    function Mini({ children }) {
+      return (
+        <div className="mini-wrap">
+          <div className="mh"><Icon name="Hash" /><span className="h">auth-module</span></div>
+          <div className="mini-body">
+            <div className="st-msg"><div className="hd"><Uav seed="Clint" /><span className="nm">Clint Berry</span><span className="ts">2:04 PM</span></div>
+              <div className="bd">Kicking off the auth module — JWT validation with expiration checks.</div></div>
+            {children}
+            <div style={{ flex: 1 }} />
+          </div>
+        </div>
+      );
+    }
+    function Reasoning() {
+      return (
+        <div className="intro">
+          <div className="kick"><img src={((typeof window !== "undefined" && window.__resources) || {}).logo || "assets/deuce-logo.png"} alt="" /><b>Super Threads</b><span>Concept exploration</span></div>
+          <h2>@-mentioning an agent opens a focused “super thread” — its own channel-within-the-channel, wrapped in the agent’s color.</h2>
+          <p>When you’re not in it, a super thread collapses into a compact agent-colored card in the main channel: the last couple of messages tick by live, and a status line shows whether the agent is still working. Step in, and the thread opens with the agent’s live status and its diffs / results docked on the right.</p>
+          <div className="sys">
+            <div className="row"><span className="dot" style={{ background: AG.coder.color }} /><span><b>One focused at a time.</b> Other agents stay collapsed in the channel — Reviewer, Tester keep ticking in their own colors.</span></div>
+            <div className="row"><span className="dot" style={{ background: AG.reviewer.color }} /><span><b>Agents only.</b> Humans post in the shared channel; super threads are the AI-interaction surface.</span></div>
+            <div className="row"><span className="dot" style={{ background: AG.tester.color }} /><span><b>Work travels with the thread.</b> Live tool calls, current file, diffs and test results dock to the right of the open thread.</span></div>
+          </div>
+          <div className="foot">Scenario: <b>#auth-module</b> — Coder, Reviewer & Tester working in parallel. Section A explores the collapsed card; Section B explores where the open thread lives; Section C pushes a novel metaphor.</div>
+        </div>
+      );
+    }
+
+    function Doc() {
+      return (
+        <div className="sheet">
+          <Page lbl="Super Threads" title="The idea + the system" desc="Focused @agent conversations inside a Deuce session">
+            <div className="frame" style={{ height: 560, width: 760 }}><Reasoning /></div>
+          </Page>
+
+          <Page lbl="A · Collapsed in the channel" title="How a super thread looks when you're not in it" desc="Agent-colored, last messages ticking live, a clear working signal">
+            <div className="cards-row">
+              <div className="mini-col"><p className="mini-cap"><b>A1</b> · Peek stack + live status (recommended)</p>
+                <div className="mini-frame"><Mini><C.CardA agent={AG.coder} peeks={C.CODER_PEEKS} live={C.CODER_LIVE} working unread={3} /></Mini></div></div>
+              <div className="mini-col"><p className="mini-cap"><b>A2</b> · Live console + activity sparkline</p>
+                <div className="mini-frame"><Mini><C.CardB agent={AG.coder} last="Done — Validate() rejects expired tokens. Build passes." live={C.CODER_LIVE} sparks={[6,12,9,16,7,14,10,18,8,13,11,15,9,17,7,12]} /></Mini></div></div>
+              <div className="mini-col"><p className="mini-cap"><b>A3</b> · Minimal bar (stacks densely)</p>
+                <div className="mini-frame"><Mini>
+                  <C.CardC agent={AG.coder} last="Done — build passes, validate.go +12 −3" working unread={3} />
+                  <C.CardC agent={AG.reviewer} last="Reading the diff for edge cases…" working unread={2} />
+                  <C.CardC agent={AG.tester} last="Tests written and passing — 4/4 green." working={false} unread={0} />
+                </Mini></div></div>
+            </div>
+          </Page>
+
+          <Page lbl="B1 · Focused layout" title="Drawer — thread + work slide in from the right" desc="Most native to the current rail; live status & diffs dock alongside the conversation">
+            <div className="frame"><C.DrawerConcept /></div>
+          </Page>
+          <Page lbl="B2 · Focused layout" title="Split — channel | thread, work in the far rail" desc="Keep the room visible on the left while you work the thread on the right">
+            <div className="frame"><C.SplitConcept /></div>
+          </Page>
+          <Page lbl="B3 · Focused layout" title="Overlay — float over the dimmed channel" desc="Lightweight, modal-like focus; the channel recedes behind">
+            <div className="frame"><C.OverlayConcept /></div>
+          </Page>
+          <Page lbl="B4 · Focused layout" title="Takeover — thread fills the center, breadcrumb back" desc="Deepest focus; the session header becomes a breadcrumb">
+            <div className="frame"><C.TakeoverConcept /></div>
+          </Page>
+
+          <Page lbl="C · Novel metaphor" title="Tune in — agents broadcast live stations" desc="Each agent's waveform is its activity; tune into one to step inside its thread">
+            <div className="frame"><C.StationConcept /></div>
+          </Page>
+        </div>
+      );
+    }
+
+    function boot() {
+      ReactDOM.createRoot(document.getElementById("root")).render(<Doc />);
+      const fire = () => setTimeout(() => window.print(), 600);
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => setTimeout(fire, 400));
+      else setTimeout(fire, 1000);
+    }
+    if (window.LucideIcons) boot(); else window.addEventListener("lucide-ready", boot, { once: true });
+  </script>
+</body>
+</html>

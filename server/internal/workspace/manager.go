@@ -3,6 +3,7 @@ package workspace
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -431,5 +432,185 @@ func (m *Manager) InstallTools(ctx context.Context, workspaceID string, logFn Lo
 		logFn("Claude Code installed successfully")
 	}
 	slog.Info("claude code installed successfully", "workspace", workspaceID)
+	return nil
+}
+
+// InstallPi installs the Pi coding agent (pi.dev) inside the DevPod workspace.
+// Pi is an npm package requiring Node >= 22.19; its official installer can't
+// install Node over a non-TTY pipe, so piInstallScript provisions Node first
+// (reuse or standalone tarball) and then runs the official installer headlessly
+// (see that const for detail). Pi is the agent harness in Topology A; the
+// supervisor launches it as `pi --mode rpc`. Output is streamed line-by-line to
+// logFn. Non-fatal: a workspace without Pi is still usable, just without agent
+// support (surfaced to the session per R3 rather than failing the workspace).
+func (m *Manager) InstallPi(ctx context.Context, workspaceID string, logFn LogFunc) error {
+	if logFn != nil {
+		logFn("Checking for Pi installation...")
+	}
+
+	// Already installed? Check via a login shell so the npm-global bin (where
+	// pi.dev/install.sh puts the binary, added to the profile) is on PATH —
+	// ClaudePathPrefix (~/.local/bin) alone would miss it and force a reinstall.
+	checkCmd := m.ExecInWorkspace(ctx, workspaceID, piLoginShell("pi --version"))
+	if output, err := checkCmd.CombinedOutput(); err == nil {
+		version := strings.TrimSpace(string(output))
+		slog.Info("pi already installed", "workspace", workspaceID, "version", version)
+		if logFn != nil {
+			logFn(fmt.Sprintf("Pi already installed: %s", version))
+		}
+		m.symlinkPi(ctx, workspaceID)
+		return nil
+	}
+
+	if logFn != nil {
+		logFn("Installing Pi...")
+	}
+	slog.Info("installing pi in workspace", "workspace", workspaceID)
+
+	// Pi's own installer (pi.dev/install.sh) is interactive — over a non-TTY
+	// `devpod ssh --command` pipe it refuses to auto-install Node and bails
+	// ("No terminal detected; install Node.js 22.19.0 or newer"). So we provision
+	// headlessly: ensure Node >= 22.19 (download the standalone tarball into
+	// ~/.local if absent/too old) and `npm install` Pi into ~/.local, where the
+	// launcher's PATH finds it. The script is written to the container and run
+	// with sh to avoid shell-quoting hazards.
+	encoded := base64.StdEncoding.EncodeToString([]byte(piInstallScript))
+	runScript := fmt.Sprintf(`printf %%s '%s' | base64 -d > "$HOME/.pi-install.sh" && sh "$HOME/.pi-install.sh"`, encoded)
+
+	installCmd := m.ExecInWorkspace(ctx, workspaceID, runScript)
+	stdout, err := installCmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("stdout pipe: %w", err)
+	}
+	installCmd.Stderr = installCmd.Stdout
+
+	if err := installCmd.Start(); err != nil {
+		if logFn != nil {
+			logFn("WARNING: Failed to start Pi install (curl/base64 may be missing in this devcontainer)")
+		}
+		slog.Warn("failed to start pi install", "workspace", workspaceID, "error", err)
+		return nil // Non-fatal
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		slog.Debug("pi install output", "workspace", workspaceID, "line", line)
+		if logFn != nil {
+			logFn(line)
+		}
+	}
+
+	if err := installCmd.Wait(); err != nil {
+		if logFn != nil {
+			logFn("WARNING: Pi installation failed — agents will not be available (see log above)")
+		}
+		slog.Warn("pi install failed", "workspace", workspaceID, "error", err)
+		return nil // Non-fatal
+	}
+
+	if logFn != nil {
+		logFn("Pi installed successfully")
+	}
+	slog.Info("pi installed successfully", "workspace", workspaceID)
+	return nil
+}
+
+// piInstallScript provisions Pi headlessly, then defers to Pi's official
+// installer for the install itself. The only thing the official installer can't
+// do over a non-TTY `devpod ssh --command` pipe is install Node — that path
+// needs /dev/tty (and xz). So we ensure Node >= 22.19 first (reuse an existing
+// one, else download the standalone gzip tarball into ~/.local — gzip is
+// universal), then run `curl pi.dev/install.sh | sh`: with Node present its
+// preflight passes, it skips the interactive Node step, and installs Pi
+// non-interactively (its npm prefix resolves to ~/.local, which the launcher
+// has on PATH). Pinned to Node 22.19.0, Pi's stated minimum.
+const piInstallScript = `#!/bin/sh
+set -e
+LOCAL="$HOME/.local"
+mkdir -p "$LOCAL/bin"
+export PATH="$LOCAL/bin:$PATH"
+
+if command -v pi >/dev/null 2>&1; then
+  echo "pi already present: $(pi --version 2>/dev/null)"
+  exit 0
+fi
+
+need_node=1
+if command -v node >/dev/null 2>&1; then
+  maj=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)
+  min=$(node -p 'process.versions.node.split(".")[1]' 2>/dev/null || echo 0)
+  if [ "${maj:-0}" -gt 22 ] 2>/dev/null; then need_node=0; fi
+  if [ "${maj:-0}" -eq 22 ] && [ "${min:-0}" -ge 19 ] 2>/dev/null; then need_node=0; fi
+fi
+
+if [ "$need_node" -eq 1 ]; then
+  NVER=v22.19.0
+  ARCH=$(uname -m)
+  case "$ARCH" in
+    x86_64|amd64) NA=x64 ;;
+    aarch64|arm64) NA=arm64 ;;
+    *) echo "ERROR: unsupported architecture $ARCH for Node install"; exit 1 ;;
+  esac
+  URL="https://nodejs.org/dist/$NVER/node-$NVER-linux-$NA.tar.gz"
+  echo "Installing Node.js $NVER ($NA) into $LOCAL (pi requires >=22.19)..."
+  curl -fsSL "$URL" | tar -xz -C "$LOCAL" --strip-components=1
+else
+  echo "Using existing Node.js $(node --version)"
+fi
+
+echo "Running the official Pi installer (pi.dev/install.sh)..."
+curl -fsSL https://pi.dev/install.sh | sh
+
+# Deterministic location for the launcher, in case the installer chose a prefix
+# whose bin is not already ~/.local/bin.
+P="$(command -v pi || true)"
+if [ -n "$P" ] && [ ! -e "$LOCAL/bin/pi" ]; then ln -sf "$P" "$LOCAL/bin/pi"; fi
+( pi --version || "$LOCAL/bin/pi" --version ) >/dev/null 2>&1 || { echo "ERROR: pi not runnable after install"; exit 1; }
+echo "pi installed: $(pi --version 2>/dev/null || "$LOCAL/bin/pi" --version 2>/dev/null)"
+`
+
+// piLoginShell wraps a command in a login shell with the npm-global bin and
+// ~/.local/bin prepended to PATH, so pi is found whether the installer updated
+// the profile or not. `devpod ssh --command` runs a non-interactive shell that
+// would otherwise miss the npm-global location entirely.
+func piLoginShell(inner string) string {
+	return `bash -lc 'export PATH="$HOME/.local/bin:$(npm config get prefix 2>/dev/null)/bin:$PATH"; ` + inner + `'`
+}
+
+// symlinkPi best-effort symlinks the resolved pi binary into ~/.local/bin so the
+// agent launcher finds it deterministically. Non-fatal.
+func (m *Manager) symlinkPi(ctx context.Context, workspaceID string) {
+	cmd := m.ExecInWorkspace(ctx, workspaceID,
+		piLoginShell(`p="$(command -v pi || true)"; if [ -n "$p" ]; then mkdir -p "$HOME/.local/bin" && ln -sf "$p" "$HOME/.local/bin/pi"; fi`))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		slog.Warn("pi symlink failed", "workspace", workspaceID, "error", err, "output", strings.TrimSpace(string(out)))
+	}
+}
+
+// InstallPiExtension writes a Pi extension file to the container's auto-discovery
+// path (~/.pi/agent/extensions/<filename>) so Pi loads it on launch. Content is
+// base64-encoded over the wire to avoid any shell-quoting hazards. Non-fatal:
+// without the extension, agents simply lose the ask-user (awaiting-input)
+// capability rather than failing the workspace.
+func (m *Manager) InstallPiExtension(ctx context.Context, workspaceID, filename, content string, logFn LogFunc) error {
+	encoded := base64.StdEncoding.EncodeToString([]byte(content))
+	cmd := fmt.Sprintf(
+		`mkdir -p "$HOME/.pi/agent/extensions" && printf %%s '%s' | base64 -d > "$HOME/.pi/agent/extensions/%s"`,
+		encoded, filename,
+	)
+	out, err := m.ExecInWorkspace(ctx, workspaceID, cmd).CombinedOutput()
+	if err != nil {
+		if logFn != nil {
+			logFn("WARNING: failed to install Pi ask-user extension")
+		}
+		slog.Warn("pi extension install failed", "workspace", workspaceID, "error", err, "output", strings.TrimSpace(string(out)))
+		return nil // Non-fatal
+	}
+	if logFn != nil {
+		logFn(fmt.Sprintf("Pi extension installed: %s", filename))
+	}
+	slog.Info("pi extension installed", "workspace", workspaceID, "filename", filename)
 	return nil
 }

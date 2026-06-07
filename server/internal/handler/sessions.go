@@ -496,11 +496,10 @@ func (h *Handler) startWorkspace(sessionID uuid.UUID, workspaceID, repoURL strin
 		slog.Error("workspace creation failed", "sessionID", sessionID, "error", err)
 		newStatus = "failed"
 	} else {
-		// Install Claude Code after workspace creation succeeds
-		if installErr := h.workspaces.InstallTools(ctx, workspaceID, logFn); installErr != nil {
-			slog.Warn("claude code installation failed", "sessionID", sessionID, "error", installErr)
-			// Non-fatal — workspace is still usable
-		}
+		// Install the agent harnesses (Claude fallback + Pi + ask-user
+		// extension) after workspace creation. Idempotent and non-fatal; the
+		// same helper runs on every start/rebuild so older containers migrate.
+		h.provisionAgentTools(ctx, workspaceID, logFn)
 		newStatus = "ready"
 	}
 

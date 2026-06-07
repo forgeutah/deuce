@@ -9,9 +9,27 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/forgeutah/deuce/server/internal/agent/pirun/extension"
 	db "github.com/forgeutah/deuce/server/internal/db"
+	"github.com/forgeutah/deuce/server/internal/workspace"
 	"github.com/forgeutah/deuce/server/internal/ws"
 )
+
+// provisionAgentTools installs the agent harnesses into a workspace container:
+// Claude Code (legacy fallback), Pi, and the ask-user extension. All installers
+// are idempotent and non-fatal, so this is safe to run on every create/start —
+// it migrates containers created before agent support without recreating them.
+func (h *Handler) provisionAgentTools(ctx context.Context, workspaceID string, logFn workspace.LogFunc) {
+	if err := h.workspaces.InstallTools(ctx, workspaceID, logFn); err != nil {
+		slog.Warn("claude code installation failed", "workspace", workspaceID, "error", err)
+	}
+	if err := h.workspaces.InstallPi(ctx, workspaceID, logFn); err != nil {
+		slog.Warn("pi installation failed", "workspace", workspaceID, "error", err)
+	}
+	if err := h.workspaces.InstallPiExtension(ctx, workspaceID, extension.AskUserFilename, extension.AskUser, logFn); err != nil {
+		slog.Warn("pi extension installation failed", "workspace", workspaceID, "error", err)
+	}
+}
 
 // workspaceAction names the four lifecycle operations the user can trigger.
 // Each one maps to a transitional workspace_status that the handler writes
@@ -198,6 +216,10 @@ func (h *Handler) runWorkspaceAction(sessionID uuid.UUID, workspaceID, repoURL s
 		// is the explicit opt-in for a fresh container).
 		actErr = h.workspaces.Create(ctx, workspaceID, repoURL, logFn)
 		if actErr == nil {
+			// (Re)provision agent tooling on every start so containers created
+			// before agent support — or where a prior install failed — pick up
+			// Pi + the ask-user extension. The installers are idempotent.
+			h.provisionAgentTools(ctx, workspaceID, logFn)
 			newStatus = "ready"
 		} else {
 			newStatus = "failed"
@@ -221,6 +243,7 @@ func (h *Handler) runWorkspaceAction(sessionID uuid.UUID, workspaceID, repoURL s
 			actErr = h.workspaces.Create(ctx, workspaceID, repoURL, logFn)
 		}
 		if actErr == nil {
+			h.provisionAgentTools(ctx, workspaceID, logFn)
 			newStatus = "ready"
 		} else {
 			newStatus = "failed"
