@@ -25,13 +25,13 @@ SELECT * FROM tasks WHERE id = $1;
 UPDATE tasks SET state = $2, seq = $3, updated_at = now() WHERE id = $1;
 
 -- name: SetTaskAwaitingInput :exec
-UPDATE tasks SET state = 'awaiting_input', pending_question = $2, seq = $3, updated_at = now() WHERE id = $1;
+UPDATE tasks SET state = 'awaiting_input', pending_question = $2, pending_question_kind = $3, pending_question_options = $4, seq = $5, updated_at = now() WHERE id = $1;
 
 -- name: ResolveTaskInput :exec
-UPDATE tasks SET state = 'running', pending_question = '', seq = $2, updated_at = now() WHERE id = $1;
+UPDATE tasks SET state = 'running', pending_question = '', pending_question_kind = '', pending_question_options = '{}', seq = $2, updated_at = now() WHERE id = $1;
 
 -- name: FinishTask :exec
-UPDATE tasks SET state = $2, reply = $3, work = $4, pending_question = '', seq = $5, updated_at = now() WHERE id = $1;
+UPDATE tasks SET state = $2, reply = $3, work = $4, pending_question = '', pending_question_kind = '', pending_question_options = '{}', seq = $5, updated_at = now() WHERE id = $1;
 
 -- name: AppendAction :exec
 -- Idempotent on (task_id, call_id): a replayed tool-start after re-attach is a

@@ -135,13 +135,22 @@ func (s *DBStore) CompleteAction(ctx context.Context, sessionID, taskID, callID,
 	})
 }
 
-func (s *DBStore) SetAwaitingInput(ctx context.Context, sessionID, taskID, question string) (int64, error) {
+func (s *DBStore) SetAwaitingInput(ctx context.Context, sessionID, taskID, question, kind string, options []string) (int64, error) {
 	tid, err := uuid.Parse(taskID)
 	if err != nil {
 		return 0, err
 	}
+	if options == nil {
+		options = []string{}
+	}
 	return s.withSeq(ctx, sessionID, func(q *db.Queries, seq int64) error {
-		return q.SetTaskAwaitingInput(ctx, db.SetTaskAwaitingInputParams{ID: tid, PendingQuestion: question, Seq: seq})
+		return q.SetTaskAwaitingInput(ctx, db.SetTaskAwaitingInputParams{
+			ID:                     tid,
+			PendingQuestion:        question,
+			PendingQuestionKind:    kind,
+			PendingQuestionOptions: options,
+			Seq:                    seq,
+		})
 	})
 }
 

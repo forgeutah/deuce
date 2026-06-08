@@ -328,7 +328,7 @@ func (r *Runtime) translate(key pirun.Key, ev pirun.Event) {
 	case pirun.KindAssistantText:
 		r.appendReply(taskID, ev.Text)
 	case pirun.KindAwaitingInput:
-		seq, err := r.store.SetAwaitingInput(ctx, key.SessionID, taskID, ev.Prompt)
+		seq, err := r.store.SetAwaitingInput(ctx, key.SessionID, taskID, ev.Prompt, ev.RequestKind, ev.Options)
 		if err != nil {
 			slog.Error("runtime: set awaiting input", "task", taskID, "error", err)
 			return
@@ -336,7 +336,8 @@ func (r *Runtime) translate(key pirun.Key, ev pirun.Event) {
 		r.setPending(taskID, ev.RequestID)
 		r.enterAwaiting(key, taskID) // suspend active timeout, start ceiling (KTD8)
 		r.broadcastTask(ws.TypeTaskAwaitingInput, ws.TaskEventPayload{
-			Seq: seq, TaskID: taskID, AgentID: key.AgentID, State: StateAwaitingInput, PendingQuestion: ev.Prompt,
+			Seq: seq, TaskID: taskID, AgentID: key.AgentID, State: StateAwaitingInput,
+			PendingQuestion: ev.Prompt, PendingQuestionKind: ev.RequestKind, PendingQuestionOptions: ev.Options,
 		}, key.SessionID)
 	case pirun.KindRunCompleted:
 		unlock := r.keys.lock(key)

@@ -66,7 +66,7 @@ func (s *fakeStore) setState(sessionID, taskID, state string) int64 {
 func (s *fakeStore) MarkRunning(_ context.Context, sessionID, taskID string) (int64, error) {
 	return s.setState(sessionID, taskID, StateRunning), nil
 }
-func (s *fakeStore) SetAwaitingInput(_ context.Context, sessionID, taskID, _ string) (int64, error) {
+func (s *fakeStore) SetAwaitingInput(_ context.Context, sessionID, taskID, _, _ string, _ []string) (int64, error) {
 	return s.setState(sessionID, taskID, StateAwaitingInput), nil
 }
 func (s *fakeStore) ResolveAwaitingInput(_ context.Context, sessionID, taskID string) (int64, error) {

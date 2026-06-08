@@ -110,7 +110,7 @@ func (q *Queries) CompleteAction(ctx context.Context, arg CompleteActionParams) 
 const createTask = `-- name: CreateTask :one
 INSERT INTO tasks (session_id, agent_id, requested_by, anchor_message_id, prompt, state, seq)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, session_id, agent_id, requested_by, anchor_message_id, prompt, state, seq, pending_question, reply, work, created_at, updated_at
+RETURNING id, session_id, agent_id, requested_by, anchor_message_id, prompt, state, seq, pending_question, reply, work, created_at, updated_at, pending_question_kind, pending_question_options
 `
 
 type CreateTaskParams struct {
@@ -148,6 +148,8 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 		&i.Work,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PendingQuestionKind,
+		&i.PendingQuestionOptions,
 	)
 	return i, err
 }
@@ -164,7 +166,7 @@ func (q *Queries) FailStuckTasks(ctx context.Context) error {
 }
 
 const finishTask = `-- name: FinishTask :exec
-UPDATE tasks SET state = $2, reply = $3, work = $4, pending_question = '', seq = $5, updated_at = now() WHERE id = $1
+UPDATE tasks SET state = $2, reply = $3, work = $4, pending_question = '', pending_question_kind = '', pending_question_options = '{}', seq = $5, updated_at = now() WHERE id = $1
 `
 
 type FinishTaskParams struct {
@@ -214,7 +216,7 @@ func (q *Queries) GetPiSessionID(ctx context.Context, arg GetPiSessionIDParams) 
 }
 
 const getTask = `-- name: GetTask :one
-SELECT id, session_id, agent_id, requested_by, anchor_message_id, prompt, state, seq, pending_question, reply, work, created_at, updated_at FROM tasks WHERE id = $1
+SELECT id, session_id, agent_id, requested_by, anchor_message_id, prompt, state, seq, pending_question, reply, work, created_at, updated_at, pending_question_kind, pending_question_options FROM tasks WHERE id = $1
 `
 
 func (q *Queries) GetTask(ctx context.Context, id uuid.UUID) (Task, error) {
@@ -234,6 +236,8 @@ func (q *Queries) GetTask(ctx context.Context, id uuid.UUID) (Task, error) {
 		&i.Work,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PendingQuestionKind,
+		&i.PendingQuestionOptions,
 	)
 	return i, err
 }
@@ -258,7 +262,7 @@ func (q *Queries) IsSessionMember(ctx context.Context, arg IsSessionMemberParams
 }
 
 const listAgentTasks = `-- name: ListAgentTasks :many
-SELECT id, session_id, agent_id, requested_by, anchor_message_id, prompt, state, seq, pending_question, reply, work, created_at, updated_at FROM tasks WHERE session_id = $1 AND agent_id = $2 ORDER BY created_at ASC
+SELECT id, session_id, agent_id, requested_by, anchor_message_id, prompt, state, seq, pending_question, reply, work, created_at, updated_at, pending_question_kind, pending_question_options FROM tasks WHERE session_id = $1 AND agent_id = $2 ORDER BY created_at ASC
 `
 
 type ListAgentTasksParams struct {
@@ -291,6 +295,8 @@ func (q *Queries) ListAgentTasks(ctx context.Context, arg ListAgentTasksParams) 
 			&i.Work,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PendingQuestionKind,
+			&i.PendingQuestionOptions,
 		); err != nil {
 			return nil, err
 		}
@@ -346,7 +352,7 @@ func (q *Queries) ListSessionTaskActions(ctx context.Context, sessionID uuid.UUI
 }
 
 const listSessionTasks = `-- name: ListSessionTasks :many
-SELECT id, session_id, agent_id, requested_by, anchor_message_id, prompt, state, seq, pending_question, reply, work, created_at, updated_at FROM tasks WHERE session_id = $1 ORDER BY created_at ASC
+SELECT id, session_id, agent_id, requested_by, anchor_message_id, prompt, state, seq, pending_question, reply, work, created_at, updated_at, pending_question_kind, pending_question_options FROM tasks WHERE session_id = $1 ORDER BY created_at ASC
 `
 
 func (q *Queries) ListSessionTasks(ctx context.Context, sessionID uuid.UUID) ([]Task, error) {
@@ -372,6 +378,8 @@ func (q *Queries) ListSessionTasks(ctx context.Context, sessionID uuid.UUID) ([]
 			&i.Work,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PendingQuestionKind,
+			&i.PendingQuestionOptions,
 		); err != nil {
 			return nil, err
 		}
@@ -435,7 +443,7 @@ func (q *Queries) PeekEventSeq(ctx context.Context, sessionID uuid.UUID) (int64,
 }
 
 const resolveTaskInput = `-- name: ResolveTaskInput :exec
-UPDATE tasks SET state = 'running', pending_question = '', seq = $2, updated_at = now() WHERE id = $1
+UPDATE tasks SET state = 'running', pending_question = '', pending_question_kind = '', pending_question_options = '{}', seq = $2, updated_at = now() WHERE id = $1
 `
 
 type ResolveTaskInputParams struct {
@@ -449,17 +457,25 @@ func (q *Queries) ResolveTaskInput(ctx context.Context, arg ResolveTaskInputPara
 }
 
 const setTaskAwaitingInput = `-- name: SetTaskAwaitingInput :exec
-UPDATE tasks SET state = 'awaiting_input', pending_question = $2, seq = $3, updated_at = now() WHERE id = $1
+UPDATE tasks SET state = 'awaiting_input', pending_question = $2, pending_question_kind = $3, pending_question_options = $4, seq = $5, updated_at = now() WHERE id = $1
 `
 
 type SetTaskAwaitingInputParams struct {
-	ID              uuid.UUID `json:"id"`
-	PendingQuestion string    `json:"pending_question"`
-	Seq             int64     `json:"seq"`
+	ID                     uuid.UUID `json:"id"`
+	PendingQuestion        string    `json:"pending_question"`
+	PendingQuestionKind    string    `json:"pending_question_kind"`
+	PendingQuestionOptions []string  `json:"pending_question_options"`
+	Seq                    int64     `json:"seq"`
 }
 
 func (q *Queries) SetTaskAwaitingInput(ctx context.Context, arg SetTaskAwaitingInputParams) error {
-	_, err := q.db.Exec(ctx, setTaskAwaitingInput, arg.ID, arg.PendingQuestion, arg.Seq)
+	_, err := q.db.Exec(ctx, setTaskAwaitingInput,
+		arg.ID,
+		arg.PendingQuestion,
+		arg.PendingQuestionKind,
+		arg.PendingQuestionOptions,
+		arg.Seq,
+	)
 	return err
 }
 
