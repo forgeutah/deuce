@@ -112,6 +112,46 @@ func (h *Handler) AddSessionMember(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sr)
 }
 
+// JoinSession adds the caller to a session as a member (the "Join Session"
+// self-serve path). Unlike AddSessionMember — which requires the caller to
+// already be a member in order to add OTHERS — JoinSession adds the caller
+// themselves, gated on TEAM membership so a user can only join a session they
+// can actually see. Idempotent (ON CONFLICT DO NOTHING). Leaving reuses
+// RemoveSessionMember with the caller's own ID.
+func (h *Handler) JoinSession(w http.ResponseWriter, r *http.Request) {
+	sessionID, err := uuid.Parse(chi.URLParam(r, "sessionID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_SESSION_ID", "invalid session ID")
+		return
+	}
+
+	callerID, err := uuid.Parse(getUserID(r))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_USER", "invalid user ID")
+		return
+	}
+
+	// Team membership is the read boundary; you may only join a session whose
+	// team you belong to.
+	if !h.requireSessionTeamMember(w, r, sessionID, callerID) {
+		return
+	}
+
+	if err := h.queries.AddSessionMember(r.Context(), db.AddSessionMemberParams{
+		SessionID: sessionID,
+		UserID:    callerID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to join session")
+		return
+	}
+
+	sr := h.broadcastMembershipChange(w, r, sessionID, callerID, callerID)
+	if sr == nil {
+		return
+	}
+	writeJSON(w, http.StatusOK, sr)
+}
+
 // RemoveSessionMember removes a user from a session. A member may remove
 // anyone, including themselves (the "leave session" path). Idempotent: removing
 // a non-member is a no-op that still returns the current state.

@@ -68,7 +68,7 @@ func newVisFixture(t *testing.T) *visFixture {
 		r.Get("/", h.ListSessions)
 		r.Route("/{sessionID}", func(r chi.Router) {
 			r.Get("/", h.GetSession)
-			// /join is registered in U4 once JoinSession exists.
+			r.Post("/join", h.JoinSession)
 			r.Get("/messages", h.ListMessages)
 			r.Post("/messages", h.SendMessage)
 			r.Get("/activities", h.ListActivities)
@@ -329,5 +329,82 @@ func TestSendMessage_GateBeforeValidation(t *testing.T) {
 	rec := f.do(t, http.MethodPost, "/api/sessions/"+sessID.String()+"/messages", alice.String(), `{"content":"","mentions":[]}`)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("empty content from non-member: want 403 (gate first), got %d", rec.Code)
+	}
+}
+
+// --- U4: self-serve session join ---
+
+func (f *visFixture) isSessionMember(t *testing.T, sessID, userID uuid.UUID) bool {
+	t.Helper()
+	var ok bool
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT EXISTS(SELECT 1 FROM session_members WHERE session_id=$1 AND user_id=$2)`,
+		sessID, userID).Scan(&ok); err != nil {
+		t.Fatalf("check session member: %v", err)
+	}
+	return ok
+}
+
+func TestJoinSession_TeamMemberCanJoin(t *testing.T) {
+	f := newVisFixture(t)
+	sessID, alice, _ := f.seedReadScenario(t)
+
+	rec := f.do(t, http.MethodPost, "/api/sessions/"+sessID.String()+"/join", alice.String(), "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("team member join: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !f.isSessionMember(t, sessID, alice) {
+		t.Fatalf("alice should be a session member after join")
+	}
+	// Response should reflect alice in members.
+	var sr sessionResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &sr); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	found := false
+	for _, m := range sr.Members {
+		if m.ID == alice {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("join response should include caller in members")
+	}
+
+	// Now alice can post.
+	if rec := f.do(t, http.MethodPost, "/api/sessions/"+sessID.String()+"/messages", alice.String(), `{"content":"hi","mentions":[]}`); rec.Code != http.StatusCreated {
+		t.Fatalf("post after join: want 201, got %d", rec.Code)
+	}
+}
+
+func TestJoinSession_OutOfTeamForbidden(t *testing.T) {
+	f := newVisFixture(t)
+	sessID, _, bob := f.seedReadScenario(t)
+
+	rec := f.do(t, http.MethodPost, "/api/sessions/"+sessID.String()+"/join", bob.String(), "")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("out-of-team join: want 403, got %d", rec.Code)
+	}
+	if f.isSessionMember(t, sessID, bob) {
+		t.Fatalf("out-of-team user must not become a member")
+	}
+}
+
+func TestJoinSession_Idempotent(t *testing.T) {
+	f := newVisFixture(t)
+	sessID, alice, _ := f.seedReadScenario(t)
+
+	for i := 0; i < 2; i++ {
+		if rec := f.do(t, http.MethodPost, "/api/sessions/"+sessID.String()+"/join", alice.String(), ""); rec.Code != http.StatusOK {
+			t.Fatalf("join #%d: want 200, got %d", i+1, rec.Code)
+		}
+	}
+	var n int
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM session_members WHERE session_id=$1 AND user_id=$2`, sessID, alice).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("idempotent join should leave exactly 1 membership row, got %d", n)
 	}
 }
