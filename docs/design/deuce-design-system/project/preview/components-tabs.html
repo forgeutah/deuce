@@ -1,0 +1,24 @@
+<!-- @dsCard group="Components" -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body{margin:0;font-family:var(--font-sans);background:var(--bg);color:var(--fg)}
+  .bar{display:flex;border-bottom:1px solid #2F3742}
+  .tab{display:flex;align-items:center;gap:6px;padding:8px 16px;font-size:14px;border-bottom:2px solid transparent;color:#9198A1;cursor:pointer}
+  .tab.active{border-bottom-color:#58a6ff;color:#F0F6FC}
+  .tab:not(.active):hover{color:#D1D7E0}
+  .spacer{margin-left:auto}
+  svg{width:16px;height:16px}
+  .cap{padding:18px 16px;font-size:12px;color:#656C76}
+</style></head>
+<body>
+  <div class="bar">
+    <div class="tab active"><i data-lucide="message-square"></i>Chat</div>
+    <div class="tab"><i data-lucide="file-text"></i>Plan</div>
+    <div class="tab"><i data-lucide="folder-tree"></i>Files</div>
+    <div class="tab"><i data-lucide="terminal"></i>Terminal</div>
+    <div class="tab spacer"><i data-lucide="code"></i>VS Code</div>
+    <div class="tab"><i data-lucide="scroll-text"></i>Logs</div>
+  </div>
+  <div class="cap">Center-panel tab bar. Active tab carries a 2px accent underline + emphasis text; right-side actions (VS Code, Logs) push off with <code style="font-family:var(--font-mono)">ml-auto</code>.</div>
+  <script type="module">import{createIcons,icons}from"https://cdn.jsdelivr.net/npm/lucide@latest/dist/esm/lucide.js";createIcons({icons});</script>
+</body></html>

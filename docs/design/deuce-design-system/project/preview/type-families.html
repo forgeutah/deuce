@@ -1,0 +1,24 @@
+<!-- @dsCard group="Type" -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body{margin:0;font-family:var(--font-sans);background:var(--bg);color:var(--fg);padding:24px}
+  .fam{margin-bottom:20px}
+  .fam:last-child{margin-bottom:0}
+  .tag{font-size:var(--text-2xs);text-transform:uppercase;letter-spacing:.06em;color:var(--fg-subtle);font-weight:600;margin-bottom:6px}
+  .sans{font-family:var(--font-sans);font-size:26px;color:var(--fg-emphasis);font-weight:600}
+  .mono{font-family:var(--font-mono);font-size:22px;color:var(--fg)}
+  .stack{font-family:var(--font-mono);font-size:10px;color:var(--fg-muted);margin-top:7px;line-height:1.5}
+</style></head>
+<body>
+  <div class="fam">
+    <div class="tag">Sans — UI &amp; content</div>
+    <div class="sans">Agents as teammates, not tools</div>
+    <div class="stack">-apple-system, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif</div>
+  </div>
+  <div class="fam">
+    <div class="tag">Mono — code, diffs, terminal</div>
+    <div class="mono">func Validate(token string) error</div>
+    <div class="stack">ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace</div>
+  </div>
+  <div class="stack" style="margin-top:14px;color:var(--fg-subtle)">No webfonts ship — Deuce deliberately reads like the OS / like GitHub.</div>
+</body></html>

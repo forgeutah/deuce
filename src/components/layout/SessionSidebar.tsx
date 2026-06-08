@@ -311,9 +311,17 @@ export function SessionSidebar() {
     <div className="flex h-full flex-col">
       {/* Header */}
       <div className="flex items-center justify-between p-3 pb-2">
-        <h1 className="text-lg font-semibold text-foreground-emphasis">
-          Deuce
-        </h1>
+        <div className="flex items-center gap-2">
+          <img
+            src="/deuce-mark.png"
+            alt=""
+            aria-hidden="true"
+            className="h-5.5 w-5.5 shrink-0 rounded-[5px] object-cover"
+          />
+          <h1 className="text-lg font-semibold tracking-[-0.01em] text-foreground-emphasis">
+            Deuce
+          </h1>
+        </div>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

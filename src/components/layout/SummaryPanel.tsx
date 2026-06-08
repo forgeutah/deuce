@@ -1,9 +1,11 @@
-import { Bot, Circle, Users as UsersIcon } from "lucide-react";
+import { useState } from "react";
+import { Bot, Circle, UserPlus, Users as UsersIcon } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { useSessionStore } from "@/stores/session-store";
 import { ActivityFeed } from "@/components/activity/ActivityFeed";
+import { ManageMembersDialog } from "@/components/session/ManageMembersDialog";
 import type { Agent, User } from "@/types";
 
 function AgentRow({ agent }: { agent: Agent }) {
@@ -60,6 +62,7 @@ function UserRow({ user }: { user: User }) {
 
 export function SummaryPanel() {
   const { activeSessionId, sessions, activities } = useSessionStore();
+  const [membersOpen, setMembersOpen] = useState(false);
 
   if (!activeSessionId) {
     return (
@@ -106,20 +109,32 @@ export function SummaryPanel() {
         )}
 
         {/* Humans */}
-        {session.members.length > 0 && (
-          <div>
-            <div className="flex items-center gap-1 mb-1 px-2">
-              <UsersIcon className="h-3 w-3 text-foreground-subtle" />
-              <span className="text-[10px] text-foreground-subtle">Members</span>
-            </div>
-            <div className="flex flex-col gap-0.5">
-              {session.members.map((user) => (
-                <UserRow key={user.id} user={user} />
-              ))}
-            </div>
+        <div>
+          <div className="flex items-center gap-1 mb-1 px-2">
+            <UsersIcon className="h-3 w-3 text-foreground-subtle" />
+            <span className="text-[10px] text-foreground-subtle">Members</span>
+            <button
+              onClick={() => setMembersOpen(true)}
+              title="Add or remove members"
+              className="ml-auto flex items-center gap-1 rounded px-1 py-0.5 text-[10px] text-foreground-subtle hover:bg-background-hover hover:text-foreground"
+            >
+              <UserPlus className="h-3 w-3" />
+              Add
+            </button>
           </div>
-        )}
+          <div className="flex flex-col gap-0.5">
+            {session.members.map((user) => (
+              <UserRow key={user.id} user={user} />
+            ))}
+          </div>
+        </div>
       </div>
+
+      <ManageMembersDialog
+        session={session}
+        open={membersOpen}
+        onOpenChange={setMembersOpen}
+      />
 
       <Separator className="bg-border-muted" />
 

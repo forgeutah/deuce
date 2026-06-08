@@ -1,0 +1,26 @@
+<!-- @dsCard group="Components" -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body{margin:0;font-family:var(--font-sans);background:#151B23;color:var(--fg);padding:12px}
+  .card{display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border-radius:6px;border-left:2px solid transparent;cursor:pointer;margin-bottom:2px}
+  .active{background:#262C36;border-left-color:#58a6ff;color:#F0F6FC}
+  .card:not(.active):hover{background:#212830}
+  .hash{margin-top:2px;width:16px;height:16px;color:#656C76;flex-shrink:0}
+  .mid{flex:1;min-width:0}
+  .top{display:flex;align-items:center;gap:5px}
+  .name{font-size:14px;font-weight:500}
+  .desc{font-size:12px;color:#656C76;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .active .desc{color:#9198A1}
+  .rt{display:flex;align-items:center;gap:6px;margin-top:6px;flex-shrink:0}
+  .d{width:8px;height:8px;border-radius:9999px}
+  .pulse{animation:p 2s ease-in-out infinite}
+  @keyframes p{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(1.2)}}
+  .unread{display:flex;height:16px;min-width:16px;align-items:center;justify-content:center;border-radius:9999px;background:#f85149;padding:0 4px;font-size:10px;font-weight:500;color:#fff}
+  svg{width:16px;height:16px}
+</style></head>
+<body>
+  <div class="card active"><i data-lucide="hash" class="hash" style="color:#656C76"></i><div class="mid"><div class="top"><span class="name">auth-module</span></div><div class="desc">JWT validation and refresh-token flow</div></div><div class="rt"><span class="d" style="background:#3fb950"></span><span class="unread">3</span></div></div>
+  <div class="card"><i data-lucide="hash" class="hash"></i><div class="mid"><div class="top"><span class="name">api-rate-limiting</span></div><div class="desc">Token-bucket rate limiter via Redis</div></div><div class="rt"><span class="d" style="background:#3fb950"></span></div></div>
+  <div class="card" style="opacity:.6"><i data-lucide="hash" class="hash"></i><div class="mid"><div class="top"><span class="name">dashboard-charts</span></div><div class="desc">Recharts for the analytics dashboard</div></div><div class="rt"><span class="d pulse" style="background:#d29922"></span><span class="unread">2</span></div></div>
+  <script type="module">import{createIcons,icons}from"https://cdn.jsdelivr.net/npm/lucide@latest/dist/esm/lucide.js";createIcons({icons});</script>
+</body></html>

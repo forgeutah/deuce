@@ -312,6 +312,20 @@ func (q *Queries) RemoveAllSessionAgents(ctx context.Context, sessionID uuid.UUI
 	return err
 }
 
+const removeSessionMember = `-- name: RemoveSessionMember :exec
+DELETE FROM session_members WHERE session_id = $1 AND user_id = $2
+`
+
+type RemoveSessionMemberParams struct {
+	SessionID uuid.UUID `json:"session_id"`
+	UserID    uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) RemoveSessionMember(ctx context.Context, arg RemoveSessionMemberParams) error {
+	_, err := q.db.Exec(ctx, removeSessionMember, arg.SessionID, arg.UserID)
+	return err
+}
+
 const resetStaleWorkspaceTransitions = `-- name: ResetStaleWorkspaceTransitions :exec
 UPDATE sessions
 SET workspace_status = 'failed'

@@ -1,0 +1,20 @@
+<!-- @dsCard group="Spacing" -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body{margin:0;font-family:var(--font-sans);background:var(--bg);color:var(--fg);padding:24px}
+  .row{display:flex;align-items:center;gap:14px;margin-bottom:9px}
+  .bar{height:16px;background:var(--accent);border-radius:2px}
+  .n{font-family:var(--font-mono);font-size:10px;color:var(--fg-muted);width:52px;flex-shrink:0}
+  .u{font-size:var(--text-xs);color:var(--fg-subtle)}
+  .note{font-size:var(--text-xs);color:var(--fg-subtle);margin-top:14px}
+</style></head>
+<body>
+  <div class="row"><div class="n">2px</div><div class="bar" style="width:2px"></div><div class="u">0.5 — hairline gaps</div></div>
+  <div class="row"><div class="n">4px</div><div class="bar" style="width:4px"></div><div class="u">1 — base unit</div></div>
+  <div class="row"><div class="n">8px</div><div class="bar" style="width:8px"></div><div class="u">2 — icon ↔ label</div></div>
+  <div class="row"><div class="n">12px</div><div class="bar" style="width:12px"></div><div class="u">3 — panel padding</div></div>
+  <div class="row"><div class="n">16px</div><div class="bar" style="width:16px"></div><div class="u">4 — content padding</div></div>
+  <div class="row"><div class="n">24px</div><div class="bar" style="width:24px"></div><div class="u">6 — section gap</div></div>
+  <div class="row"><div class="n">32px</div><div class="bar" style="width:32px"></div><div class="u">8 — large blocks</div></div>
+  <div class="note">4px base (Tailwind). Tight, dense rhythm — rows sit at 6px vertical padding.</div>
+</body></html>
