@@ -1,6 +1,6 @@
 ---
 title: "feat: Team-scoped session visibility + Join-to-participate"
-status: active
+status: completed
 date: 2026-06-08
 type: feat
 depth: deep
