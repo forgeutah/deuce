@@ -153,6 +153,12 @@ func (h *Handler) GetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read gate: a session is visible to anyone on its team, not just its
+	// members. Non-team users cannot read a session even by direct ID.
+	if !h.requireSessionTeamMember(w, r, sessionID, userID) {
+		return
+	}
+
 	session, err := h.queries.GetSession(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "session not found")

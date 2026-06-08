@@ -122,6 +122,31 @@ func (q *Queries) GetUnreadCount(ctx context.Context, arg GetUnreadCountParams) 
 	return column_1, err
 }
 
+const isSessionTeamMember = `-- name: IsSessionTeamMember :one
+SELECT EXISTS (
+    SELECT 1
+    FROM sessions s
+    JOIN projects p ON p.id = s.project_id
+    JOIN team_members tm ON tm.team_id = p.team_id
+    WHERE s.id = $1 AND tm.user_id = $2
+) AS is_member
+`
+
+type IsSessionTeamMemberParams struct {
+	SessionID uuid.UUID `json:"session_id"`
+	UserID    uuid.UUID `json:"user_id"`
+}
+
+// Read gate: true when the user belongs to the team that owns the session's
+// project. Backs the read authorization for GetSession / messages /
+// activities / agent-runs snapshot (team membership = read boundary).
+func (q *Queries) IsSessionTeamMember(ctx context.Context, arg IsSessionTeamMemberParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isSessionTeamMember, arg.SessionID, arg.UserID)
+	var is_member bool
+	err := row.Scan(&is_member)
+	return is_member, err
+}
+
 const listNonArchivedSessions = `-- name: ListNonArchivedSessions :many
 SELECT id, name, project_id, status, workspace_status, plan_content, created_at, last_activity_at, repo_url, description FROM sessions
 WHERE status != 'archived'

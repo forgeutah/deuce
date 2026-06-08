@@ -59,6 +59,17 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read gate: team members may read a session's history (static snapshot)
+	// even before joining it. Non-team users get 403.
+	userID, err := uuid.Parse(getUserID(r))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_USER", "invalid user ID")
+		return
+	}
+	if !h.requireSessionTeamMember(w, r, sessionID, userID) {
+		return
+	}
+
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 100 {

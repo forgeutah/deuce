@@ -222,3 +222,58 @@ func TestListSessions_NoTeamSeesNothing(t *testing.T) {
 		t.Fatalf("user in no team should see no sessions, got %d", len(got))
 	}
 }
+
+// --- U2: team-membership read gate ---
+
+// readScenario seeds team A (alice in it, not a session member), team B
+// (bob in it), and one session under team A. Returns the ids needed to
+// exercise read endpoints from both an in-team and an out-of-team user.
+func (f *visFixture) seedReadScenario(t *testing.T) (sessID, alice, bob uuid.UUID) {
+	teamA := f.seedTeam(t, "team-a")
+	teamB := f.seedTeam(t, "team-b")
+	alice = f.seedUser(t, "alice@example.com")
+	bob = f.seedUser(t, "bob@example.com")
+	f.addTeamMember(t, teamA, alice)
+	f.addTeamMember(t, teamB, bob)
+	projA := f.seedProject(t, teamA, "proj-a")
+	sessID = f.seedSession(t, projA, "session-a")
+	return sessID, alice, bob
+}
+
+func TestGetSession_ReadGate(t *testing.T) {
+	f := newVisFixture(t)
+	sessID, alice, bob := f.seedReadScenario(t)
+
+	// In-team, NOT a session member -> 200 (team membership grants read).
+	if rec := f.do(t, http.MethodGet, "/api/sessions/"+sessID.String(), alice.String(), ""); rec.Code != http.StatusOK {
+		t.Fatalf("team member GetSession: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	// Out-of-team -> 403.
+	if rec := f.do(t, http.MethodGet, "/api/sessions/"+sessID.String(), bob.String(), ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("out-of-team GetSession: want 403, got %d", rec.Code)
+	}
+}
+
+func TestListMessages_ReadGate(t *testing.T) {
+	f := newVisFixture(t)
+	sessID, alice, bob := f.seedReadScenario(t)
+
+	if rec := f.do(t, http.MethodGet, "/api/sessions/"+sessID.String()+"/messages", alice.String(), ""); rec.Code != http.StatusOK {
+		t.Fatalf("team member ListMessages: want 200, got %d", rec.Code)
+	}
+	if rec := f.do(t, http.MethodGet, "/api/sessions/"+sessID.String()+"/messages", bob.String(), ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("out-of-team ListMessages: want 403, got %d", rec.Code)
+	}
+}
+
+func TestListActivities_ReadGate(t *testing.T) {
+	f := newVisFixture(t)
+	sessID, alice, bob := f.seedReadScenario(t)
+
+	if rec := f.do(t, http.MethodGet, "/api/sessions/"+sessID.String()+"/activities", alice.String(), ""); rec.Code != http.StatusOK {
+		t.Fatalf("team member ListActivities: want 200, got %d", rec.Code)
+	}
+	if rec := f.do(t, http.MethodGet, "/api/sessions/"+sessID.String()+"/activities", bob.String(), ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("out-of-team ListActivities: want 403, got %d", rec.Code)
+	}
+}

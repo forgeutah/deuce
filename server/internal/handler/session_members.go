@@ -171,6 +171,26 @@ func (h *Handler) requireSessionMember(w http.ResponseWriter, r *http.Request, s
 	return true
 }
 
+// requireSessionTeamMember writes a 403/500 and returns false unless userID
+// belongs to the team that owns sessionID's project. This is the READ gate:
+// team membership grants visibility/read access to a session, whereas
+// requireSessionMember (session membership) gates writing and the live stream.
+func (h *Handler) requireSessionTeamMember(w http.ResponseWriter, r *http.Request, sessionID, userID uuid.UUID) bool {
+	member, err := h.queries.IsSessionTeamMember(r.Context(), db.IsSessionTeamMemberParams{
+		SessionID: sessionID,
+		UserID:    userID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to check team membership")
+		return false
+	}
+	if !member {
+		writeError(w, http.StatusForbidden, "FORBIDDEN", "not a team member")
+		return false
+	}
+	return true
+}
+
 // broadcastMembershipChange rebuilds the session response and pushes a
 // session_update to the existing room (so members' lists refresh) and directly
 // to the affected user (added members aren't subscribed to the room yet;

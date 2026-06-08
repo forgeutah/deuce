@@ -13,6 +13,18 @@ ORDER BY s.last_activity_at DESC;
 -- name: GetSession :one
 SELECT * FROM sessions WHERE id = $1;
 
+-- name: IsSessionTeamMember :one
+-- Read gate: true when the user belongs to the team that owns the session's
+-- project. Backs the read authorization for GetSession / messages /
+-- activities / agent-runs snapshot (team membership = read boundary).
+SELECT EXISTS (
+    SELECT 1
+    FROM sessions s
+    JOIN projects p ON p.id = s.project_id
+    JOIN team_members tm ON tm.team_id = p.team_id
+    WHERE s.id = @session_id AND tm.user_id = @user_id
+) AS is_member;
+
 -- name: CreateSession :one
 INSERT INTO sessions (name, description, project_id, repo_url, status, workspace_status, plan_content)
 VALUES ($1, $2, $3, $4, 'active', 'starting', '')

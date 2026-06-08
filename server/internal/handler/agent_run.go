@@ -60,13 +60,11 @@ func (h *Handler) AgentRunsSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	member, err := h.queries.IsSessionMember(r.Context(), db.IsSessionMemberParams{SessionID: sessionID, UserID: userID})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to check membership")
-		return
-	}
-	if !member {
-		writeError(w, http.StatusForbidden, "FORBIDDEN", "not a session member")
+	// Read gate (KTD1): the snapshot is read-only state, so it follows the
+	// READ boundary (team membership), not session membership. A team member
+	// viewing a session they have not joined sees the static task/action
+	// cards; the LIVE AgentRunEvent stream stays session-gated at the WS join.
+	if !h.requireSessionTeamMember(w, r, sessionID, userID) {
 		return
 	}
 
