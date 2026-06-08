@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -27,6 +28,28 @@ func (q *Queries) AddTeamMember(ctx context.Context, arg AddTeamMemberParams) er
 	return err
 }
 
+const createTeam = `-- name: CreateTeam :one
+INSERT INTO teams (name, slug) VALUES ($1, $2) RETURNING id, name, slug, created_at, is_default
+`
+
+type CreateTeamParams struct {
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+}
+
+func (q *Queries) CreateTeam(ctx context.Context, arg CreateTeamParams) (Team, error) {
+	row := q.db.QueryRow(ctx, createTeam, arg.Name, arg.Slug)
+	var i Team
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.CreatedAt,
+		&i.IsDefault,
+	)
+	return i, err
+}
+
 const getDefaultTeam = `-- name: GetDefaultTeam :one
 SELECT id, name, slug, created_at, is_default FROM teams WHERE is_default LIMIT 1
 `
@@ -42,6 +65,93 @@ func (q *Queries) GetDefaultTeam(ctx context.Context) (Team, error) {
 		&i.IsDefault,
 	)
 	return i, err
+}
+
+const getTeam = `-- name: GetTeam :one
+SELECT id, name, slug, created_at, is_default FROM teams WHERE id = $1
+`
+
+func (q *Queries) GetTeam(ctx context.Context, id uuid.UUID) (Team, error) {
+	row := q.db.QueryRow(ctx, getTeam, id)
+	var i Team
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.CreatedAt,
+		&i.IsDefault,
+	)
+	return i, err
+}
+
+const isTeamMember = `-- name: IsTeamMember :one
+SELECT EXISTS (
+    SELECT 1 FROM team_members WHERE team_id = $1 AND user_id = $2
+) AS is_member
+`
+
+type IsTeamMemberParams struct {
+	TeamID uuid.UUID `json:"team_id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) IsTeamMember(ctx context.Context, arg IsTeamMemberParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isTeamMember, arg.TeamID, arg.UserID)
+	var is_member bool
+	err := row.Scan(&is_member)
+	return is_member, err
+}
+
+const listAllTeamsWithMembership = `-- name: ListAllTeamsWithMembership :many
+SELECT
+    t.id, t.name, t.slug, t.created_at, t.is_default,
+    (SELECT COUNT(*) FROM team_members tm WHERE tm.team_id = t.id)::int AS member_count,
+    EXISTS (
+        SELECT 1 FROM team_members me
+        WHERE me.team_id = t.id AND me.user_id = $1
+    ) AS is_member
+FROM teams t
+ORDER BY t.name
+`
+
+type ListAllTeamsWithMembershipRow struct {
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	Slug        string    `json:"slug"`
+	CreatedAt   time.Time `json:"created_at"`
+	IsDefault   bool      `json:"is_default"`
+	MemberCount int32     `json:"member_count"`
+	IsMember    bool      `json:"is_member"`
+}
+
+// Browse list for the team-management UI: every team plus its member count
+// and whether the calling user already belongs to it.
+func (q *Queries) ListAllTeamsWithMembership(ctx context.Context, userID uuid.UUID) ([]ListAllTeamsWithMembershipRow, error) {
+	rows, err := q.db.Query(ctx, listAllTeamsWithMembership, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllTeamsWithMembershipRow{}
+	for rows.Next() {
+		var i ListAllTeamsWithMembershipRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Slug,
+			&i.CreatedAt,
+			&i.IsDefault,
+			&i.MemberCount,
+			&i.IsMember,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listTeamMembers = `-- name: ListTeamMembers :many
@@ -109,4 +219,18 @@ func (q *Queries) ListTeamsForUser(ctx context.Context, userID uuid.UUID) ([]Tea
 		return nil, err
 	}
 	return items, nil
+}
+
+const removeTeamMember = `-- name: RemoveTeamMember :exec
+DELETE FROM team_members WHERE team_id = $1 AND user_id = $2
+`
+
+type RemoveTeamMemberParams struct {
+	TeamID uuid.UUID `json:"team_id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) RemoveTeamMember(ctx context.Context, arg RemoveTeamMemberParams) error {
+	_, err := q.db.Exec(ctx, removeTeamMember, arg.TeamID, arg.UserID)
+	return err
 }
