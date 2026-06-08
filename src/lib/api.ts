@@ -104,6 +104,12 @@ async function request<T>(
     throw new ApiError(message, res.status, code);
   }
 
+  // 204 No Content (and other empty bodies) have nothing to parse — calling
+  // res.json() on them throws. Callers typed Promise<void> rely on this.
+  if (res.status === 204 || res.headers.get("content-length") === "0") {
+    return undefined as T;
+  }
+
   return res.json();
 }
 

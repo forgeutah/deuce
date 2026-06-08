@@ -189,6 +189,13 @@ func (h *Handler) JoinTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate the team exists first so a bad/stale ID returns a clean 404
+	// rather than a 500 from the FK violation (mirrors LeaveTeam).
+	if _, err := h.queries.GetTeam(r.Context(), teamID); err != nil {
+		writeError(w, http.StatusNotFound, "TEAM_NOT_FOUND", "team not found")
+		return
+	}
+
 	if err := h.queries.AddTeamMember(r.Context(), db.AddTeamMemberParams{TeamID: teamID, UserID: callerID}); err != nil {
 		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to join team")
 		return

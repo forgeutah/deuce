@@ -189,6 +189,17 @@ func TestJoinTeam_ThenSessionsVisible(t *testing.T) {
 	}
 }
 
+func TestJoinTeam_NonexistentReturns404(t *testing.T) {
+	f := newTeamsFixture(t)
+	alice := f.seedUser(t, "alice@example.com")
+	ghost := uuid.New() // valid UUID, no such team
+
+	rec := f.do(t, http.MethodPost, "/api/teams/"+ghost.String()+"/join", alice.String(), "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("join nonexistent team: want 404, got %d", rec.Code)
+	}
+}
+
 func TestLeaveTeam_GuardsDefaultAndSelfOnly(t *testing.T) {
 	f := newTeamsFixture(t)
 	alice := f.seedUser(t, "alice@example.com")

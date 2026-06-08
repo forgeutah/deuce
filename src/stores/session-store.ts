@@ -390,9 +390,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           s.id === sessionId ? updated : s,
         ),
       }));
-      get().wsResubscribe?.(sessionId);
+      // Reload the message snapshot BEFORE opening the live stream. setMessages
+      // wholesale-replaces the array, so a live new_message arriving between
+      // the snapshot fetch and the replace would be clobbered; subscribing
+      // after the replace means live events only ever append via addMessage.
       const data = await api.listMessages(sessionId);
       get().setMessages(sessionId, data.messages.reverse());
+      get().wsResubscribe?.(sessionId);
     } catch (err) {
       // Roll back the optimistic membership add.
       if (me) {
@@ -423,7 +427,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   setCurrentUser: (currentUser) => set({ currentUser }),
   setTeams: (teams) => set({ teams }),
   setProjects: (projects) => set({ projects }),
-  setSessions: (sessions) => set({ sessions }),
+  setSessions: (sessions) =>
+    set((state) => ({
+      sessions,
+      // If the active session is no longer visible (e.g. the user left its
+      // team), clear the pointer so the UI doesn't strand on a dead view.
+      activeSessionId:
+        state.activeSessionId &&
+        sessions.some((s) => s.id === state.activeSessionId)
+          ? state.activeSessionId
+          : null,
+    })),
   setMessages: (sessionId, messages) =>
     set((state) => ({
       messages: { ...state.messages, [sessionId]: messages },
