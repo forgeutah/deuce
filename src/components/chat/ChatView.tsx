@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 
 import { cn } from "@/lib/utils";
 import { api, ApiError } from "@/lib/api";
+import { isSessionMember } from "@/lib/membership";
 import { useSessionStore } from "@/stores/session-store";
 import { tasksByAnchor, queuePositions } from "@/stores/agent-runs";
 import { AgentTaskCard } from "@/components/super-threads/AgentTaskCard";
@@ -444,10 +445,7 @@ export function ChatView() {
   const workspaceLive = isWorkspaceLive(session?.workspaceStatus);
   // Team membership grants read access; SESSION membership grants posting.
   // A viewer who hasn't joined sees the JoinSessionGate instead of a composer.
-  const isMember =
-    !!currentUser &&
-    !!session &&
-    session.members.some((m) => m.id === currentUser.id);
+  const isMember = !!session && isSessionMember(session, currentUser?.id);
 
   return (
     <div className="flex h-full flex-col">

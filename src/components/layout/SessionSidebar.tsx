@@ -23,6 +23,7 @@ import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useSessionStore } from "@/stores/session-store";
+import { isSessionMember } from "@/lib/membership";
 import { CreateSessionDialog } from "@/components/session/CreateSessionDialog";
 import { AgentSettingsDialog } from "@/components/settings/AgentSettingsDialog";
 import { SSHKeysDialog } from "@/components/settings/SSHKeysDialog";
@@ -301,11 +302,9 @@ export function SessionSidebar() {
   // Which sessions the current user has actually joined — drives the
   // view-only marker (visible-but-not-joined).
   const memberSessionIds = new Set(
-    currentUser
-      ? sessions
-          .filter((s) => s.members.some((m) => m.id === currentUser.id))
-          .map((s) => s.id)
-      : [],
+    sessions
+      .filter((s) => isSessionMember(s, currentUser?.id))
+      .map((s) => s.id),
   );
 
   const groupsByTeam = new Map<

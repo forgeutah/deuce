@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api } from "@/lib/api";
+import { isSessionMember } from "@/lib/membership";
 import type {
   Session,
   Project,
@@ -376,7 +377,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (me) {
       set((state) => ({
         sessions: state.sessions.map((s) =>
-          s.id === sessionId && !s.members.some((m) => m.id === me.id)
+          s.id === sessionId && !isSessionMember(s, me.id)
             ? { ...s, members: [...s.members, me] }
             : s,
         ),
