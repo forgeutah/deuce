@@ -128,6 +128,8 @@ export const api = {
 
   listTeams: () => request<Team[]>("/teams"),
 
+  listUsers: () => request<User[]>("/users"),
+
   listProjects: (teamId?: string) =>
     request<Project[]>(teamId ? `/projects?teamId=${teamId}` : "/projects"),
 
@@ -194,6 +196,20 @@ export const api = {
     request<Agent[]>(`/sessions/${sessionId}/agents`, {
       method: "PUT",
       body: JSON.stringify({ agentIds }),
+    }),
+
+  addSessionMember: (
+    sessionId: string,
+    body: { userId?: string; email?: string },
+  ) =>
+    request<Session>(`/sessions/${sessionId}/members`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  removeSessionMember: (sessionId: string, userId: string) =>
+    request<Session>(`/sessions/${sessionId}/members/${userId}`, {
+      method: "DELETE",
     }),
 
   listGitHubOrgs: () => request<GitHubOrg[]>("/github/orgs"),

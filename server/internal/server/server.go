@@ -193,6 +193,7 @@ func (s *Server) Router() http.Handler {
 			})
 		})
 		r.Get("/teams", h.ListTeams)
+		r.Get("/users", h.ListUsers)
 		r.Get("/projects", h.ListProjects)
 		r.Get("/agents", h.ListAgents)
 		r.Post("/agents", h.CreateAgent)
@@ -207,6 +208,8 @@ func (s *Server) Router() http.Handler {
 			r.Route("/{sessionID}", func(r chi.Router) {
 				r.Get("/", h.GetSession)
 				r.Patch("/", h.UpdateSession)
+				r.Post("/members", h.AddSessionMember)
+				r.Delete("/members/{userID}", h.RemoveSessionMember)
 				r.Get("/messages", h.ListMessages)
 				r.Post("/messages", h.SendMessage)
 				r.Get("/activities", h.ListActivities)

@@ -59,6 +59,9 @@ INSERT INTO session_members (session_id, user_id)
 VALUES ($1, $2)
 ON CONFLICT DO NOTHING;
 
+-- name: RemoveSessionMember :exec
+DELETE FROM session_members WHERE session_id = $1 AND user_id = $2;
+
 -- name: AddSessionAgent :exec
 INSERT INTO session_agents (session_id, agent_id)
 VALUES ($1, $2)
