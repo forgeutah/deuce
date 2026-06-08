@@ -220,20 +220,24 @@ function SessionCard({
   );
 }
 
-function TeamGroup({
+function SessionGroup({
   label,
   sessions,
   activeSessionId,
   memberSessionIds,
+  defaultOpen,
+  emptyHint,
   onSelectSession,
 }: {
   label: string;
   sessions: Session[];
   activeSessionId: string | null;
   memberSessionIds: Set<string>;
+  defaultOpen: boolean;
+  emptyHint?: string;
   onSelectSession: (id: string) => void;
 }) {
-  const [isOpen, setIsOpen] = useState(true);
+  const [isOpen, setIsOpen] = useState(defaultOpen);
 
   return (
     <div className="mb-1">
@@ -246,25 +250,35 @@ function TeamGroup({
         ) : (
           <ChevronRight className="h-3 w-3" />
         )}
-        {label}
+        <span className="truncate">{label}</span>
+        <span className="ml-auto text-foreground-subtle/70">
+          {sessions.length}
+        </span>
       </button>
       {isOpen && (
         <div className="flex flex-col gap-0.5 pl-1">
-          {sessions
-            .sort(
-              (a, b) =>
-                new Date(b.lastActivityAt).getTime() -
-                new Date(a.lastActivityAt).getTime(),
-            )
-            .map((session) => (
-              <SessionCard
-                key={session.id}
-                session={session}
-                isActive={session.id === activeSessionId}
-                viewOnly={!memberSessionIds.has(session.id)}
-                onClick={() => onSelectSession(session.id)}
-              />
-            ))}
+          {sessions.length === 0 ? (
+            <p className="px-2 py-1 text-[11px] text-foreground-subtle">
+              {emptyHint ?? "No sessions"}
+            </p>
+          ) : (
+            sessions
+              .slice()
+              .sort(
+                (a, b) =>
+                  new Date(b.lastActivityAt).getTime() -
+                  new Date(a.lastActivityAt).getTime(),
+              )
+              .map((session) => (
+                <SessionCard
+                  key={session.id}
+                  session={session}
+                  isActive={session.id === activeSessionId}
+                  viewOnly={!memberSessionIds.has(session.id)}
+                  onClick={() => onSelectSession(session.id)}
+                />
+              ))
+          )}
         </div>
       )}
     </div>
@@ -291,46 +305,47 @@ export function SessionSidebar() {
     s.name.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
-  // Group sessions by team. A session references a project, the project carries
-  // a teamId, and the store holds the user's teams for the display name.
-  // Sessions whose project or team can't be resolved collapse into a single
-  // "No team" group (the empty key). Groups are ordered by most-recent activity
-  // so active teams float up.
+  // A session references a project; the project carries the teamId used to
+  // place it under a team group.
   const teamIdByProjectId = new Map(projects.map((p) => [p.id, p.teamId]));
-  const teamNameById = new Map(teams.map((t) => [t.id, t.name]));
 
-  // Which sessions the current user has actually joined — drives the
-  // view-only marker (visible-but-not-joined).
+  // Which sessions the current user has actually joined — drives both the
+  // "My Sessions" top group and the view-only marker in the team groups.
   const memberSessionIds = new Set(
     sessions
       .filter((s) => isSessionMember(s, currentUser?.id))
       .map((s) => s.id),
   );
 
-  const groupsByTeam = new Map<
-    string,
-    { label: string; sessions: Session[]; lastActivityAt: number }
-  >();
+  // Top section: every session the user is a member of, regardless of team.
+  const mySessions = filteredSessions.filter((s) => memberSessionIds.has(s.id));
+
+  // Team sections: one per team the user belongs to (collapsed by default),
+  // each listing ALL visible sessions in that team — joined or not. A joined
+  // session intentionally also appears here, so the team view is a complete
+  // browse while "My Sessions" stays the quick-access list.
+  const sessionsByTeamId = new Map<string, Session[]>();
   for (const session of filteredSessions) {
     const teamId = teamIdByProjectId.get(session.projectId) ?? "";
-    const ts = new Date(session.lastActivityAt).getTime();
-    const activity = Number.isNaN(ts) ? 0 : ts;
-    const existing = groupsByTeam.get(teamId);
-    if (existing) {
-      existing.sessions.push(session);
-      existing.lastActivityAt = Math.max(existing.lastActivityAt, activity);
-    } else {
-      groupsByTeam.set(teamId, {
-        label: teamNameById.get(teamId) ?? "No team",
-        sessions: [session],
-        lastActivityAt: activity,
-      });
-    }
+    const list = sessionsByTeamId.get(teamId);
+    if (list) list.push(session);
+    else sessionsByTeamId.set(teamId, [session]);
   }
 
-  const teamGroups = Array.from(groupsByTeam.entries())
-    .map(([key, group]) => ({ key, ...group }))
-    .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+  const teamGroups = teams
+    .map((t) => ({
+      key: t.id,
+      label: t.name,
+      sessions: sessionsByTeamId.get(t.id) ?? [],
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  // Defensive: sessions whose team isn't among the user's teams (shouldn't
+  // happen with team-scoped listing, but keeps orphans visible if it does).
+  const knownTeamIds = new Set(teams.map((t) => t.id));
+  const orphanSessions = filteredSessions.filter(
+    (s) => !knownTeamIds.has(teamIdByProjectId.get(s.projectId) ?? ""),
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -379,17 +394,48 @@ export function SessionSidebar() {
 
       {/* Session List */}
       <ScrollArea className="flex-1 px-2 py-2">
+        {/* My Sessions — every session you're a member of, open by default */}
+        <SessionGroup
+          label="My Sessions"
+          sessions={mySessions}
+          activeSessionId={activeSessionId}
+          memberSessionIds={memberSessionIds}
+          defaultOpen
+          emptyHint={
+            searchQuery
+              ? "No matches"
+              : "You haven't joined any sessions yet"
+          }
+          onSelectSession={setActiveSession}
+        />
+
+        {/* One group per team you're on — all sessions in the team, collapsed */}
         {teamGroups.map(({ key, label, sessions: groupSessions }) => (
-          <TeamGroup
-            key={key || "__no_team__"}
+          <SessionGroup
+            key={key}
             label={label}
             sessions={groupSessions}
             activeSessionId={activeSessionId}
             memberSessionIds={memberSessionIds}
+            defaultOpen={false}
+            emptyHint="No sessions in this team yet"
             onSelectSession={setActiveSession}
           />
         ))}
-        {filteredSessions.length === 0 && (
+
+        {/* Orphans (defensive — sessions outside any of your teams) */}
+        {orphanSessions.length > 0 && (
+          <SessionGroup
+            label="Other"
+            sessions={orphanSessions}
+            activeSessionId={activeSessionId}
+            memberSessionIds={memberSessionIds}
+            defaultOpen={false}
+            onSelectSession={setActiveSession}
+          />
+        )}
+
+        {filteredSessions.length === 0 && teamGroups.length === 0 && (
           <p className="px-2 py-4 text-center text-xs text-foreground-subtle">
             {searchQuery ? "No sessions match your search" : "No sessions yet"}
           </p>
