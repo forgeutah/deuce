@@ -277,3 +277,57 @@ func TestListActivities_ReadGate(t *testing.T) {
 		t.Fatalf("out-of-team ListActivities: want 403, got %d", rec.Code)
 	}
 }
+
+// --- U3: write gate on SendMessage ---
+
+func (f *visFixture) countMessages(t *testing.T, sessID uuid.UUID) int {
+	t.Helper()
+	var n int
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM messages WHERE session_id = $1`, sessID).Scan(&n); err != nil {
+		t.Fatalf("count messages: %v", err)
+	}
+	return n
+}
+
+func TestSendMessage_WriteGate(t *testing.T) {
+	f := newVisFixture(t)
+	sessID, alice, bob := f.seedReadScenario(t)
+
+	body := `{"content":"hello","mentions":[]}`
+
+	// Team member but NOT a session member -> 403, no row created.
+	rec := f.do(t, http.MethodPost, "/api/sessions/"+sessID.String()+"/messages", alice.String(), body)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("non-session-member send: want 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if n := f.countMessages(t, sessID); n != 0 {
+		t.Fatalf("non-member send must not persist; got %d messages", n)
+	}
+
+	// Out-of-team -> 403 (team gate would also reject; session gate fires first).
+	if rec := f.do(t, http.MethodPost, "/api/sessions/"+sessID.String()+"/messages", bob.String(), body); rec.Code != http.StatusForbidden {
+		t.Fatalf("out-of-team send: want 403, got %d", rec.Code)
+	}
+
+	// Now make alice a session member -> 201, row created.
+	f.addSessionMember(t, sessID, alice)
+	if rec := f.do(t, http.MethodPost, "/api/sessions/"+sessID.String()+"/messages", alice.String(), body); rec.Code != http.StatusCreated {
+		t.Fatalf("member send: want 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if n := f.countMessages(t, sessID); n != 1 {
+		t.Fatalf("member send should persist exactly 1 message; got %d", n)
+	}
+}
+
+func TestSendMessage_GateBeforeValidation(t *testing.T) {
+	f := newVisFixture(t)
+	sessID, alice, _ := f.seedReadScenario(t)
+
+	// Empty content from a NON-member must still 403 (membership checked
+	// before EMPTY_CONTENT), so non-members can't probe validation rules.
+	rec := f.do(t, http.MethodPost, "/api/sessions/"+sessID.String()+"/messages", alice.String(), `{"content":"","mentions":[]}`)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("empty content from non-member: want 403 (gate first), got %d", rec.Code)
+	}
+}

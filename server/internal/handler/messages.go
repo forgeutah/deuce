@@ -141,6 +141,14 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Write gate: posting (and the agent @mention routing below it) requires
+	// SESSION membership. Team members who are only viewing must Join first.
+	// Checked before body validation so a non-member can't probe content
+	// rules. steer (WS) is already session-gated in ws/client.go.
+	if !h.requireSessionMember(w, r, sessionID, userID) {
+		return
+	}
+
 	var req sendMessageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
