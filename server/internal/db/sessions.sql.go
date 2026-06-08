@@ -252,11 +252,17 @@ func (q *Queries) ListSessionMembers(ctx context.Context, sessionID uuid.UUID) (
 
 const listSessionsForUser = `-- name: ListSessionsForUser :many
 SELECT s.id, s.name, s.project_id, s.status, s.workspace_status, s.plan_content, s.created_at, s.last_activity_at, s.repo_url, s.description FROM sessions s
-JOIN session_members sm ON s.id = sm.session_id
-WHERE sm.user_id = $1
+JOIN projects p ON p.id = s.project_id
+JOIN team_members tm ON tm.team_id = p.team_id
+WHERE tm.user_id = $1
 ORDER BY s.last_activity_at DESC
 `
 
+// Team-scoped visibility (not membership-scoped): a user sees every session
+// whose project belongs to a team they are a member of, regardless of
+// session_members. session_members is the write/participation gate, not the
+// read gate. The session -> project -> team -> team_members chain has one row
+// per (session, user) so no DISTINCT is needed.
 func (q *Queries) ListSessionsForUser(ctx context.Context, userID uuid.UUID) ([]Session, error) {
 	rows, err := q.db.Query(ctx, listSessionsForUser, userID)
 	if err != nil {

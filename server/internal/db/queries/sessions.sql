@@ -1,7 +1,13 @@
 -- name: ListSessionsForUser :many
+-- Team-scoped visibility (not membership-scoped): a user sees every session
+-- whose project belongs to a team they are a member of, regardless of
+-- session_members. session_members is the write/participation gate, not the
+-- read gate. The session -> project -> team -> team_members chain has one row
+-- per (session, user) so no DISTINCT is needed.
 SELECT s.* FROM sessions s
-JOIN session_members sm ON s.id = sm.session_id
-WHERE sm.user_id = $1
+JOIN projects p ON p.id = s.project_id
+JOIN team_members tm ON tm.team_id = p.team_id
+WHERE tm.user_id = $1
 ORDER BY s.last_activity_at DESC;
 
 -- name: GetSession :one
