@@ -1,0 +1,23 @@
+<!-- @dsCard group="Colors" -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body{margin:0;font-family:var(--font-sans);background:var(--bg);color:var(--fg);padding:24px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .row{display:flex;align-items:center;gap:12px}
+  .chip{width:44px;height:44px;border-radius:var(--radius-md);border:1px solid var(--border);flex-shrink:0}
+  .t b{display:block;font-size:var(--text-xs);color:var(--fg-emphasis);font-weight:600}
+  .t span{font-family:var(--font-mono);font-size:var(--text-2xs);color:var(--fg-muted)}
+  .t i{font-style:normal;font-size:10px;color:var(--fg-subtle);display:block}
+</style></head>
+<body>
+  <div class="grid">
+    <div class="row"><div class="chip" style="background:#0D1117"></div><div class="t"><b>background</b><span>#0D1117</span><i>app canvas</i></div></div>
+    <div class="row"><div class="chip" style="background:#151B23"></div><div class="t"><b>bg-subtle</b><span>#151B23</span><i>sidebars / rails</i></div></div>
+    <div class="row"><div class="chip" style="background:#010409"></div><div class="t"><b>bg-inset</b><span>#010409</span><i>code / terminal</i></div></div>
+    <div class="row"><div class="chip" style="background:#262C36"></div><div class="t"><b>bg-emphasis</b><span>#262C36</span><i>active / selected</i></div></div>
+    <div class="row"><div class="chip" style="background:#212830"></div><div class="t"><b>bg-hover</b><span>#212830</span><i>row hover</i></div></div>
+    <div class="row"><div class="chip" style="background:#2A313C"></div><div class="t"><b>bg-input</b><span>#2A313C</span><i>fields</i></div></div>
+    <div class="row"><div class="chip" style="background:#2F3742"></div><div class="t"><b>bg-overlay</b><span>#2F3742</span><i>popover / menu</i></div></div>
+    <div class="row"><div class="chip" style="background:#3D444D"></div><div class="t"><b>border</b><span>#3D444D</span><i>default divider</i></div></div>
+  </div>
+</body></html>

@@ -1,0 +1,25 @@
+<!-- @dsCard group="Brand" -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body{margin:0;font-family:var(--font-sans);background:var(--bg);color:var(--fg);padding:24px}
+  .term{background:#151922;border:1px solid var(--brand-green-dim);border-radius:var(--radius-md);padding:14px 16px;margin-bottom:20px;font-family:var(--font-mono);font-size:14px;color:var(--brand-green)}
+  .term .glow{text-shadow:var(--brand-glow)}
+  .cursor{display:inline-block;width:8px;height:15px;background:var(--brand-green);margin-left:2px;vertical-align:-2px;animation:blink 1.1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+  .row{display:flex;gap:12px}
+  .sw{flex:1}
+  .chip{height:50px;border-radius:var(--radius-md);border:1px solid var(--border-muted)}
+  .name{font-size:var(--text-xs);color:var(--fg-emphasis);margin-top:8px;font-weight:600}
+  .hex{font-family:var(--font-mono);font-size:var(--text-2xs);color:var(--fg-muted);margin-top:1px}
+  .note{font-size:var(--text-xs);color:var(--fg-muted);margin-top:16px}
+</style></head>
+<body>
+  <div class="term"><span style="color:var(--brand-green-dim)">&gt;_</span> <span class="glow">deuce --collaborate</span><span class="cursor"></span></div>
+  <div class="row">
+    <div class="sw"><div class="chip" style="background:#99D5A1"></div><div class="name">green-bright</div><div class="hex">#99D5A1</div></div>
+    <div class="sw"><div class="chip" style="background:#60C070"></div><div class="name">green ◆</div><div class="hex">#60C070</div></div>
+    <div class="sw"><div class="chip" style="background:#4f8a5e"></div><div class="name">green-dim</div><div class="hex">#4f8a5e</div></div>
+    <div class="sw"><div class="chip" style="background:#151922"></div><div class="name">terminal-bg</div><div class="hex">#151922</div></div>
+  </div>
+  <div class="note">Brand phosphor green is for the logo, splash &amp; marketing chrome — the product UI keeps its blue Primer accent.</div>
+</body></html>

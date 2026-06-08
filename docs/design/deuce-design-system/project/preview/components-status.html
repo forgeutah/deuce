@@ -1,0 +1,37 @@
+<!-- @dsCard group="Components" -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body{margin:0;font-family:var(--font-sans);background:var(--bg);color:var(--fg);padding:24px}
+  .grp{margin-bottom:16px}
+  .grp:last-child{margin-bottom:0}
+  .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#656C76;font-weight:600;margin-bottom:8px;display:block}
+  .row{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .pill{font-size:10px;font-weight:500;padding:2px 8px;border-radius:9999px}
+  .dot{display:flex;align-items:center;gap:7px;font-size:12px;color:#9198A1}
+  .d{width:8px;height:8px;border-radius:9999px}
+  .pulse{animation:p 2s ease-in-out infinite}
+  @keyframes p{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(1.2)}}
+  .unread{display:flex;height:16px;min-width:16px;align-items:center;justify-content:center;border-radius:9999px;background:#f85149;padding:0 4px;font-size:10px;font-weight:500;color:#fff}
+  .mention{font-size:12px;font-weight:500;color:#fff;padding:1px 8px;border-radius:9999px}
+</style></head>
+<body>
+  <div class="grp"><span class="lbl">Status pills</span><div class="row">
+    <span class="pill" style="background:#4b2900;color:#d29922">Paused</span>
+    <span class="pill" style="background:#2F3742;color:#9198A1">Archived</span>
+    <span class="unread">3</span>
+    <span class="unread">12</span>
+  </div></div>
+  <div class="grp"><span class="lbl">Workspace status dots</span><div class="row">
+    <span class="dot"><span class="d" style="background:#3fb950"></span>ready</span>
+    <span class="dot"><span class="d pulse" style="background:#d29922"></span>starting</span>
+    <span class="dot"><span class="d" style="background:#f85149"></span>failed</span>
+    <span class="dot"><span class="d" style="background:#3D444D"></span>suspended</span>
+  </div></div>
+  <div class="grp"><span class="lbl">@mention pills (agent-colored)</span><div class="row">
+    <span class="mention" style="background:#58a6ff">@Coder</span>
+    <span class="mention" style="background:#BE8FFF">@Reviewer</span>
+    <span class="mention" style="background:#3fb950">@Planner</span>
+    <span class="mention" style="background:#d29922">@Tester</span>
+    <span class="mention" style="background:#f778ba">@Designer</span>
+  </div></div>
+</body></html>

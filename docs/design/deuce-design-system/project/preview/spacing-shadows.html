@@ -1,0 +1,20 @@
+<!-- @dsCard group="Spacing" -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body{margin:0;font-family:var(--font-sans);background:var(--bg-inset);color:var(--fg);padding:30px 24px}
+  .row{display:flex;gap:22px}
+  .c{flex:1;text-align:center}
+  .box{height:60px;background:var(--bg-overlay);border:1px solid var(--border-muted);border-radius:var(--radius-md);margin-bottom:12px}
+  .n{font-size:var(--text-xs);color:var(--fg-emphasis);font-weight:600}
+  .v{font-family:var(--font-mono);font-size:10px;color:var(--fg-muted);margin-top:2px}
+  .note{font-size:var(--text-xs);color:var(--fg-subtle);margin-top:20px;text-align:center}
+</style></head>
+<body>
+  <div class="row">
+    <div class="c"><div class="box" style="box-shadow:0 1px 2px rgba(1,4,9,.3)"></div><div class="n">shadow-sm</div><div class="v">0 1px 2px /.3</div></div>
+    <div class="c"><div class="box" style="box-shadow:0 3px 6px rgba(1,4,9,.4)"></div><div class="n">shadow-md</div><div class="v">0 3px 6px /.4</div></div>
+    <div class="c"><div class="box" style="box-shadow:0 8px 24px rgba(1,4,9,.5)"></div><div class="n">shadow-lg</div><div class="v">0 8px 24px /.5</div></div>
+    <div class="c"><div class="box" style="box-shadow:0 16px 32px rgba(1,4,9,.6)"></div><div class="n">overlay</div><div class="v">0 16px 32px /.6</div></div>
+  </div>
+  <div class="note">Shadows are reserved for true overlays (menus, dialogs). In-flow surfaces separate by background value + border — no shadow.</div>
+</body></html>

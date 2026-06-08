@@ -1,0 +1,21 @@
+<!-- @dsCard group="Components" -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body{margin:0;font-family:var(--font-sans);background:var(--bg);color:var(--fg);padding:24px}
+  .field{margin-bottom:16px}
+  .field:last-child{margin-bottom:0}
+  .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#656C76;font-weight:600;margin-bottom:7px;display:block}
+  .search{position:relative}
+  .search svg{position:absolute;left:8px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:#656C76}
+  .search input{width:100%;box-sizing:border-box;height:28px;padding:0 8px 0 28px;font-size:12px}
+  input,textarea{font-family:inherit;background:#2A313C;border:1px solid #2F3742;border-radius:6px;color:#D1D7E0;outline:none}
+  input::placeholder,textarea::placeholder{color:#656C76}
+  .focused{border-color:#58a6ff;box-shadow:0 0 0 3px rgba(88,166,255,.3)}
+  .txt{width:100%;box-sizing:border-box;padding:8px 12px;font-size:14px;resize:none;height:38px}
+</style></head>
+<body>
+  <div class="field"><span class="lbl">Search (sidebar)</span><div class="search"><i data-lucide="search"></i><input placeholder="Search sessions..."></div></div>
+  <div class="field"><span class="lbl">Text input — default / focused</span><div style="display:flex;gap:12px"><input style="flex:1;height:32px;padding:0 12px;font-size:14px" value="auth-module"><input class="focused" style="flex:1;height:32px;padding:0 12px;font-size:14px" value="Focused"></div></div>
+  <div class="field"><span class="lbl">Message composer</span><textarea class="txt" placeholder="Message (@ to mention an agent)"></textarea></div>
+  <script type="module">import{createIcons,icons}from"https://cdn.jsdelivr.net/npm/lucide@latest/dist/esm/lucide.js";createIcons({icons});</script>
+</body></html>

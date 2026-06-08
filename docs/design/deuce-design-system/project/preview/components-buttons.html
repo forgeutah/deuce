@@ -1,0 +1,24 @@
+<!-- @dsCard group="Components" -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body{margin:0;font-family:var(--font-sans);background:var(--bg);color:var(--fg);padding:24px}
+  .row{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+  .row:last-child{margin-bottom:0}
+  button{font-family:inherit;font-size:14px;font-weight:500;border:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px;border-radius:6px;transition:background .15s,color .15s}
+  .primary{background:#1f6feb;color:#fff;height:36px;padding:0 16px}
+  .primary:hover{background:#58a6ff}
+  .ghost{background:transparent;color:#9198A1;height:32px;padding:0 12px}
+  .ghost:hover{background:#212830;color:#D1D7E0}
+  .icon{background:transparent;color:#9198A1;height:28px;width:28px;padding:0;justify-content:center}
+  .icon:hover{color:#D1D7E0;background:#212830}
+  .send{background:#1f6feb;color:#fff;height:36px;width:36px;padding:0;justify-content:center}
+  .disabled{background:#1f6feb;color:#fff;height:36px;padding:0 16px;opacity:.5;cursor:not-allowed}
+  .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#656C76;font-weight:600;width:74px;flex-shrink:0}
+  svg{width:16px;height:16px}
+</style></head>
+<body>
+  <div class="row"><span class="lbl">Primary</span><button class="primary"><i data-lucide="plus"></i>New Session</button><button class="primary">Save</button><button class="disabled">Disabled</button></div>
+  <div class="row"><span class="lbl">Ghost</span><button class="ghost"><i data-lucide="users"></i>Teams</button><button class="ghost"><i data-lucide="key"></i>SSH Keys</button><button class="ghost"><i data-lucide="settings"></i>Settings</button></div>
+  <div class="row"><span class="lbl">Icon</span><button class="icon"><i data-lucide="plus"></i></button><button class="icon"><i data-lucide="pencil"></i></button><button class="icon"><i data-lucide="split"></i></button><button class="send"><i data-lucide="send-horizontal"></i></button></div>
+  <script type="module">import{createIcons,icons}from"https://cdn.jsdelivr.net/npm/lucide@latest/dist/esm/lucide.js";createIcons({icons});</script>
+</body></html>

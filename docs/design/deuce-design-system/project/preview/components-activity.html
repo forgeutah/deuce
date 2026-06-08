@@ -1,0 +1,20 @@
+<!-- @dsCard group="Components" -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body{margin:0;font-family:var(--font-sans);background:#151B23;color:var(--fg);padding:14px 16px}
+  .eyebrow{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#656C76;font-weight:600;margin-bottom:8px}
+  .act{display:flex;align-items:flex-start;gap:8px;padding:4px 2px;font-size:12px}
+  .act svg{width:12px;height:12px;margin-top:2px;flex-shrink:0}
+  .desc{flex:1;color:#D1D7E0}
+  .add{color:#3fb950;margin-left:4px}
+  .del{color:#f85149;margin-left:4px}
+  .when{color:#656C76;flex-shrink:0}
+</style></head>
+<body>
+  <div class="eyebrow">Activity</div>
+  <div class="act"><i data-lucide="bot" style="color:#656C76"></i><span class="desc">Reviewer completed code review</span><span class="when">10m ago</span></div>
+  <div class="act"><i data-lucide="circle-check" style="color:#3fb950"></i><span class="desc">4/4 tests passing</span><span class="when">45m ago</span></div>
+  <div class="act"><i data-lucide="file" style="color:#656C76"></i><span class="desc">validate.go<span class="add">+12</span><span class="del">-3</span></span><span class="when">1h ago</span></div>
+  <div class="act"><i data-lucide="git-commit" style="color:#656C76"></i><span class="desc">a1b2c3d Add token expiration check</span><span class="when">1h ago</span></div>
+  <script type="module">import{createIcons,icons}from"https://cdn.jsdelivr.net/npm/lucide@latest/dist/esm/lucide.js";createIcons({icons});</script>
+</body></html>

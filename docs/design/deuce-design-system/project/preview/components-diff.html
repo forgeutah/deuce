@@ -1,0 +1,27 @@
+<!-- @dsCard group="Components" -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body{margin:0;font-family:var(--font-sans);background:var(--bg);color:var(--fg);padding:20px 16px}
+  .box{border:1px solid #3D444D;background:#151B23;border-radius:6px;padding:12px;font-family:var(--font-mono);font-size:12px;line-height:1.5}
+  .sum{color:#9198A1;margin-bottom:8px}
+  pre{margin:0;white-space:pre;overflow-x:auto;color:#D1D7E0}
+  .ctx{color:#656C76}
+  .add{color:#3fb950}
+  .cap{font-size:12px;color:#656C76;margin-top:12px}
+</style></head>
+<body>
+  <div class="box">
+    <div class="sum">internal/auth/validate.go (+12 -3)</div>
+<pre><span class="ctx">@@ -42,8 +42,19 @@ func Validate(token string) error</span>
+<span class="ctx">   }</span>
+<span class="add">+  claims, err := ParseClaims(token)</span>
+<span class="add">+  if err != nil {</span>
+<span class="add">+    return fmt.Errorf("parse claims: %w", err)</span>
+<span class="add">+  }</span>
+<span class="add">+  if claims.ExpiresAt.Before(time.Now()) {</span>
+<span class="add">+    return ErrTokenExpired</span>
+<span class="add">+  }</span>
+<span class="ctx">   return nil</span></pre>
+  </div>
+  <div class="cap">Expandable diff inside an agent message — mono on inset surface, additions in success green.</div>
+</body></html>
