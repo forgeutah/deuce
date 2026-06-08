@@ -9,6 +9,7 @@ import type {
   Session,
   SSHKey,
   Team,
+  TeamBrowseItem,
   User,
 } from "@/types";
 
@@ -211,6 +212,26 @@ export const api = {
     request<Session>(`/sessions/${sessionId}/members/${userId}`, {
       method: "DELETE",
     }),
+
+  // Self-serve "Join Session": adds the caller as a member (team-authorized
+  // server-side). Returns the updated session with the caller in members.
+  joinSession: (sessionId: string) =>
+    request<Session>(`/sessions/${sessionId}/join`, { method: "POST" }),
+
+  // Team management (browse / create / join / leave).
+  listAllTeams: () => request<TeamBrowseItem[]>("/teams/all"),
+
+  createTeam: (name: string) =>
+    request<TeamBrowseItem>("/teams", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+
+  joinTeam: (teamId: string) =>
+    request<void>(`/teams/${teamId}/join`, { method: "POST" }),
+
+  leaveTeam: (teamId: string, userId: string) =>
+    request<void>(`/teams/${teamId}/members/${userId}`, { method: "DELETE" }),
 
   listGitHubOrgs: () => request<GitHubOrg[]>("/github/orgs"),
 

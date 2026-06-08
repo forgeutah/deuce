@@ -31,6 +31,18 @@ export interface Project {
   teamId: string;
 }
 
+// TeamBrowseItem is the shape returned by GET /teams/all for the
+// team-management UI: every team plus the caller's membership state, a member
+// count, and whether it is the (un-leavable) default team.
+export interface TeamBrowseItem {
+  id: string;
+  name: string;
+  slug: string;
+  memberCount: number;
+  isMember: boolean;
+  isDefault: boolean;
+}
+
 export interface Session {
   id: string;
   name: string;

@@ -50,6 +50,10 @@ interface SessionState {
   steerSender:
     | ((sessionId: string, agentId: string, message: string) => void)
     | null;
+  // wsResubscribe is registered by the WebSocket hook so joining a session
+  // (without switching the active session) can start the live subscription
+  // immediately. Null until the hook mounts.
+  wsResubscribe: ((sessionId: string) => void) | null;
 
   // Actions
   setActiveSession: (sessionId: string) => void;
@@ -86,6 +90,8 @@ interface SessionState {
   ) => void;
   steer: (sessionId: string, agentId: string, message: string) => void;
   setShowLogs: (show: boolean) => void;
+  setWsResubscribe: (fn: ((sessionId: string) => void) | null) => void;
+  joinSession: (sessionId: string) => Promise<void>;
   addSession: (session: Session) => void;
   updateWorkspaceStatus: (
     sessionId: string,
@@ -126,6 +132,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   searchQuery: "",
   openThread: null,
   steerSender: null,
+  wsResubscribe: null,
 
   setActiveSession: (sessionId) => {
     set((state) => ({
@@ -355,6 +362,50 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   setShowLogs: (show) => set({ showLogs: show }),
+
+  setWsResubscribe: (fn) => set({ wsResubscribe: fn }),
+
+  // joinSession adds the current user to a session's members (the "Join
+  // Session" CTA). Optimistically flips membership so the composer unlocks
+  // immediately, then reconciles with the server response. On success it
+  // starts the live WS subscription (the active session didn't change, so the
+  // join effect won't re-fire) and reloads messages to catch anything posted
+  // between the static snapshot and going live. Rolls back on failure.
+  joinSession: async (sessionId) => {
+    const me = get().currentUser;
+    if (me) {
+      set((state) => ({
+        sessions: state.sessions.map((s) =>
+          s.id === sessionId && !s.members.some((m) => m.id === me.id)
+            ? { ...s, members: [...s.members, me] }
+            : s,
+        ),
+      }));
+    }
+    try {
+      const updated = await api.joinSession(sessionId);
+      set((state) => ({
+        sessions: state.sessions.map((s) =>
+          s.id === sessionId ? updated : s,
+        ),
+      }));
+      get().wsResubscribe?.(sessionId);
+      const data = await api.listMessages(sessionId);
+      get().setMessages(sessionId, data.messages.reverse());
+    } catch (err) {
+      // Roll back the optimistic membership add.
+      if (me) {
+        set((state) => ({
+          sessions: state.sessions.map((s) =>
+            s.id === sessionId
+              ? { ...s, members: s.members.filter((m) => m.id !== me.id) }
+              : s,
+          ),
+        }));
+      }
+      throw err;
+    }
+  },
 
   addSession: (session) =>
     set((state) => ({
