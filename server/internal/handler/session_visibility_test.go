@@ -68,10 +68,13 @@ func newVisFixture(t *testing.T) *visFixture {
 		r.Get("/", h.ListSessions)
 		r.Route("/{sessionID}", func(r chi.Router) {
 			r.Get("/", h.GetSession)
+			r.Patch("/", h.UpdateSession)
 			r.Post("/join", h.JoinSession)
+			r.Post("/members", h.AddSessionMember)
 			r.Get("/messages", h.ListMessages)
 			r.Post("/messages", h.SendMessage)
 			r.Get("/activities", h.ListActivities)
+			r.Get("/files", h.ListFiles)
 		})
 	})
 
@@ -387,6 +390,60 @@ func TestJoinSession_OutOfTeamForbidden(t *testing.T) {
 	}
 	if f.isSessionMember(t, sessID, bob) {
 		t.Fatalf("out-of-team user must not become a member")
+	}
+}
+
+// --- Authz gates closed during code review (terminal/workspace/files/update/
+// agents were previously un-gated; these lock in the representative gates) ---
+
+func TestListFiles_ReadGate(t *testing.T) {
+	f := newVisFixture(t)
+	sessID, _, bob := f.seedReadScenario(t)
+
+	// Out-of-team user is rejected by the team read-gate before any workspace
+	// logic runs (so workspace-not-ready never masks the 403).
+	rec := f.do(t, http.MethodGet, "/api/sessions/"+sessID.String()+"/files", bob.String(), "")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("out-of-team ListFiles: want 403, got %d", rec.Code)
+	}
+}
+
+func TestUpdateSession_WriteGate(t *testing.T) {
+	f := newVisFixture(t)
+	sessID, alice, _ := f.seedReadScenario(t)
+
+	// alice is a team member but NOT a session member -> PATCH is write-gated.
+	rec := f.do(t, http.MethodPatch, "/api/sessions/"+sessID.String(), alice.String(), `{"description":"hijack"}`)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("non-session-member UpdateSession: want 403, got %d", rec.Code)
+	}
+}
+
+func TestAddSessionMember_TargetMustBeTeamMember(t *testing.T) {
+	f := newVisFixture(t)
+	sessID, alice, bob := f.seedReadScenario(t)
+	f.addSessionMember(t, sessID, alice) // alice can manage members
+
+	// bob is NOT on the session's team -> adding him is rejected.
+	rec := f.do(t, http.MethodPost, "/api/sessions/"+sessID.String()+"/members", alice.String(), `{"userId":"`+bob.String()+`"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("add non-team user: want 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Put bob on the team -> now he can be added.
+	teamA, err := f.queries.IsSessionTeamMember(context.Background(), db.IsSessionTeamMemberParams{SessionID: sessID, UserID: alice})
+	if err != nil || !teamA {
+		t.Fatalf("precondition: alice should be a team member")
+	}
+	// Resolve team via project and add bob.
+	if _, err := f.pool.Exec(context.Background(),
+		`INSERT INTO team_members (team_id, user_id) SELECT p.team_id, $2 FROM sessions s JOIN projects p ON p.id = s.project_id WHERE s.id = $1`,
+		sessID, bob); err != nil {
+		t.Fatalf("add bob to team: %v", err)
+	}
+	rec2 := f.do(t, http.MethodPost, "/api/sessions/"+sessID.String()+"/members", alice.String(), `{"userId":"`+bob.String()+`"}`)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("add team user: want 200, got %d: %s", rec2.Code, rec2.Body.String())
 	}
 }
 

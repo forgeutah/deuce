@@ -256,9 +256,24 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 
 // StopAgent handles POST /api/sessions/{id}/agents/stop
 func (h *Handler) StopAgent(w http.ResponseWriter, r *http.Request) {
-	sessionID := chi.URLParam(r, "sessionID")
+	sessionID, err := uuid.Parse(chi.URLParam(r, "sessionID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_SESSION_ID", "invalid session ID")
+		return
+	}
+
+	// Write gate: cancelling a session's agent runs requires SESSION membership.
+	userID, err := uuid.Parse(getUserID(r))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_USER", "invalid user ID")
+		return
+	}
+	if !h.requireSessionMember(w, r, sessionID, userID) {
+		return
+	}
+
 	if h.agentQueue != nil {
-		h.agentQueue.Cancel(sessionID)
+		h.agentQueue.Cancel(sessionID.String())
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

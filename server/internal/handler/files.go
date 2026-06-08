@@ -110,6 +110,16 @@ func (h *Handler) ListFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read gate: the file tree is session content, readable by team members.
+	userID, err := uuid.Parse(getUserID(r))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_USER", "invalid user ID")
+		return
+	}
+	if !h.requireSessionTeamMember(w, r, sessionID, userID) {
+		return
+	}
+
 	session, err := h.queries.GetSession(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "session not found")
@@ -181,6 +191,16 @@ func (h *Handler) GetFileContent(w http.ResponseWriter, r *http.Request) {
 	sessionID, err := uuid.Parse(chi.URLParam(r, "sessionID"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_SESSION_ID", "invalid session ID")
+		return
+	}
+
+	// Read gate: file content is session content, readable by team members.
+	userID, err := uuid.Parse(getUserID(r))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_USER", "invalid user ID")
+		return
+	}
+	if !h.requireSessionTeamMember(w, r, sessionID, userID) {
 		return
 	}
 

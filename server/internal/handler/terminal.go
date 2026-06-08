@@ -26,6 +26,17 @@ func (h *Handler) HandleTerminalWebSocket(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Authorize: an interactive shell into the workspace is a write/live
+	// surface, so it requires SESSION membership (not just team read access).
+	userID, err := uuid.Parse(getUserID(r))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_USER", "invalid user ID")
+		return
+	}
+	if !h.requireSessionMember(w, r, sessionID, userID) {
+		return
+	}
+
 	// Look up session to get workspace name and verify status
 	session, err := h.queries.GetSession(r.Context(), sessionID)
 	if err != nil {

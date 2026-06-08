@@ -97,6 +97,23 @@ func (h *Handler) AddSessionMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The target must belong to the session's team. Session membership grants
+	// write + live-stream access; granting it to someone outside the team
+	// would let them post to a session they can't even read (reads are
+	// team-gated), an incoherent state. Keep membership within the team boundary.
+	teamMember, err := h.queries.IsSessionTeamMember(r.Context(), db.IsSessionTeamMemberParams{
+		SessionID: sessionID,
+		UserID:    target.ID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to check team membership")
+		return
+	}
+	if !teamMember {
+		writeError(w, http.StatusBadRequest, "NOT_TEAM_MEMBER", "user is not a member of this session's team")
+		return
+	}
+
 	if err := h.queries.AddSessionMember(r.Context(), db.AddSessionMemberParams{
 		SessionID: sessionID,
 		UserID:    target.ID,
