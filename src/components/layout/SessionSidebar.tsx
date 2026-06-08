@@ -26,6 +26,7 @@ import { useSessionStore } from "@/stores/session-store";
 import { CreateSessionDialog } from "@/components/session/CreateSessionDialog";
 import { AgentSettingsDialog } from "@/components/settings/AgentSettingsDialog";
 import { SSHKeysDialog } from "@/components/settings/SSHKeysDialog";
+import { TeamManagementDialog } from "@/components/teams/TeamManagementDialog";
 import type { Session } from "@/types";
 
 const MAX_DESCRIPTION_LENGTH = 200;
@@ -273,6 +274,7 @@ export function SessionSidebar() {
   const [createOpen, setCreateOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sshKeysOpen, setSshKeysOpen] = useState(false);
+  const [teamsOpen, setTeamsOpen] = useState(false);
   const {
     projects,
     teams,
@@ -399,7 +401,10 @@ export function SessionSidebar() {
 
       {/* Footer Nav */}
       <div className="flex flex-col gap-0.5 p-2">
-        <button className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground-muted hover:bg-background-hover hover:text-foreground">
+        <button
+          onClick={() => setTeamsOpen(true)}
+          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground-muted hover:bg-background-hover hover:text-foreground"
+        >
           <Users className="h-4 w-4" />
           Teams
         </button>
@@ -422,6 +427,7 @@ export function SessionSidebar() {
       <CreateSessionDialog open={createOpen} onOpenChange={setCreateOpen} />
       <AgentSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <SSHKeysDialog open={sshKeysOpen} onOpenChange={setSshKeysOpen} />
+      <TeamManagementDialog open={teamsOpen} onOpenChange={setTeamsOpen} />
     </div>
   );
 }
