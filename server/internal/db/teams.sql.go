@@ -11,6 +11,39 @@ import (
 	"github.com/google/uuid"
 )
 
+const addTeamMember = `-- name: AddTeamMember :exec
+INSERT INTO team_members (team_id, user_id)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING
+`
+
+type AddTeamMemberParams struct {
+	TeamID uuid.UUID `json:"team_id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) AddTeamMember(ctx context.Context, arg AddTeamMemberParams) error {
+	_, err := q.db.Exec(ctx, addTeamMember, arg.TeamID, arg.UserID)
+	return err
+}
+
+const getDefaultTeam = `-- name: GetDefaultTeam :one
+SELECT id, name, slug, created_at, is_default FROM teams WHERE is_default LIMIT 1
+`
+
+func (q *Queries) GetDefaultTeam(ctx context.Context) (Team, error) {
+	row := q.db.QueryRow(ctx, getDefaultTeam)
+	var i Team
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.CreatedAt,
+		&i.IsDefault,
+	)
+	return i, err
+}
+
 const listTeamMembers = `-- name: ListTeamMembers :many
 SELECT u.id, u.name, u.email, u.avatar, u.status, u.created_at FROM users u
 JOIN team_members tm ON u.id = tm.user_id
@@ -46,7 +79,7 @@ func (q *Queries) ListTeamMembers(ctx context.Context, teamID uuid.UUID) ([]User
 }
 
 const listTeamsForUser = `-- name: ListTeamsForUser :many
-SELECT t.id, t.name, t.slug, t.created_at FROM teams t
+SELECT t.id, t.name, t.slug, t.created_at, t.is_default FROM teams t
 JOIN team_members tm ON t.id = tm.team_id
 WHERE tm.user_id = $1
 ORDER BY t.name
@@ -66,6 +99,7 @@ func (q *Queries) ListTeamsForUser(ctx context.Context, userID uuid.UUID) ([]Tea
 			&i.Name,
 			&i.Slug,
 			&i.CreatedAt,
+			&i.IsDefault,
 		); err != nil {
 			return nil, err
 		}
