@@ -9,6 +9,7 @@ import {
   Users,
   ChevronDown,
   ChevronRight,
+  Eye,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -25,7 +26,6 @@ import { useSessionStore } from "@/stores/session-store";
 import { CreateSessionDialog } from "@/components/session/CreateSessionDialog";
 import { AgentSettingsDialog } from "@/components/settings/AgentSettingsDialog";
 import { SSHKeysDialog } from "@/components/settings/SSHKeysDialog";
-import { repoGroupKey, repoGroupLabel } from "@/lib/repo";
 import type { Session } from "@/types";
 
 const MAX_DESCRIPTION_LENGTH = 200;
@@ -33,10 +33,12 @@ const MAX_DESCRIPTION_LENGTH = 200;
 function SessionCard({
   session,
   isActive,
+  viewOnly,
   onClick,
 }: {
   session: Session;
   isActive: boolean;
+  viewOnly: boolean;
   onClick: () => void;
 }) {
   const updateSessionDescription = useSessionStore(
@@ -191,6 +193,15 @@ function SessionCard({
         )}
       </div>
       <div className="mt-1.5 flex shrink-0 items-center gap-1">
+        {viewOnly && (
+          <span title="Viewing — not a member" className="flex shrink-0">
+            <Eye
+              className="h-3 w-3 text-foreground-subtle"
+              role="img"
+              aria-label="Viewing — not a member"
+            />
+          </span>
+        )}
         <span
           className={cn("h-2 w-2 shrink-0 rounded-full", statusDotClass)}
           role="img"
@@ -207,15 +218,17 @@ function SessionCard({
   );
 }
 
-function RepoGroup({
+function TeamGroup({
   label,
   sessions,
   activeSessionId,
+  memberSessionIds,
   onSelectSession,
 }: {
   label: string;
   sessions: Session[];
   activeSessionId: string | null;
+  memberSessionIds: Set<string>;
   onSelectSession: (id: string) => void;
 }) {
   const [isOpen, setIsOpen] = useState(true);
@@ -246,6 +259,7 @@ function RepoGroup({
                 key={session.id}
                 session={session}
                 isActive={session.id === activeSessionId}
+                viewOnly={!memberSessionIds.has(session.id)}
                 onClick={() => onSelectSession(session.id)}
               />
             ))}
@@ -261,7 +275,9 @@ export function SessionSidebar() {
   const [sshKeysOpen, setSshKeysOpen] = useState(false);
   const {
     projects,
+    teams,
     sessions,
+    currentUser,
     activeSessionId,
     searchQuery,
     setActiveSession,
@@ -272,38 +288,46 @@ export function SessionSidebar() {
     s.name.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
-  // Group sessions by repository. A session references a project, and a project
-  // carries the repoUrl; sessions whose projects resolve to the same repo merge
-  // into one group, keyed by a canonical host/owner/repo identity so different
-  // clone forms (HTTPS vs SSH) of one repo group together. Sessions whose
-  // project is missing or has no repoUrl collapse into a single "No repository"
-  // group (the empty key). Groups are ordered by most-recent activity so active
-  // repos float up.
-  const repoUrlByProjectId = new Map(projects.map((p) => [p.id, p.repoUrl]));
+  // Group sessions by team. A session references a project, the project carries
+  // a teamId, and the store holds the user's teams for the display name.
+  // Sessions whose project or team can't be resolved collapse into a single
+  // "No team" group (the empty key). Groups are ordered by most-recent activity
+  // so active teams float up.
+  const teamIdByProjectId = new Map(projects.map((p) => [p.id, p.teamId]));
+  const teamNameById = new Map(teams.map((t) => [t.id, t.name]));
 
-  const groupsByRepo = new Map<
+  // Which sessions the current user has actually joined — drives the
+  // view-only marker (visible-but-not-joined).
+  const memberSessionIds = new Set(
+    currentUser
+      ? sessions
+          .filter((s) => s.members.some((m) => m.id === currentUser.id))
+          .map((s) => s.id)
+      : [],
+  );
+
+  const groupsByTeam = new Map<
     string,
     { label: string; sessions: Session[]; lastActivityAt: number }
   >();
   for (const session of filteredSessions) {
-    const repoUrl = repoUrlByProjectId.get(session.projectId) ?? "";
-    const key = repoGroupKey(repoUrl);
+    const teamId = teamIdByProjectId.get(session.projectId) ?? "";
     const ts = new Date(session.lastActivityAt).getTime();
     const activity = Number.isNaN(ts) ? 0 : ts;
-    const existing = groupsByRepo.get(key);
+    const existing = groupsByTeam.get(teamId);
     if (existing) {
       existing.sessions.push(session);
       existing.lastActivityAt = Math.max(existing.lastActivityAt, activity);
     } else {
-      groupsByRepo.set(key, {
-        label: repoGroupLabel(repoUrl),
+      groupsByTeam.set(teamId, {
+        label: teamNameById.get(teamId) ?? "No team",
         sessions: [session],
         lastActivityAt: activity,
       });
     }
   }
 
-  const repoGroups = Array.from(groupsByRepo.entries())
+  const teamGroups = Array.from(groupsByTeam.entries())
     .map(([key, group]) => ({ key, ...group }))
     .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 
@@ -354,12 +378,13 @@ export function SessionSidebar() {
 
       {/* Session List */}
       <ScrollArea className="flex-1 px-2 py-2">
-        {repoGroups.map(({ key, label, sessions: groupSessions }) => (
-          <RepoGroup
-            key={key || "__no_repo__"}
+        {teamGroups.map(({ key, label, sessions: groupSessions }) => (
+          <TeamGroup
+            key={key || "__no_team__"}
             label={label}
             sessions={groupSessions}
             activeSessionId={activeSessionId}
+            memberSessionIds={memberSessionIds}
             onSelectSession={setActiveSession}
           />
         ))}
