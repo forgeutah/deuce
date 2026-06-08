@@ -120,6 +120,12 @@ func (h *Handler) handleWorkspaceAction(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	// Authorize: workspace lifecycle is destructive (delete/rebuild wipe the
+	// container), so it requires SESSION membership.
+	if !h.requireSessionMember(w, r, sessionID, userID) {
+		return
+	}
+
 	// Reject when the row is already transitional — another action is in
 	// flight. Returns 409 with the in-flight action so the UI can render a
 	// useful message.

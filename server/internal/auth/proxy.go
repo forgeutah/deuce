@@ -33,6 +33,8 @@ const (
 type ProxyUserStore interface {
 	LookupUserByEmail(ctx context.Context, email string) (db.User, error)
 	CreateUserByEmail(ctx context.Context, arg db.CreateUserByEmailParams) (db.User, error)
+	GetDefaultTeam(ctx context.Context) (db.Team, error)
+	AddTeamMember(ctx context.Context, arg db.AddTeamMemberParams) error
 }
 
 // ProxyConfig is the resolved subset of *config.Config the middleware needs.
@@ -235,6 +237,23 @@ func ProxyMiddleware(store ProxyUserStore, pc ProxyConfig) func(http.Handler) ht
 			}
 
 			if created {
+				// Team membership is the read boundary for sessions, so a
+				// brand-new user with no team would see nothing. Auto-join them
+				// to the default team. Non-fatal and idempotent: if the default
+				// team is missing or the add fails, the user is still admitted
+				// (they see no sessions until added to a team out-of-band)
+				// rather than blocked by a 500.
+				if team, terr := store.GetDefaultTeam(r.Context()); terr != nil {
+					slog.Warn("auth.proxy: no default team to auto-join",
+						"email", sanitizeForLog(email), "error", terr)
+				} else if aerr := store.AddTeamMember(r.Context(), db.AddTeamMemberParams{
+					TeamID: team.ID,
+					UserID: user.ID,
+				}); aerr != nil {
+					slog.Warn("auth.proxy: default-team auto-join failed",
+						"email", sanitizeForLog(email), "error", aerr)
+				}
+
 				slog.Info("auth.proxy: provisioned user",
 					"email", sanitizeForLog(email),
 					"deuce_user_id", user.ID.String(),

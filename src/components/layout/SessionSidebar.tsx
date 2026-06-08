@@ -9,6 +9,7 @@ import {
   Users,
   ChevronDown,
   ChevronRight,
+  Eye,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -22,10 +23,11 @@ import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useSessionStore } from "@/stores/session-store";
+import { isSessionMember } from "@/lib/membership";
 import { CreateSessionDialog } from "@/components/session/CreateSessionDialog";
 import { AgentSettingsDialog } from "@/components/settings/AgentSettingsDialog";
 import { SSHKeysDialog } from "@/components/settings/SSHKeysDialog";
-import { repoGroupKey, repoGroupLabel } from "@/lib/repo";
+import { TeamManagementDialog } from "@/components/teams/TeamManagementDialog";
 import type { Session } from "@/types";
 
 const MAX_DESCRIPTION_LENGTH = 200;
@@ -33,10 +35,12 @@ const MAX_DESCRIPTION_LENGTH = 200;
 function SessionCard({
   session,
   isActive,
+  viewOnly,
   onClick,
 }: {
   session: Session;
   isActive: boolean;
+  viewOnly: boolean;
   onClick: () => void;
 }) {
   const updateSessionDescription = useSessionStore(
@@ -191,6 +195,15 @@ function SessionCard({
         )}
       </div>
       <div className="mt-1.5 flex shrink-0 items-center gap-1">
+        {viewOnly && (
+          <span title="Viewing — not a member" className="flex shrink-0">
+            <Eye
+              className="h-3 w-3 text-foreground-subtle"
+              role="img"
+              aria-label="Viewing — not a member"
+            />
+          </span>
+        )}
         <span
           className={cn("h-2 w-2 shrink-0 rounded-full", statusDotClass)}
           role="img"
@@ -207,18 +220,24 @@ function SessionCard({
   );
 }
 
-function RepoGroup({
+function SessionGroup({
   label,
   sessions,
   activeSessionId,
+  memberSessionIds,
+  defaultOpen,
+  emptyHint,
   onSelectSession,
 }: {
   label: string;
   sessions: Session[];
   activeSessionId: string | null;
+  memberSessionIds: Set<string>;
+  defaultOpen: boolean;
+  emptyHint?: string;
   onSelectSession: (id: string) => void;
 }) {
-  const [isOpen, setIsOpen] = useState(true);
+  const [isOpen, setIsOpen] = useState(defaultOpen);
 
   return (
     <div className="mb-1">
@@ -231,24 +250,35 @@ function RepoGroup({
         ) : (
           <ChevronRight className="h-3 w-3" />
         )}
-        {label}
+        <span className="truncate">{label}</span>
+        <span className="ml-auto text-foreground-subtle/70">
+          {sessions.length}
+        </span>
       </button>
       {isOpen && (
         <div className="flex flex-col gap-0.5 pl-1">
-          {sessions
-            .sort(
-              (a, b) =>
-                new Date(b.lastActivityAt).getTime() -
-                new Date(a.lastActivityAt).getTime(),
-            )
-            .map((session) => (
-              <SessionCard
-                key={session.id}
-                session={session}
-                isActive={session.id === activeSessionId}
-                onClick={() => onSelectSession(session.id)}
-              />
-            ))}
+          {sessions.length === 0 ? (
+            <p className="px-2 py-1 text-[11px] text-foreground-subtle">
+              {emptyHint ?? "No sessions"}
+            </p>
+          ) : (
+            sessions
+              .slice()
+              .sort(
+                (a, b) =>
+                  new Date(b.lastActivityAt).getTime() -
+                  new Date(a.lastActivityAt).getTime(),
+              )
+              .map((session) => (
+                <SessionCard
+                  key={session.id}
+                  session={session}
+                  isActive={session.id === activeSessionId}
+                  viewOnly={!memberSessionIds.has(session.id)}
+                  onClick={() => onSelectSession(session.id)}
+                />
+              ))
+          )}
         </div>
       )}
     </div>
@@ -259,9 +289,12 @@ export function SessionSidebar() {
   const [createOpen, setCreateOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sshKeysOpen, setSshKeysOpen] = useState(false);
+  const [teamsOpen, setTeamsOpen] = useState(false);
   const {
     projects,
+    teams,
     sessions,
+    currentUser,
     activeSessionId,
     searchQuery,
     setActiveSession,
@@ -272,40 +305,47 @@ export function SessionSidebar() {
     s.name.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
-  // Group sessions by repository. A session references a project, and a project
-  // carries the repoUrl; sessions whose projects resolve to the same repo merge
-  // into one group, keyed by a canonical host/owner/repo identity so different
-  // clone forms (HTTPS vs SSH) of one repo group together. Sessions whose
-  // project is missing or has no repoUrl collapse into a single "No repository"
-  // group (the empty key). Groups are ordered by most-recent activity so active
-  // repos float up.
-  const repoUrlByProjectId = new Map(projects.map((p) => [p.id, p.repoUrl]));
+  // A session references a project; the project carries the teamId used to
+  // place it under a team group.
+  const teamIdByProjectId = new Map(projects.map((p) => [p.id, p.teamId]));
 
-  const groupsByRepo = new Map<
-    string,
-    { label: string; sessions: Session[]; lastActivityAt: number }
-  >();
+  // Which sessions the current user has actually joined — drives both the
+  // "My Sessions" top group and the view-only marker in the team groups.
+  const memberSessionIds = new Set(
+    sessions
+      .filter((s) => isSessionMember(s, currentUser?.id))
+      .map((s) => s.id),
+  );
+
+  // Top section: every session the user is a member of, regardless of team.
+  const mySessions = filteredSessions.filter((s) => memberSessionIds.has(s.id));
+
+  // Team sections: one per team the user belongs to (collapsed by default),
+  // each listing ALL visible sessions in that team — joined or not. A joined
+  // session intentionally also appears here, so the team view is a complete
+  // browse while "My Sessions" stays the quick-access list.
+  const sessionsByTeamId = new Map<string, Session[]>();
   for (const session of filteredSessions) {
-    const repoUrl = repoUrlByProjectId.get(session.projectId) ?? "";
-    const key = repoGroupKey(repoUrl);
-    const ts = new Date(session.lastActivityAt).getTime();
-    const activity = Number.isNaN(ts) ? 0 : ts;
-    const existing = groupsByRepo.get(key);
-    if (existing) {
-      existing.sessions.push(session);
-      existing.lastActivityAt = Math.max(existing.lastActivityAt, activity);
-    } else {
-      groupsByRepo.set(key, {
-        label: repoGroupLabel(repoUrl),
-        sessions: [session],
-        lastActivityAt: activity,
-      });
-    }
+    const teamId = teamIdByProjectId.get(session.projectId) ?? "";
+    const list = sessionsByTeamId.get(teamId);
+    if (list) list.push(session);
+    else sessionsByTeamId.set(teamId, [session]);
   }
 
-  const repoGroups = Array.from(groupsByRepo.entries())
-    .map(([key, group]) => ({ key, ...group }))
-    .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+  const teamGroups = teams
+    .map((t) => ({
+      key: t.id,
+      label: t.name,
+      sessions: sessionsByTeamId.get(t.id) ?? [],
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  // Defensive: sessions whose team isn't among the user's teams (shouldn't
+  // happen with team-scoped listing, but keeps orphans visible if it does).
+  const knownTeamIds = new Set(teams.map((t) => t.id));
+  const orphanSessions = filteredSessions.filter(
+    (s) => !knownTeamIds.has(teamIdByProjectId.get(s.projectId) ?? ""),
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -354,16 +394,48 @@ export function SessionSidebar() {
 
       {/* Session List */}
       <ScrollArea className="flex-1 px-2 py-2">
-        {repoGroups.map(({ key, label, sessions: groupSessions }) => (
-          <RepoGroup
-            key={key || "__no_repo__"}
+        {/* My Sessions — every session you're a member of, open by default */}
+        <SessionGroup
+          label="My Sessions"
+          sessions={mySessions}
+          activeSessionId={activeSessionId}
+          memberSessionIds={memberSessionIds}
+          defaultOpen
+          emptyHint={
+            searchQuery
+              ? "No matches"
+              : "You haven't joined any sessions yet"
+          }
+          onSelectSession={setActiveSession}
+        />
+
+        {/* One group per team you're on — all sessions in the team, collapsed */}
+        {teamGroups.map(({ key, label, sessions: groupSessions }) => (
+          <SessionGroup
+            key={key}
             label={label}
             sessions={groupSessions}
             activeSessionId={activeSessionId}
+            memberSessionIds={memberSessionIds}
+            defaultOpen={false}
+            emptyHint="No sessions in this team yet"
             onSelectSession={setActiveSession}
           />
         ))}
-        {filteredSessions.length === 0 && (
+
+        {/* Orphans (defensive — sessions outside any of your teams) */}
+        {orphanSessions.length > 0 && (
+          <SessionGroup
+            label="Other"
+            sessions={orphanSessions}
+            activeSessionId={activeSessionId}
+            memberSessionIds={memberSessionIds}
+            defaultOpen={false}
+            onSelectSession={setActiveSession}
+          />
+        )}
+
+        {filteredSessions.length === 0 && teamGroups.length === 0 && (
           <p className="px-2 py-4 text-center text-xs text-foreground-subtle">
             {searchQuery ? "No sessions match your search" : "No sessions yet"}
           </p>
@@ -374,7 +446,10 @@ export function SessionSidebar() {
 
       {/* Footer Nav */}
       <div className="flex flex-col gap-0.5 p-2">
-        <button className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground-muted hover:bg-background-hover hover:text-foreground">
+        <button
+          onClick={() => setTeamsOpen(true)}
+          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground-muted hover:bg-background-hover hover:text-foreground"
+        >
           <Users className="h-4 w-4" />
           Teams
         </button>
@@ -397,6 +472,7 @@ export function SessionSidebar() {
       <CreateSessionDialog open={createOpen} onOpenChange={setCreateOpen} />
       <AgentSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <SSHKeysDialog open={sshKeysOpen} onOpenChange={setSshKeysOpen} />
+      <TeamManagementDialog open={teamsOpen} onOpenChange={setTeamsOpen} />
     </div>
   );
 }

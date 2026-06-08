@@ -143,6 +143,16 @@ func (h *Handler) UpdateSessionAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Write gate: changing a session's agent roster requires SESSION membership.
+	userID, err := uuid.Parse(getUserID(r))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_USER", "invalid user ID")
+		return
+	}
+	if !h.requireSessionMember(w, r, sessionID, userID) {
+		return
+	}
+
 	var req updateAgentsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_BODY", "invalid request body")

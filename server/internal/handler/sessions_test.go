@@ -77,6 +77,11 @@ func newVSCodeURIFixture(t *testing.T, publicHostname, sshAddr string) *vscodeUR
 	if _, err := pool.Exec(ctx, `INSERT INTO session_members (session_id, user_id) VALUES ($1, $2)`, sessionID, userID); err != nil {
 		t.Fatalf("seed session_member: %v", err)
 	}
+	// The user must also be a member of the session's team — vscode-uri (and
+	// the other read endpoints) are team-gated.
+	if _, err := pool.Exec(ctx, `INSERT INTO team_members (team_id, user_id) VALUES ($1, $2)`, teamID, userID); err != nil {
+		t.Fatalf("seed team_member: %v", err)
+	}
 
 	session, err := q.GetSession(ctx, sessionID)
 	if err != nil {
@@ -250,8 +255,11 @@ func TestGetSessionVSCodeURI_NonexistentSession(t *testing.T) {
 
 	missing := uuid.New().String()
 	rec := f.do(t, http.MethodGet, "/api/sessions/"+missing+"/vscode-uri", f.userID.String())
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status: want 404, got %d body=%s", rec.Code, rec.Body.String())
+	// The team read-gate runs before the session lookup, so a session the
+	// caller can't see (nonexistent or in another team) returns 403, not 404 —
+	// deliberately not a cross-team existence oracle.
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status: want 403, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	var body struct {
 		Error struct {
@@ -261,8 +269,8 @@ func TestGetSessionVSCodeURI_NonexistentSession(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if body.Error.Code != "SESSION_NOT_FOUND" {
-		t.Errorf("error code: want SESSION_NOT_FOUND, got %q", body.Error.Code)
+	if body.Error.Code != "FORBIDDEN" {
+		t.Errorf("error code: want FORBIDDEN, got %q", body.Error.Code)
 	}
 }
 

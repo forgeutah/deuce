@@ -9,6 +9,7 @@ import type {
   Session,
   SSHKey,
   Team,
+  TeamBrowseItem,
   User,
 } from "@/types";
 
@@ -101,6 +102,12 @@ async function request<T>(
       body?.error?.message ?? `Request failed: ${res.status}`;
     const code = body?.error?.code ?? "";
     throw new ApiError(message, res.status, code);
+  }
+
+  // 204 No Content (and other empty bodies) have nothing to parse — calling
+  // res.json() on them throws. Callers typed Promise<void> rely on this.
+  if (res.status === 204 || res.headers.get("content-length") === "0") {
+    return undefined as T;
   }
 
   return res.json();
@@ -211,6 +218,26 @@ export const api = {
     request<Session>(`/sessions/${sessionId}/members/${userId}`, {
       method: "DELETE",
     }),
+
+  // Self-serve "Join Session": adds the caller as a member (team-authorized
+  // server-side). Returns the updated session with the caller in members.
+  joinSession: (sessionId: string) =>
+    request<Session>(`/sessions/${sessionId}/join`, { method: "POST" }),
+
+  // Team management (browse / create / join / leave).
+  listAllTeams: () => request<TeamBrowseItem[]>("/teams/all"),
+
+  createTeam: (name: string) =>
+    request<TeamBrowseItem>("/teams", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+
+  joinTeam: (teamId: string) =>
+    request<void>(`/teams/${teamId}/join`, { method: "POST" }),
+
+  leaveTeam: (teamId: string, userId: string) =>
+    request<void>(`/teams/${teamId}/members/${userId}`, { method: "DELETE" }),
 
   listGitHubOrgs: () => request<GitHubOrg[]>("/github/orgs"),
 

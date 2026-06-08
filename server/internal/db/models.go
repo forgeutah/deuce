@@ -124,6 +124,7 @@ type Team struct {
 	Name      string    `json:"name"`
 	Slug      string    `json:"slug"`
 	CreatedAt time.Time `json:"created_at"`
+	IsDefault bool      `json:"is_default"`
 }
 
 type TeamMember struct {

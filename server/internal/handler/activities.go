@@ -52,6 +52,16 @@ func (h *Handler) ListActivities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read gate: team membership grants read access to a session's activity.
+	userID, err := uuid.Parse(getUserID(r))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_USER", "invalid user ID")
+		return
+	}
+	if !h.requireSessionTeamMember(w, r, sessionID, userID) {
+		return
+	}
+
 	limit := 20
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 100 {

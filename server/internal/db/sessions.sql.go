@@ -122,6 +122,31 @@ func (q *Queries) GetUnreadCount(ctx context.Context, arg GetUnreadCountParams) 
 	return column_1, err
 }
 
+const isSessionTeamMember = `-- name: IsSessionTeamMember :one
+SELECT EXISTS (
+    SELECT 1
+    FROM sessions s
+    JOIN projects p ON p.id = s.project_id
+    JOIN team_members tm ON tm.team_id = p.team_id
+    WHERE s.id = $1 AND tm.user_id = $2
+) AS is_member
+`
+
+type IsSessionTeamMemberParams struct {
+	SessionID uuid.UUID `json:"session_id"`
+	UserID    uuid.UUID `json:"user_id"`
+}
+
+// Read gate: true when the user belongs to the team that owns the session's
+// project. Backs the read authorization for GetSession / messages /
+// activities / agent-runs snapshot (team membership = read boundary).
+func (q *Queries) IsSessionTeamMember(ctx context.Context, arg IsSessionTeamMemberParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isSessionTeamMember, arg.SessionID, arg.UserID)
+	var is_member bool
+	err := row.Scan(&is_member)
+	return is_member, err
+}
+
 const listNonArchivedSessions = `-- name: ListNonArchivedSessions :many
 SELECT id, name, project_id, status, workspace_status, plan_content, created_at, last_activity_at, repo_url, description FROM sessions
 WHERE status != 'archived'
@@ -252,11 +277,17 @@ func (q *Queries) ListSessionMembers(ctx context.Context, sessionID uuid.UUID) (
 
 const listSessionsForUser = `-- name: ListSessionsForUser :many
 SELECT s.id, s.name, s.project_id, s.status, s.workspace_status, s.plan_content, s.created_at, s.last_activity_at, s.repo_url, s.description FROM sessions s
-JOIN session_members sm ON s.id = sm.session_id
-WHERE sm.user_id = $1
+JOIN projects p ON p.id = s.project_id
+JOIN team_members tm ON tm.team_id = p.team_id
+WHERE tm.user_id = $1
 ORDER BY s.last_activity_at DESC
 `
 
+// Team-scoped visibility (not membership-scoped): a user sees every session
+// whose project belongs to a team they are a member of, regardless of
+// session_members. session_members is the write/participation gate, not the
+// read gate. The session -> project -> team -> team_members chain has one row
+// per (session, user) so no DISTINCT is needed.
 func (q *Queries) ListSessionsForUser(ctx context.Context, userID uuid.UUID) ([]Session, error) {
 	rows, err := q.db.Query(ctx, listSessionsForUser, userID)
 	if err != nil {

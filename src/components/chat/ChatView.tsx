@@ -7,11 +7,13 @@ import {
   RefreshCw,
   AlertCircle,
   Loader2,
+  UserPlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 import { cn } from "@/lib/utils";
 import { api, ApiError } from "@/lib/api";
+import { isSessionMember } from "@/lib/membership";
 import { useSessionStore } from "@/stores/session-store";
 import { tasksByAnchor, queuePositions } from "@/stores/agent-runs";
 import { AgentTaskCard } from "@/components/super-threads/AgentTaskCard";
@@ -117,6 +119,63 @@ function WorkspaceComposerGate({ session }: { session: Session }) {
         <p className="text-[11px] text-foreground-subtle">
           History stays readable. Sending a new message is locked until the
           workspace is back up.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// JoinSessionGate replaces the composer when the current user can see and read
+// the session (their team owns it) but has not joined it. Reading is allowed
+// (history stays fully readable above); posting and steering require
+// membership, so the primary action here is to Join. This gate takes priority
+// over the workspace gate — there's no point offering Start/Rebuild to someone
+// who hasn't joined yet.
+function JoinSessionGate({ session }: { session: Session }) {
+  const joinSession = useSessionStore((s) => s.joinSession);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function join() {
+    if (pending) return;
+    setError(null);
+    setPending(true);
+    try {
+      await joinSession(session.id);
+      // On success the store flips membership and this gate unmounts.
+    } catch (err) {
+      setError(
+        err instanceof ApiError ? err.message : "Couldn't join. Try again.",
+      );
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-border-muted bg-background-subtle px-3 py-2.5">
+      <div className="flex items-center gap-2 text-sm">
+        <span className="text-foreground-muted">
+          You're viewing{" "}
+          <span className="font-medium text-foreground">#{session.name}</span>.
+          Join to send messages and run agents.
+        </span>
+        <Button
+          onClick={join}
+          disabled={pending}
+          size="sm"
+          className="ml-auto gap-1.5 h-7"
+        >
+          {pending ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <UserPlus className="h-3.5 w-3.5" />
+          )}
+          Join Session
+        </Button>
+      </div>
+      {error && (
+        <p className="text-xs text-danger" role="alert">
+          {error}
         </p>
       )}
     </div>
@@ -298,6 +357,7 @@ export function ChatView() {
     addMessage,
     agentRuns,
     openAgentThread,
+    currentUser,
   } = useSessionStore();
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -383,6 +443,9 @@ export function ChatView() {
 
   const isReadOnly = session?.status !== "active";
   const workspaceLive = isWorkspaceLive(session?.workspaceStatus);
+  // Team membership grants read access; SESSION membership grants posting.
+  // A viewer who hasn't joined sees the JoinSessionGate instead of a composer.
+  const isMember = !!session && isSessionMember(session, currentUser?.id);
 
   return (
     <div className="flex h-full flex-col">
@@ -486,11 +549,13 @@ export function ChatView() {
         </div>
       </div>
 
-      {/* Input — three modes, in priority order:
+      {/* Input — four modes, in priority order:
             1. Session paused/archived → existing read-only banner (session
-               lifecycle, not workspace lifecycle).
-            2. Workspace not live → WorkspaceComposerGate with Start/Rebuild.
-            3. Normal composer. */}
+               lifecycle, not workspace lifecycle); applies to everyone.
+            2. Not a session member → JoinSessionGate (primary CTA for a
+               team member who is only viewing).
+            3. Workspace not live → WorkspaceComposerGate with Start/Rebuild.
+            4. Normal composer. */}
       <div className="border-t border-border-muted p-3">
         {isReadOnly ? (
           <div className="flex items-center justify-center rounded-md border border-border-muted bg-background-subtle py-2 text-xs text-foreground-subtle">
@@ -498,6 +563,8 @@ export function ChatView() {
               ? "Session is paused"
               : "Session is archived"}
           </div>
+        ) : !isMember && session ? (
+          <JoinSessionGate session={session} />
         ) : !workspaceLive && session ? (
           <WorkspaceComposerGate session={session} />
         ) : (

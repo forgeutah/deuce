@@ -59,6 +59,17 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read gate: team members may read a session's history (static snapshot)
+	// even before joining it. Non-team users get 403.
+	userID, err := uuid.Parse(getUserID(r))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_USER", "invalid user ID")
+		return
+	}
+	if !h.requireSessionTeamMember(w, r, sessionID, userID) {
+		return
+	}
+
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 100 {
@@ -127,6 +138,14 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	userID, err := uuid.Parse(getUserID(r))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_USER", "invalid user ID")
+		return
+	}
+
+	// Write gate: posting (and the agent @mention routing below it) requires
+	// SESSION membership. Team members who are only viewing must Join first.
+	// Checked before body validation so a non-member can't probe content
+	// rules. steer (WS) is already session-gated in ws/client.go.
+	if !h.requireSessionMember(w, r, sessionID, userID) {
 		return
 	}
 
@@ -237,9 +256,24 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 
 // StopAgent handles POST /api/sessions/{id}/agents/stop
 func (h *Handler) StopAgent(w http.ResponseWriter, r *http.Request) {
-	sessionID := chi.URLParam(r, "sessionID")
+	sessionID, err := uuid.Parse(chi.URLParam(r, "sessionID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_SESSION_ID", "invalid session ID")
+		return
+	}
+
+	// Write gate: cancelling a session's agent runs requires SESSION membership.
+	userID, err := uuid.Parse(getUserID(r))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_USER", "invalid user ID")
+		return
+	}
+	if !h.requireSessionMember(w, r, sessionID, userID) {
+		return
+	}
+
 	if h.agentQueue != nil {
-		h.agentQueue.Cancel(sessionID)
+		h.agentQueue.Cancel(sessionID.String())
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

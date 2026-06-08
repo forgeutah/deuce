@@ -153,6 +153,12 @@ func (h *Handler) GetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read gate: a session is visible to anyone on its team, not just its
+	// members. Non-team users cannot read a session even by direct ID.
+	if !h.requireSessionTeamMember(w, r, sessionID, userID) {
+		return
+	}
+
 	session, err := h.queries.GetSession(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "session not found")
@@ -303,6 +309,12 @@ func (h *Handler) UpdateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Write gate: mutating session state (status, plan, description, workspace
+	// status) requires SESSION membership.
+	if !h.requireSessionMember(w, r, sessionID, userID) {
+		return
+	}
+
 	var req updateSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
@@ -391,9 +403,11 @@ type vscodeURIResponse struct {
 // the SSH proxy (U7) would reject the connection. The frontend uses the
 // 412 NO_SSH_KEY response to open the SSH key setup modal.
 //
-// Authorization mirrors GetSession: any authenticated user can fetch the
-// URI. The real access gate is the SSH proxy's public-key auth — only a
-// session-member's registered key will authenticate at SSH time.
+// Authorization mirrors GetSession: a team member may fetch the URI. The
+// real access gate is the SSH proxy's public-key auth — only a session
+// member's registered key will authenticate at SSH time — but we still
+// team-gate the endpoint so it doesn't leak the workspace name / reachable
+// SSH destination for sessions outside the caller's teams.
 func (h *Handler) GetSessionVSCodeURI(w http.ResponseWriter, r *http.Request) {
 	// SSH listener availability check — short-circuit before the DB
 	// roundtrip so a downed SSH listener doesn't quietly slow the UI down.
@@ -411,6 +425,10 @@ func (h *Handler) GetSessionVSCodeURI(w http.ResponseWriter, r *http.Request) {
 	userID, err := uuid.Parse(getUserID(r))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_USER", "invalid user ID")
+		return
+	}
+
+	if !h.requireSessionTeamMember(w, r, sessionID, userID) {
 		return
 	}
 

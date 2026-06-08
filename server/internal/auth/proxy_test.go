@@ -48,6 +48,13 @@ type fakeStore struct {
 	createErrs    []error
 	createCalls   atomic.Int32
 	createHistory []createCall
+
+	// Default-team auto-join (U6). defaultTeam/defaultTeamErr drive
+	// GetDefaultTeam; addTeamCalls records every AddTeamMember invocation.
+	defaultTeam    db.Team
+	defaultTeamErr error
+	addTeamErr     error
+	addTeamCalls   []db.AddTeamMemberParams
 }
 
 func (f *fakeStore) LookupUserByEmail(_ context.Context, email string) (db.User, error) {
@@ -86,6 +93,20 @@ func (f *fakeStore) CreateUserByEmail(_ context.Context, arg db.CreateUserByEmai
 		err = f.createErrs[idx]
 	}
 	return u, err
+}
+
+func (f *fakeStore) GetDefaultTeam(_ context.Context) (db.Team, error) {
+	if f.defaultTeamErr != nil {
+		return db.Team{}, f.defaultTeamErr
+	}
+	return f.defaultTeam, nil
+}
+
+func (f *fakeStore) AddTeamMember(_ context.Context, arg db.AddTeamMemberParams) error {
+	f.mu.Lock()
+	f.addTeamCalls = append(f.addTeamCalls, arg)
+	f.mu.Unlock()
+	return f.addTeamErr
 }
 
 func makeUser(t *testing.T, email, name string) db.User {
@@ -319,6 +340,65 @@ func TestNameHeader_UnconfiguredOptional_AdmitsWithEmptyName(t *testing.T) {
 	}
 	if store.createHistory[0].params.Name != "" {
 		t.Fatalf("create should receive empty name when name header unconfigured, got %q", store.createHistory[0].params.Name)
+	}
+}
+
+// ---------- default-team auto-join (U6) ----------
+
+func TestProvision_AutoJoinsDefaultTeam(t *testing.T) {
+	pc, hdrs := forgeBaseline()
+	want := makeUser(t, "newbie@forge.dev", "Newbie")
+	team := db.Team{ID: uuid.New(), Name: "Default", IsDefault: true}
+	store := &fakeStore{
+		lookupErrs:    []error{pgx.ErrNoRows},
+		createResults: []db.User{want},
+		defaultTeam:   team,
+	}
+
+	w, rec := invoke(t, store, pc, hdrs)
+	if w.Code != http.StatusOK || !rec.called {
+		t.Fatalf("provision should admit: status=%d body=%q", w.Code, w.Body.String())
+	}
+	if len(store.addTeamCalls) != 1 {
+		t.Fatalf("want exactly 1 AddTeamMember call, got %d", len(store.addTeamCalls))
+	}
+	if store.addTeamCalls[0].TeamID != team.ID || store.addTeamCalls[0].UserID != want.ID {
+		t.Fatalf("AddTeamMember called with wrong args: %+v", store.addTeamCalls[0])
+	}
+}
+
+func TestProvision_ReturningUserDoesNotRejoinTeam(t *testing.T) {
+	pc, hdrs := forgeBaseline()
+	existing := makeUser(t, "alice@forge.dev", "Alice")
+	store := &fakeStore{
+		lookupResults: []db.User{existing}, // found on first lookup -> not created
+		defaultTeam:   db.Team{ID: uuid.New(), IsDefault: true},
+	}
+
+	w, rec := invoke(t, store, pc, hdrs)
+	if w.Code != http.StatusOK || !rec.called {
+		t.Fatalf("returning user should admit: status=%d", w.Code)
+	}
+	if len(store.addTeamCalls) != 0 {
+		t.Fatalf("returning user must not trigger team auto-join, got %d calls", len(store.addTeamCalls))
+	}
+}
+
+func TestProvision_MissingDefaultTeamStillAdmits(t *testing.T) {
+	pc, hdrs := forgeBaseline()
+	want := makeUser(t, "newbie@forge.dev", "Newbie")
+	store := &fakeStore{
+		lookupErrs:     []error{pgx.ErrNoRows},
+		createResults:  []db.User{want},
+		defaultTeamErr: pgx.ErrNoRows, // no default team configured
+	}
+
+	w, rec := invoke(t, store, pc, hdrs)
+	if w.Code != http.StatusOK || !rec.called {
+		t.Fatalf("missing default team must not block admission: status=%d body=%q", w.Code, w.Body.String())
+	}
+	if len(store.addTeamCalls) != 0 {
+		t.Fatalf("no team add should occur when default team lookup fails")
 	}
 }
 

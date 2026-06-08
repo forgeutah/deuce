@@ -97,6 +97,23 @@ func (h *Handler) AddSessionMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The target must belong to the session's team. Session membership grants
+	// write + live-stream access; granting it to someone outside the team
+	// would let them post to a session they can't even read (reads are
+	// team-gated), an incoherent state. Keep membership within the team boundary.
+	teamMember, err := h.queries.IsSessionTeamMember(r.Context(), db.IsSessionTeamMemberParams{
+		SessionID: sessionID,
+		UserID:    target.ID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to check team membership")
+		return
+	}
+	if !teamMember {
+		writeError(w, http.StatusBadRequest, "NOT_TEAM_MEMBER", "user is not a member of this session's team")
+		return
+	}
+
 	if err := h.queries.AddSessionMember(r.Context(), db.AddSessionMemberParams{
 		SessionID: sessionID,
 		UserID:    target.ID,
@@ -106,6 +123,46 @@ func (h *Handler) AddSessionMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sr := h.broadcastMembershipChange(w, r, sessionID, callerID, target.ID)
+	if sr == nil {
+		return
+	}
+	writeJSON(w, http.StatusOK, sr)
+}
+
+// JoinSession adds the caller to a session as a member (the "Join Session"
+// self-serve path). Unlike AddSessionMember — which requires the caller to
+// already be a member in order to add OTHERS — JoinSession adds the caller
+// themselves, gated on TEAM membership so a user can only join a session they
+// can actually see. Idempotent (ON CONFLICT DO NOTHING). Leaving reuses
+// RemoveSessionMember with the caller's own ID.
+func (h *Handler) JoinSession(w http.ResponseWriter, r *http.Request) {
+	sessionID, err := uuid.Parse(chi.URLParam(r, "sessionID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_SESSION_ID", "invalid session ID")
+		return
+	}
+
+	callerID, err := uuid.Parse(getUserID(r))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_USER", "invalid user ID")
+		return
+	}
+
+	// Team membership is the read boundary; you may only join a session whose
+	// team you belong to.
+	if !h.requireSessionTeamMember(w, r, sessionID, callerID) {
+		return
+	}
+
+	if err := h.queries.AddSessionMember(r.Context(), db.AddSessionMemberParams{
+		SessionID: sessionID,
+		UserID:    callerID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to join session")
+		return
+	}
+
+	sr := h.broadcastMembershipChange(w, r, sessionID, callerID, callerID)
 	if sr == nil {
 		return
 	}
@@ -166,6 +223,26 @@ func (h *Handler) requireSessionMember(w http.ResponseWriter, r *http.Request, s
 	}
 	if !member {
 		writeError(w, http.StatusForbidden, "FORBIDDEN", "not a session member")
+		return false
+	}
+	return true
+}
+
+// requireSessionTeamMember writes a 403/500 and returns false unless userID
+// belongs to the team that owns sessionID's project. This is the READ gate:
+// team membership grants visibility/read access to a session, whereas
+// requireSessionMember (session membership) gates writing and the live stream.
+func (h *Handler) requireSessionTeamMember(w http.ResponseWriter, r *http.Request, sessionID, userID uuid.UUID) bool {
+	member, err := h.queries.IsSessionTeamMember(r.Context(), db.IsSessionTeamMemberParams{
+		SessionID: sessionID,
+		UserID:    userID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to check team membership")
+		return false
+	}
+	if !member {
+		writeError(w, http.StatusForbidden, "FORBIDDEN", "not a team member")
 		return false
 	}
 	return true

@@ -192,7 +192,15 @@ func (s *Server) Router() http.Handler {
 				r.Delete("/{keyID}", h.DeleteMySSHKey)
 			})
 		})
-		r.Get("/teams", h.ListTeams)
+		r.Route("/teams", func(r chi.Router) {
+			r.Get("/", h.ListTeams)
+			r.Get("/all", h.ListAllTeams)
+			r.Post("/", h.CreateTeam)
+			r.Route("/{teamID}", func(r chi.Router) {
+				r.Post("/join", h.JoinTeam)
+				r.Delete("/members/{userID}", h.LeaveTeam)
+			})
+		})
 		r.Get("/users", h.ListUsers)
 		r.Get("/projects", h.ListProjects)
 		r.Get("/agents", h.ListAgents)
@@ -208,6 +216,7 @@ func (s *Server) Router() http.Handler {
 			r.Route("/{sessionID}", func(r chi.Router) {
 				r.Get("/", h.GetSession)
 				r.Patch("/", h.UpdateSession)
+				r.Post("/join", h.JoinSession)
 				r.Post("/members", h.AddSessionMember)
 				r.Delete("/members/{userID}", h.RemoveSessionMember)
 				r.Get("/messages", h.ListMessages)

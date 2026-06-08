@@ -330,5 +330,24 @@ export function useWebSocket() {
     return () => setSteerSender(null);
   }, [sendSteer]);
 
+  // resubscribe starts the live subscription for a session WITHOUT a session
+  // switch — used right after "Join Session", since the join effect above only
+  // fires on activeSessionId change. Mirrors that effect's join/mark_read/
+  // snapshot-fetch sequence so a freshly-joined viewer goes from static
+  // snapshot to live updates immediately.
+  const resubscribe = useCallback((sessionId: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: "join", sessionId }));
+    ws.send(JSON.stringify({ type: "mark_read", sessionId }));
+    void useSessionStore.getState().fetchAgentRuns(sessionId);
+  }, []);
+
+  useEffect(() => {
+    const setWsResubscribe = useSessionStore.getState().setWsResubscribe;
+    setWsResubscribe(resubscribe);
+    return () => setWsResubscribe(null);
+  }, [resubscribe]);
+
   return { sendSteer };
 }
