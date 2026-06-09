@@ -696,6 +696,35 @@ button,
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
+.q-pending-q .q-text {
+  white-space: pre-wrap;
+}
+/* typed-question controls (select buttons / confirm) */
+.q-choices {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.q-choice {
+  border: 1px solid color-mix(in srgb, var(--color-warning) 45%, var(--color-border));
+  border-radius: var(--radius-md);
+  background: var(--color-background-input);
+  color: var(--color-foreground);
+  padding: 5px 11px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.q-choice:hover {
+  background: color-mix(in srgb, var(--color-warning) 14%, var(--color-background-input));
+  border-color: var(--color-warning);
+}
+.q-choice-hint {
+  font-size: 11px;
+  color: var(--color-foreground-subtle);
+}
 
 /* drawer composer */
 .q-drawer-composer {

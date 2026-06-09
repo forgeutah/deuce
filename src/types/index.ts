@@ -170,6 +170,10 @@ export interface AgentAction {
 }
 
 // AgentTask is one @mention-spawned agent run, anchored to a channel message.
+// How the user answers an awaiting-input question: free text, pick one of
+// options, or yes/no. Mirrors the Pi ask_user extension's `kind`.
+export type QuestionKind = "input" | "select" | "confirm";
+
 export interface AgentTask {
   id: string;
   sessionId: string;
@@ -181,6 +185,10 @@ export interface AgentTask {
   seq: number;
   position?: number; // queue #N while queued
   pendingQuestion?: string;
+  // Typed-question metadata. kind is undefined/"input" for free text, "select"
+  // for a pick-one (options populated), or "confirm" for yes/no.
+  pendingQuestionKind?: QuestionKind;
+  pendingQuestionOptions?: string[];
   reply?: string;
   actions: AgentAction[];
   // order is a client-only stable creation-order index assigned by the reducer
@@ -201,6 +209,8 @@ export interface TaskEventPayload {
   state?: TaskState;
   position?: number;
   pendingQuestion?: string;
+  pendingQuestionKind?: QuestionKind;
+  pendingQuestionOptions?: string[];
   reply?: string;
   status?: "done" | "failed" | "cancelled";
 }
