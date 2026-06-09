@@ -390,6 +390,10 @@ func (r *Runtime) finalizeLocked(ctx context.Context, key pirun.Key, taskID, sta
 	if ok && isTerminal(cur) {
 		return // already terminal — second signal is a no-op (idempotent, KTD12)
 	}
+	// No-JSON backstop: if the agent narrated an ask_user tool call as text
+	// (the ask-user extension didn't fire), rewrite it to the plain question
+	// before it is persisted, broadcast, and posted to chat (R9/R11/R12).
+	reply = sanitizeNarratedQuestion(reply)
 	seq, err := r.store.FinishTask(ctx, key.SessionID, taskID, state, reply)
 	if err != nil {
 		slog.Error("runtime: finish task", "task", taskID, "state", state, "error", err)
