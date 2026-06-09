@@ -17,6 +17,7 @@ import { isSessionMember } from "@/lib/membership";
 import { useSessionStore } from "@/stores/session-store";
 import { tasksByAnchor, queuePositions } from "@/stores/agent-runs";
 import { AgentTaskCard } from "@/components/super-threads/AgentTaskCard";
+import { visibleChatMessages } from "@/components/chat/message-visibility";
 import type { Agent, Message, User, Session, WorkspaceStatus } from "@/types";
 
 function isWorkspaceLive(status: WorkspaceStatus | undefined): boolean {
@@ -379,6 +380,12 @@ export function ChatView() {
     ? [...session.agents, ...session.members]
     : [];
 
+  // Agent task replies render on the super-thread surfaces (inline card +
+  // drawer), not as chat bubbles. System notices (agent-typed, nil author)
+  // are not in agentIds and stay visible.
+  const agentIds = new Set(session?.agents.map((a) => a.id) ?? []);
+  const visibleMessages = visibleChatMessages(sessionMessages, agentIds);
+
   // Super Threads: inline task cards anchored to the message that spawned them.
   const sessionRuns = activeSessionId ? agentRuns[activeSessionId] : undefined;
   const cardsByAnchor = tasksByAnchor(sessionRuns);
@@ -460,7 +467,7 @@ export function ChatView() {
         onScroll={handleScroll}
       >
         <div className="flex flex-col gap-1 py-4">
-          {sessionMessages.length === 0 && (
+          {visibleMessages.length === 0 && (
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <Bot className="h-10 w-10 text-foreground-subtle mb-3" />
               <h3 className="text-sm font-medium text-foreground-muted">
@@ -482,8 +489,8 @@ export function ChatView() {
             </div>
           )}
 
-          {sessionMessages.map((msg, i) => {
-            const prevMsg = sessionMessages[i - 1];
+          {visibleMessages.map((msg, i) => {
+            const prevMsg = visibleMessages[i - 1];
             const showHeader =
               !prevMsg ||
               prevMsg.authorId !== msg.authorId ||
