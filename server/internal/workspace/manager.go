@@ -369,72 +369,6 @@ func readWorkspaceUID(workspaceID string) (string, error) {
 // .bashrc/.profile, so $HOME/.local/bin is not on PATH by default.
 const ClaudePathPrefix = `PATH="$HOME/.local/bin:$PATH" `
 
-// InstallTools installs Claude Code inside the DevPod workspace using the
-// native installer (https://claude.ai/install.sh) — single curl-piped
-// script, no Node/npm needed. Output is streamed line-by-line to logFn
-// (if non-nil).
-func (m *Manager) InstallTools(ctx context.Context, workspaceID string, logFn LogFunc) error {
-	if logFn != nil {
-		logFn("Checking for Claude Code installation...")
-	}
-
-	// Check if claude is already installed
-	checkCmd := m.ExecInWorkspace(ctx, workspaceID, ClaudePathPrefix+"claude --version")
-	if output, err := checkCmd.CombinedOutput(); err == nil {
-		version := strings.TrimSpace(string(output))
-		slog.Info("claude code already installed", "workspace", workspaceID, "version", version)
-		if logFn != nil {
-			logFn(fmt.Sprintf("Claude Code already installed: %s", version))
-		}
-		return nil
-	}
-
-	// Install Claude Code
-	if logFn != nil {
-		logFn("Installing Claude Code...")
-	}
-	slog.Info("installing claude code in workspace", "workspace", workspaceID)
-
-	installCmd := m.ExecInWorkspace(ctx, workspaceID, "curl -fsSL https://claude.ai/install.sh | bash")
-	stdout, err := installCmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("stdout pipe: %w", err)
-	}
-	installCmd.Stderr = installCmd.Stdout
-
-	if err := installCmd.Start(); err != nil {
-		if logFn != nil {
-			logFn("WARNING: Failed to install Claude Code (curl may not be available in this devcontainer)")
-		}
-		slog.Warn("failed to start claude code install", "workspace", workspaceID, "error", err)
-		return nil // Non-fatal — workspace is still usable, just without agent support
-	}
-
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
-		slog.Debug("claude install output", "workspace", workspaceID, "line", line)
-		if logFn != nil {
-			logFn(line)
-		}
-	}
-
-	if err := installCmd.Wait(); err != nil {
-		if logFn != nil {
-			logFn("WARNING: Claude Code installation failed — agents will not be available")
-		}
-		slog.Warn("claude code install failed", "workspace", workspaceID, "error", err)
-		return nil // Non-fatal
-	}
-
-	if logFn != nil {
-		logFn("Claude Code installed successfully")
-	}
-	slog.Info("claude code installed successfully", "workspace", workspaceID)
-	return nil
-}
-
 // InstallPi installs the Pi coding agent (pi.dev) inside the DevPod workspace.
 // Pi is an npm package requiring Node >= 22.19; its official installer can't
 // install Node over a non-TTY pipe, so piInstallScript provisions Node first
@@ -617,5 +551,63 @@ func (m *Manager) InstallPiExtension(ctx context.Context, workspaceID, filename,
 		logFn(fmt.Sprintf("Pi extension installed: %s", filename))
 	}
 	slog.Info("pi extension installed", "workspace", workspaceID, "filename", filename)
+	return nil
+}
+
+// PiSubagentsPackage is the Pi package providing the `subagent` tool, consumed
+// by the compound-engineering bundle's agents/*.md personas. Installed via
+// `pi install` so Pi tracks it in its own package registry.
+const PiSubagentsPackage = "npm:pi-subagents"
+
+// InstallPiPackage installs a Pi package (e.g. npm:pi-subagents) inside the
+// DevPod workspace via `pi install`, which registers it in Pi's settings and
+// fetches it. Re-running on an already-installed package is a cheap update, so
+// this is safe on every create/start. Requires Pi (InstallPi) to have run
+// first. Output is streamed line-by-line to logFn. Non-fatal at the call site:
+// a workspace without the package still runs agents, just without the tools it
+// provides.
+func (m *Manager) InstallPiPackage(ctx context.Context, workspaceID, pkg string, logFn LogFunc) error {
+	if logFn != nil {
+		logFn(fmt.Sprintf("Installing Pi package %s...", pkg))
+	}
+	slog.Info("installing pi package", "workspace", workspaceID, "package", pkg)
+
+	installCmd := m.ExecInWorkspace(ctx, workspaceID, piLoginShell(fmt.Sprintf("pi install %s", pkg)))
+	stdout, err := installCmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("stdout pipe: %w", err)
+	}
+	installCmd.Stderr = installCmd.Stdout
+
+	if err := installCmd.Start(); err != nil {
+		if logFn != nil {
+			logFn(fmt.Sprintf("WARNING: failed to start install of Pi package %s", pkg))
+		}
+		slog.Warn("failed to start pi package install", "workspace", workspaceID, "package", pkg, "error", err)
+		return fmt.Errorf("start pi install %s: %w", pkg, err)
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		slog.Debug("pi package install output", "workspace", workspaceID, "package", pkg, "line", line)
+		if logFn != nil {
+			logFn(line)
+		}
+	}
+
+	if err := installCmd.Wait(); err != nil {
+		if logFn != nil {
+			logFn(fmt.Sprintf("WARNING: Pi package %s installation failed — agent tools from this package will be unavailable (see log above)", pkg))
+		}
+		slog.Warn("pi package install failed", "workspace", workspaceID, "package", pkg, "error", err)
+		return fmt.Errorf("pi install %s: %w", pkg, err)
+	}
+
+	if logFn != nil {
+		logFn(fmt.Sprintf("Pi package installed: %s", pkg))
+	}
+	slog.Info("pi package installed", "workspace", workspaceID, "package", pkg)
 	return nil
 }

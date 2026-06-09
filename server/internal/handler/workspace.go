@@ -15,16 +15,16 @@ import (
 	"github.com/forgeutah/deuce/server/internal/ws"
 )
 
-// provisionAgentTools installs the agent harnesses into a workspace container:
-// Claude Code (legacy fallback), Pi, and the ask-user extension. All installers
-// are idempotent and non-fatal, so this is safe to run on every create/start —
+// provisionAgentTools installs the agent harness into a workspace container:
+// Pi, the pi-subagents package, and the ask-user extension. All installers are
+// idempotent and non-fatal, so this is safe to run on every create/start —
 // it migrates containers created before agent support without recreating them.
 func (h *Handler) provisionAgentTools(ctx context.Context, workspaceID string, logFn workspace.LogFunc) {
-	if err := h.workspaces.InstallTools(ctx, workspaceID, logFn); err != nil {
-		slog.Warn("claude code installation failed", "workspace", workspaceID, "error", err)
-	}
 	if err := h.workspaces.InstallPi(ctx, workspaceID, logFn); err != nil {
 		slog.Warn("pi installation failed", "workspace", workspaceID, "error", err)
+	}
+	if err := h.workspaces.InstallPiPackage(ctx, workspaceID, workspace.PiSubagentsPackage, logFn); err != nil {
+		slog.Warn("pi-subagents installation failed", "workspace", workspaceID, "error", err)
 	}
 	if err := h.workspaces.InstallPiExtension(ctx, workspaceID, extension.AskUserFilename, extension.AskUser, logFn); err != nil {
 		// Loud, not fatal: the workspace still comes up, but the user has been
