@@ -25,6 +25,9 @@ type Runtime struct {
 	store Store
 	sup   *pirun.Supervisor
 	bc    Broadcaster
+	// baseSystemPrompt is prepended to each agent's own system_prompt at Pi
+	// launch — the global "prefer ask_user when blocked" guidance.
+	baseSystemPrompt string
 	// replyPoster, when set, posts an agent's terminal reply as a normal chat
 	// message so it shows in the existing chat UI (the Super Threads task/action
 	// cards are a separate, later surface). Wired by the handler layer.
@@ -69,23 +72,51 @@ const (
 	defaultAwaitTimeout  = 30 * time.Minute
 )
 
+// DefaultBaseSystemPrompt is the global system prompt applied to every agent on
+// the Pi path, ahead of the agent's own system_prompt. Its load-bearing job is
+// to steer agents to the ask_user tool when blocked on a human decision (which
+// is what surfaces the interactive typed prompt) instead of guessing or asking
+// in a normal chat reply. Overridable via DEUCE_AGENT_SYSTEM_PROMPT.
+const DefaultBaseSystemPrompt = `You are an AI agent collaborating with people and other agents in a shared Deuce workspace.
+
+Ask before you guess. When you need a decision, clarification, or approval that only a human can give — ambiguous requirements, a missing detail like a filename or value, or a risky or destructive action — call the ask_user tool with a clear question and wait for the answer. Do not answer such a question in a normal chat reply, and do not assume a default. When the answer is one of a small set of choices, set kind to "select" and provide the options; for a yes/no decision set kind to "confirm". Only ask when you are genuinely blocked — otherwise keep working.`
+
 // NewRuntime builds the runtime. Call Start to begin consuming process exits.
-func NewRuntime(store Store, sup *pirun.Supervisor, bc Broadcaster) *Runtime {
+// baseSystemPrompt is prepended to every agent's own system_prompt at Pi launch
+// (pass DefaultBaseSystemPrompt for the standard guidance, or "" to disable).
+func NewRuntime(store Store, sup *pirun.Supervisor, bc Broadcaster, baseSystemPrompt string) *Runtime {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Runtime{
-		store:         store,
-		sup:           sup,
-		bc:            bc,
-		running:       make(map[pirun.Key]string),
-		workspace:     make(map[pirun.Key]string),
-		consumers:     make(map[pirun.Key]*pirun.Process),
-		replies:       make(map[string]*strings.Builder),
-		pendingReq:    make(map[string]string),
-		timers:        make(map[string]*taskTimers),
-		activeTimeout: defaultActiveTimeout,
-		awaitTimeout:  defaultAwaitTimeout,
-		ctx:           ctx,
-		cancel:        cancel,
+		store:            store,
+		sup:              sup,
+		bc:               bc,
+		baseSystemPrompt: baseSystemPrompt,
+		running:          make(map[pirun.Key]string),
+		workspace:        make(map[pirun.Key]string),
+		consumers:        make(map[pirun.Key]*pirun.Process),
+		replies:          make(map[string]*strings.Builder),
+		pendingReq:       make(map[string]string),
+		timers:           make(map[string]*taskTimers),
+		activeTimeout:    defaultActiveTimeout,
+		awaitTimeout:     defaultAwaitTimeout,
+		ctx:              ctx,
+		cancel:           cancel,
+	}
+}
+
+// joinSystemPrompts combines the global base prompt with an agent's own
+// system_prompt, trimming each and separating with a blank line. Either may be
+// empty, in which case the other is returned (both empty → "").
+func joinSystemPrompts(base, agent string) string {
+	base = strings.TrimSpace(base)
+	agent = strings.TrimSpace(agent)
+	switch {
+	case base == "":
+		return agent
+	case agent == "":
+		return base
+	default:
+		return base + "\n\n" + agent
 	}
 }
 
@@ -246,15 +277,16 @@ func (r *Runtime) promoteLocked(ctx context.Context, key pirun.Key) {
 	r.mu.Lock()
 	wsID := r.workspace[key]
 	r.mu.Unlock()
-	// The agent's configured persona/instructions are applied to the Pi process
-	// at launch (Ensure only launches when no process exists for the key, so
-	// this is a no-op on reuse). A lookup failure is non-fatal — fall back to no
-	// system prompt rather than failing the task.
-	systemPrompt, err := r.store.AgentSystemPrompt(ctx, key.AgentID)
+	// The global guidance plus the agent's own persona/instructions are applied
+	// to the Pi process at launch (Ensure only launches when no process exists
+	// for the key, so this is a no-op on reuse). A per-agent lookup failure is
+	// non-fatal — fall back to the global base alone rather than failing the task.
+	agentPrompt, err := r.store.AgentSystemPrompt(ctx, key.AgentID)
 	if err != nil {
 		slog.Warn("runtime: agent system prompt lookup failed", "key", key.String(), "error", err)
-		systemPrompt = ""
+		agentPrompt = ""
 	}
+	systemPrompt := joinSystemPrompts(r.baseSystemPrompt, agentPrompt)
 	p, err := r.sup.Ensure(ctx, key, wsID, "", systemPrompt)
 	if err != nil {
 		slog.Error("runtime: ensure pi process", "key", key.String(), "error", err)

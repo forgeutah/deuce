@@ -168,7 +168,11 @@ func (s *Server) Router() http.Handler {
 		}
 		launcher := pirun.NewDevpodLauncher(wm, s.cfg.PiProvider, s.cfg.PiModel)
 		sup := pirun.NewSupervisor(launcher, s.cfg.AnthropicAPIKey)
-		rt := agent.NewRuntime(agent.NewDBStore(s.pool, s.queries), sup, s.hub)
+		basePrompt := s.cfg.AgentSystemPrompt
+		if basePrompt == "" {
+			basePrompt = agent.DefaultBaseSystemPrompt
+		}
+		rt := agent.NewRuntime(agent.NewDBStore(s.pool, s.queries), sup, s.hub, basePrompt)
 		rt.Start()
 		h.SetRuntime(rt)
 		s.piSupervisor = sup

@@ -300,7 +300,7 @@ func newTestRuntime(t *testing.T) (*Runtime, *fakeStore, *fakeBroadcaster, *tLau
 	bc := &fakeBroadcaster{}
 	lr := &tLauncher{}
 	sup := pirun.NewSupervisor(lr, "test-key")
-	rt := NewRuntime(store, sup, bc)
+	rt := NewRuntime(store, sup, bc, "")
 	rt.Start()
 	t.Cleanup(func() {
 		rt.Shutdown()
