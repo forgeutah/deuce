@@ -58,7 +58,7 @@ type Event struct {
 
 	// Awaiting-input (KindAwaitingInput).
 	RequestID   string
-	RequestKind string   // select / confirm / input / editor
+	RequestKind string // select / confirm / input / editor
 	Prompt      string
 	Options     []string // choice labels for a select request (empty otherwise)
 

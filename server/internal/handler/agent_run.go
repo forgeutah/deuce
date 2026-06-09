@@ -26,13 +26,13 @@ type agentActionResp struct {
 }
 
 type agentTaskResp struct {
-	ID              string            `json:"id"`
-	SessionID       string            `json:"sessionId"`
-	AgentID         string            `json:"agentId"`
-	RequestedBy     string            `json:"requestedBy,omitempty"`
-	AnchorMessageID string            `json:"anchorMessageId,omitempty"`
-	Prompt          string            `json:"prompt"`
-	State           string            `json:"state"`
+	ID                     string            `json:"id"`
+	SessionID              string            `json:"sessionId"`
+	AgentID                string            `json:"agentId"`
+	RequestedBy            string            `json:"requestedBy,omitempty"`
+	AnchorMessageID        string            `json:"anchorMessageId,omitempty"`
+	Prompt                 string            `json:"prompt"`
+	State                  string            `json:"state"`
 	Seq                    int64             `json:"seq"`
 	PendingQuestion        string            `json:"pendingQuestion,omitempty"`
 	PendingQuestionKind    string            `json:"pendingQuestionKind,omitempty"`
