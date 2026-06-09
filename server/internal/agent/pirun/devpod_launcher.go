@@ -39,6 +39,8 @@ func NewDevpodLauncher(wm *workspace.Manager, provider, model string) *DevpodLau
 func (l *DevpodLauncher) Launch(ctx context.Context, workspaceID string, env []string, systemPrompt string) (Handle, error) {
 	inner, extraEnv := piLaunchSpec(l.provider, l.model, systemPrompt)
 	env = append(env, extraEnv...)
+	slog.Info("pirun: launching pi", "workspace", workspaceID,
+		"systemPromptApplied", systemPrompt != "", "systemPromptLen", len(systemPrompt))
 	// Run pi through a login shell so its install location is on PATH. The
 	// pi.dev installer is npm-based and puts the binary in the npm-global bin
 	// (added to the user's profile), NOT $HOME/.local/bin — and a
