@@ -1,7 +1,7 @@
 ---
 title: "feat: Interactive typed agent questions with no-JSON guarantee"
 type: feat
-status: active
+status: completed
 date: 2026-06-08
 origin: docs/brainstorms/2026-06-08-interactive-agent-questions-requirements.md
 ---
