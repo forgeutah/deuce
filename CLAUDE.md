@@ -97,6 +97,12 @@ DEUCE_AGENT_HARNESS=pi
 DEUCE_PI_PROVIDER=anthropic
 DEUCE_PI_MODEL=claude-haiku-4-5
 
+# Global system prompt prepended to every agent's own system_prompt on the Pi
+# path (applied via --append-system-prompt at launch). Empty uses the built-in
+# default (agent.DefaultBaseSystemPrompt) that steers agents to the ask_user
+# tool when blocked on a human decision; set it to override.
+DEUCE_AGENT_SYSTEM_PROMPT=
+
 # Auth mode (default "dev"; set to "proxy" when running behind a header-trust
 # reverse proxy like forge-proxy or Tailscale Serve). The literal value
 # "forge-proxy" is rejected with a migration hint — use "proxy" with the

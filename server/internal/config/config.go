@@ -50,6 +50,11 @@ type Config struct {
 	PiProvider   string `env:"DEUCE_PI_PROVIDER" envDefault:"anthropic"`
 	PiModel      string `env:"DEUCE_PI_MODEL" envDefault:"claude-haiku-4-5"`
 
+	// AgentSystemPrompt is a global system prompt prepended to every agent's own
+	// system_prompt on the Pi path. Empty means use agent.DefaultBaseSystemPrompt
+	// (the built-in "prefer ask_user when blocked" guidance); set it to override.
+	AgentSystemPrompt string `env:"DEUCE_AGENT_SYSTEM_PROMPT" envDefault:""`
+
 	AuthMode string `env:"DEUCE_AUTH_MODE" envDefault:"dev"`
 
 	// Unified proxy-mode configuration. No defaults — operators wire each

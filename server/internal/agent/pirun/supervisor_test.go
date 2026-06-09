@@ -87,7 +87,7 @@ type fakeLauncher struct {
 	failNext error
 }
 
-func (l *fakeLauncher) Launch(context.Context, string, []string) (Handle, error) {
+func (l *fakeLauncher) Launch(context.Context, string, []string, string) (Handle, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.failNext != nil {
@@ -123,7 +123,7 @@ func TestEnsureLaunchesAndHandshakes(t *testing.T) {
 	s := NewSupervisor(l, "sk-test")
 	key := Key{SessionID: "s1", AgentID: "a1"}
 
-	p, err := s.Ensure(context.Background(), key, "ws1", "")
+	p, err := s.Ensure(context.Background(), key, "ws1", "", "")
 	if err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
@@ -147,9 +147,9 @@ func TestEnsureReusesAndIsolatesKeys(t *testing.T) {
 	k1 := Key{SessionID: "s1", AgentID: "a1"}
 	k2 := Key{SessionID: "s1", AgentID: "a2"}
 
-	p1, _ := s.Ensure(ctx, k1, "ws", "")
-	p1b, _ := s.Ensure(ctx, k1, "ws", "") // reuse
-	p2, _ := s.Ensure(ctx, k2, "ws", "")  // distinct agent
+	p1, _ := s.Ensure(ctx, k1, "ws", "", "")
+	p1b, _ := s.Ensure(ctx, k1, "ws", "", "") // reuse
+	p2, _ := s.Ensure(ctx, k2, "ws", "", "")  // distinct agent
 
 	if p1 != p1b {
 		t.Error("same key should reuse the same process")
@@ -168,7 +168,7 @@ func TestEnsureLaunchError(t *testing.T) {
 	s := NewSupervisor(l, "")
 	key := Key{SessionID: "s1", AgentID: "a1"}
 
-	if _, err := s.Ensure(context.Background(), key, "ws", ""); err == nil {
+	if _, err := s.Ensure(context.Background(), key, "ws", "", ""); err == nil {
 		t.Fatal("expected launch error")
 	}
 	if _, ok := s.Get(key); ok {
@@ -181,7 +181,7 @@ func TestProcessExitEmitsSignal(t *testing.T) {
 	s := NewSupervisor(l, "")
 	key := Key{SessionID: "s1", AgentID: "a1"}
 
-	p, err := s.Ensure(context.Background(), key, "ws", "")
+	p, err := s.Ensure(context.Background(), key, "ws", "", "")
 	if err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestReattachSendsSwitchSession(t *testing.T) {
 	s := NewSupervisor(l, "")
 	key := Key{SessionID: "s1", AgentID: "a1"}
 
-	if _, err := s.Ensure(context.Background(), key, "ws", "/sessions/prior.jsonl"); err != nil {
+	if _, err := s.Ensure(context.Background(), key, "ws", "/sessions/prior.jsonl", ""); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
 	m := l.handles[0].waitCmd(t, "switch_session")
@@ -238,8 +238,8 @@ func TestShutdownStopsAllAndRejectsEnsure(t *testing.T) {
 	l := &fakeLauncher{}
 	s := NewSupervisor(l, "")
 	ctx := context.Background()
-	_, _ = s.Ensure(ctx, Key{SessionID: "s", AgentID: "a"}, "ws", "")
-	_, _ = s.Ensure(ctx, Key{SessionID: "s", AgentID: "b"}, "ws", "")
+	_, _ = s.Ensure(ctx, Key{SessionID: "s", AgentID: "a"}, "ws", "", "")
+	_, _ = s.Ensure(ctx, Key{SessionID: "s", AgentID: "b"}, "ws", "", "")
 
 	if err := s.Shutdown(ctx); err != nil {
 		t.Fatalf("Shutdown: %v", err)
@@ -251,7 +251,7 @@ func TestShutdownStopsAllAndRejectsEnsure(t *testing.T) {
 			t.Error("handle was not stopped on shutdown")
 		}
 	}
-	if _, err := s.Ensure(ctx, Key{SessionID: "s", AgentID: "c"}, "ws", ""); !errors.Is(err, ErrSupervisorClosed) {
+	if _, err := s.Ensure(ctx, Key{SessionID: "s", AgentID: "c"}, "ws", "", ""); !errors.Is(err, ErrSupervisorClosed) {
 		t.Errorf("Ensure after shutdown = %v, want ErrSupervisorClosed", err)
 	}
 }
@@ -262,7 +262,7 @@ func TestIdleReap(t *testing.T) {
 	s.idleTimeout = 60 * time.Millisecond // shorten for the test (same package)
 	key := Key{SessionID: "s1", AgentID: "a1"}
 
-	if _, err := s.Ensure(context.Background(), key, "ws", ""); err != nil {
+	if _, err := s.Ensure(context.Background(), key, "ws", "", ""); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
 	// No activity → reaped after the idle timeout.

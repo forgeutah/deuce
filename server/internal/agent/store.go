@@ -47,6 +47,11 @@ type Store interface {
 
 	// TaskState returns the current state of a task.
 	TaskState(ctx context.Context, taskID string) (state string, ok bool, err error)
+
+	// AgentSystemPrompt returns the agent's configured system prompt (empty
+	// when unset). Applied to the Pi process at launch so the agent carries its
+	// persona/instructions (the legacy executor did this via --append-system-prompt).
+	AgentSystemPrompt(ctx context.Context, agentID string) (string, error)
 }
 
 // EnqueueParams describes a new task to enqueue.
