@@ -246,7 +246,16 @@ func (r *Runtime) promoteLocked(ctx context.Context, key pirun.Key) {
 	r.mu.Lock()
 	wsID := r.workspace[key]
 	r.mu.Unlock()
-	p, err := r.sup.Ensure(ctx, key, wsID, "")
+	// The agent's configured persona/instructions are applied to the Pi process
+	// at launch (Ensure only launches when no process exists for the key, so
+	// this is a no-op on reuse). A lookup failure is non-fatal — fall back to no
+	// system prompt rather than failing the task.
+	systemPrompt, err := r.store.AgentSystemPrompt(ctx, key.AgentID)
+	if err != nil {
+		slog.Warn("runtime: agent system prompt lookup failed", "key", key.String(), "error", err)
+		systemPrompt = ""
+	}
+	p, err := r.sup.Ensure(ctx, key, wsID, "", systemPrompt)
 	if err != nil {
 		slog.Error("runtime: ensure pi process", "key", key.String(), "error", err)
 		// promote=false: we are inside promoteLocked, don't recurse. teardown=true

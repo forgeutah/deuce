@@ -41,7 +41,10 @@ type stderrReporter interface {
 // seam, mirroring workspace.commandRunner / sshproxy.resolveContainerHook so
 // the supervisor is testable without a container.
 type Launcher interface {
-	Launch(ctx context.Context, workspaceID string, env []string) (Handle, error)
+	// Launch starts a Pi process. systemPrompt, when non-empty, is applied to
+	// the agent via --append-system-prompt (passed through the environment so
+	// arbitrary text needs no shell quoting).
+	Launch(ctx context.Context, workspaceID string, env []string, systemPrompt string) (Handle, error)
 }
 
 // Exit is emitted on the supervisor's Exits channel when a process dies (clean
@@ -164,7 +167,7 @@ func (s *Supervisor) Get(key Key) (*Process, bool) {
 // callers never race the devpod-ssh tunnel setup (the U1 transport caveat). When
 // sessionPath is non-empty it re-attaches to that prior Pi session via
 // switch_session (KTD13 continuity), tolerating failure.
-func (s *Supervisor) Ensure(ctx context.Context, key Key, workspaceID, sessionPath string) (*Process, error) {
+func (s *Supervisor) Ensure(ctx context.Context, key Key, workspaceID, sessionPath, systemPrompt string) (*Process, error) {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -180,7 +183,7 @@ func (s *Supervisor) Ensure(ctx context.Context, key Key, workspaceID, sessionPa
 	if s.apiKey != "" {
 		env = append(env, "ANTHROPIC_API_KEY="+s.apiKey)
 	}
-	h, err := s.launcher.Launch(s.ctx, workspaceID, env)
+	h, err := s.launcher.Launch(s.ctx, workspaceID, env, systemPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("pirun: launch %s: %w", key, err)
 	}

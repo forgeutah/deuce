@@ -135,6 +135,18 @@ func (s *DBStore) CompleteAction(ctx context.Context, sessionID, taskID, callID,
 	})
 }
 
+func (s *DBStore) AgentSystemPrompt(ctx context.Context, agentID string) (string, error) {
+	aid, err := uuid.Parse(agentID)
+	if err != nil {
+		return "", err
+	}
+	ag, err := s.q.GetAgent(ctx, aid)
+	if err != nil {
+		return "", err
+	}
+	return ag.SystemPrompt, nil
+}
+
 func (s *DBStore) SetAwaitingInput(ctx context.Context, sessionID, taskID, question, kind string, options []string) (int64, error) {
 	tid, err := uuid.Parse(taskID)
 	if err != nil {

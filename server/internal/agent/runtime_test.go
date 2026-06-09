@@ -22,11 +22,12 @@ type fakeTask struct {
 }
 
 type fakeStore struct {
-	mu    sync.Mutex
-	seq   map[string]int64
-	tasks map[string]*fakeTask
-	order int
-	idn   int
+	mu           sync.Mutex
+	seq          map[string]int64
+	tasks        map[string]*fakeTask
+	order        int
+	idn          int
+	systemPrompt string
 }
 
 func newFakeStore() *fakeStore {
@@ -68,6 +69,9 @@ func (s *fakeStore) MarkRunning(_ context.Context, sessionID, taskID string) (in
 }
 func (s *fakeStore) SetAwaitingInput(_ context.Context, sessionID, taskID, _, _ string, _ []string) (int64, error) {
 	return s.setState(sessionID, taskID, StateAwaitingInput), nil
+}
+func (s *fakeStore) AgentSystemPrompt(_ context.Context, _ string) (string, error) {
+	return s.systemPrompt, nil
 }
 func (s *fakeStore) ResolveAwaitingInput(_ context.Context, sessionID, taskID string) (int64, error) {
 	return s.setState(sessionID, taskID, StateRunning), nil
@@ -257,7 +261,7 @@ type tLauncher struct {
 	hs []*tHandle
 }
 
-func (l *tLauncher) Launch(context.Context, string, []string) (pirun.Handle, error) {
+func (l *tLauncher) Launch(context.Context, string, []string, string) (pirun.Handle, error) {
 	h := newTHandle()
 	l.mu.Lock()
 	l.hs = append(l.hs, h)

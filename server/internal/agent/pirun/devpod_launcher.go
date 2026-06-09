@@ -36,8 +36,9 @@ func NewDevpodLauncher(wm *workspace.Manager, provider, model string) *DevpodLau
 // Launch starts a long-lived `pi --mode rpc` process in the container. The
 // command is prefixed with workspace.ClaudePathPrefix-style PATH handling so the
 // pi binary on the user's local bin is found in a non-interactive shell.
-func (l *DevpodLauncher) Launch(ctx context.Context, workspaceID string, env []string) (Handle, error) {
-	inner := join(append([]string{"pi", "--mode", "rpc", "--provider", l.provider}, modelArgs(l.model)...))
+func (l *DevpodLauncher) Launch(ctx context.Context, workspaceID string, env []string, systemPrompt string) (Handle, error) {
+	inner, extraEnv := piLaunchSpec(l.provider, l.model, systemPrompt)
+	env = append(env, extraEnv...)
 	// Run pi through a login shell so its install location is on PATH. The
 	// pi.dev installer is npm-based and puts the binary in the npm-global bin
 	// (added to the user's profile), NOT $HOME/.local/bin — and a
@@ -85,6 +86,23 @@ func (l *DevpodLauncher) Launch(ctx context.Context, workspaceID string, env []s
 	}()
 
 	return h, nil
+}
+
+// piLaunchSpec builds the inner `pi --mode rpc ...` command and any extra env
+// vars. When systemPrompt is non-empty, the prompt text is passed through the
+// environment (DEUCE_SYSTEM_PROMPT, forwarded via devpod --set-env as a single
+// argv element) and referenced from --append-system-prompt, so arbitrary prompt
+// content — quotes, newlines, $ — never has to be shell-quoted inside the
+// bash -lc command. --append-system-prompt keeps Pi's default coding-agent
+// prompt and adds the agent's persona, matching the legacy executor. Pure for
+// testability.
+func piLaunchSpec(provider, model, systemPrompt string) (inner string, extraEnv []string) {
+	args := append([]string{"pi", "--mode", "rpc", "--provider", provider}, modelArgs(model)...)
+	if systemPrompt != "" {
+		extraEnv = []string{"DEUCE_SYSTEM_PROMPT=" + systemPrompt}
+		args = append(args, "--append-system-prompt", `"$DEUCE_SYSTEM_PROMPT"`)
+	}
+	return join(args), extraEnv
 }
 
 func modelArgs(model string) []string {
