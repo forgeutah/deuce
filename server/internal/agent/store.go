@@ -27,8 +27,10 @@ type Store interface {
 	CompleteAction(ctx context.Context, sessionID, taskID, callID, text string, isError bool) (seq int64, err error)
 
 	// SetAwaitingInput transitions running→awaiting_input with the pending
-	// question and returns the event seq.
-	SetAwaitingInput(ctx context.Context, sessionID, taskID, question string) (seq int64, err error)
+	// question and returns the event seq. kind is the question type (input /
+	// select / confirm; empty means free-text input) and options are the choice
+	// labels for a select question (nil otherwise).
+	SetAwaitingInput(ctx context.Context, sessionID, taskID, question, kind string, options []string) (seq int64, err error)
 
 	// ResolveAwaitingInput transitions awaiting_input→running and returns the seq.
 	ResolveAwaitingInput(ctx context.Context, sessionID, taskID string) (seq int64, err error)

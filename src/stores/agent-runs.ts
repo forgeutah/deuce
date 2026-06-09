@@ -136,14 +136,20 @@ function reduceTask(
       next.state = "running";
       next.position = undefined;
       next.pendingQuestion = undefined;
+      next.pendingQuestionKind = undefined;
+      next.pendingQuestionOptions = undefined;
       break;
     case "task_awaiting_input":
       next.state = "awaiting_input";
       next.pendingQuestion = p.pendingQuestion;
+      next.pendingQuestionKind = p.pendingQuestionKind;
+      next.pendingQuestionOptions = p.pendingQuestionOptions;
       break;
     case "task_completed":
       next.state = (p.status as TaskState) ?? p.state ?? "done";
       next.pendingQuestion = undefined;
+      next.pendingQuestionKind = undefined;
+      next.pendingQuestionOptions = undefined;
       if (p.reply) next.reply = p.reply;
       break;
   }

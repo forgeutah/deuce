@@ -591,9 +591,14 @@ func (m *Manager) symlinkPi(ctx context.Context, workspaceID string) {
 
 // InstallPiExtension writes a Pi extension file to the container's auto-discovery
 // path (~/.pi/agent/extensions/<filename>) so Pi loads it on launch. Content is
-// base64-encoded over the wire to avoid any shell-quoting hazards. Non-fatal:
-// without the extension, agents simply lose the ask-user (awaiting-input)
-// capability rather than failing the workspace.
+// base64-encoded over the wire to avoid any shell-quoting hazards.
+//
+// A failure is loud, not silent: without the ask-user extension Pi has no way to
+// surface a blocking question, so the agent narrates the call as plain text
+// (raw `ask_user(...)` in the chat) or guesses instead of asking. The failure is
+// logged at error level and surfaced to the user through logFn with the concrete
+// consequence, and the error is returned so the caller can react — but
+// provisioning stays non-fatal at the call site (the workspace still comes up).
 func (m *Manager) InstallPiExtension(ctx context.Context, workspaceID, filename, content string, logFn LogFunc) error {
 	encoded := base64.StdEncoding.EncodeToString([]byte(content))
 	cmd := fmt.Sprintf(
@@ -603,10 +608,10 @@ func (m *Manager) InstallPiExtension(ctx context.Context, workspaceID, filename,
 	out, err := m.ExecInWorkspace(ctx, workspaceID, cmd).CombinedOutput()
 	if err != nil {
 		if logFn != nil {
-			logFn("WARNING: failed to install Pi ask-user extension")
+			logFn("ERROR: failed to install the Pi ask-user extension — agents in this session cannot ask you questions and may proceed on assumptions instead. Rebuild the workspace to retry.")
 		}
-		slog.Warn("pi extension install failed", "workspace", workspaceID, "error", err, "output", strings.TrimSpace(string(out)))
-		return nil // Non-fatal
+		slog.Error("pi extension install failed", "workspace", workspaceID, "error", err, "output", strings.TrimSpace(string(out)))
+		return fmt.Errorf("install pi ask-user extension %q: %w", filename, err)
 	}
 	if logFn != nil {
 		logFn(fmt.Sprintf("Pi extension installed: %s", filename))

@@ -139,6 +139,34 @@ func TestDecodeExtensionUIRequest(t *testing.T) {
 	if ev.RequestID != "ui-7" || ev.RequestKind != "input" || ev.Prompt != "Which environment?" {
 		t.Errorf("ui request decoded as %+v", ev)
 	}
+	if len(ev.Options) != 0 {
+		t.Errorf("free-text request should carry no options, got %v", ev.Options)
+	}
+}
+
+func TestDecodeExtensionUIRequestSelectOptions(t *testing.T) {
+	// A select-kind request carries choice options; decode them best-effort
+	// whether they ride top-level or under params.
+	ev, err := Decode([]byte(`{"type":"extension_ui_request","id":"ui-9","kind":"select","prompt":"Which framework?","options":["React","Vue","Svelte"]}`))
+	if err != nil {
+		t.Fatalf("decode select request: %v", err)
+	}
+	if ev.Kind != KindAwaitingInput || ev.RequestKind != "select" {
+		t.Fatalf("kind=%q requestKind=%q, want awaiting_input/select", ev.Kind, ev.RequestKind)
+	}
+	if got := ev.Options; len(got) != 3 || got[0] != "React" || got[2] != "Svelte" {
+		t.Errorf("options = %v, want [React Vue Svelte]", got)
+	}
+}
+
+func TestDecodeExtensionUIRequestParamsOptions(t *testing.T) {
+	ev, err := Decode([]byte(`{"type":"extension_ui_request","id":"ui-10","method":"select","params":{"prompt":"Pick","options":["a","b"]}}`))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(ev.Options) != 2 || ev.Options[1] != "b" || ev.Prompt != "Pick" {
+		t.Errorf("params-options request decoded as %+v", ev)
+	}
 }
 
 func TestNormalizeTool(t *testing.T) {

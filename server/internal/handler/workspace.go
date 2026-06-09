@@ -27,7 +27,10 @@ func (h *Handler) provisionAgentTools(ctx context.Context, workspaceID string, l
 		slog.Warn("pi installation failed", "workspace", workspaceID, "error", err)
 	}
 	if err := h.workspaces.InstallPiExtension(ctx, workspaceID, extension.AskUserFilename, extension.AskUser, logFn); err != nil {
-		slog.Warn("pi extension installation failed", "workspace", workspaceID, "error", err)
+		// Loud, not fatal: the workspace still comes up, but the user has been
+		// told via logFn that agents can't ask questions here (R10). Error level
+		// so it stands out from routine provisioning warnings.
+		slog.Error("pi extension installation failed", "workspace", workspaceID, "error", err)
 	}
 }
 

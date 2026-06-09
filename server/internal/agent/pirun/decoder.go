@@ -60,6 +60,7 @@ type Event struct {
 	RequestID   string
 	RequestKind string // select / confirm / input / editor
 	Prompt      string
+	Options     []string // choice labels for a select request (empty otherwise)
 
 	// Command reply (KindCommandReply).
 	Command string
@@ -191,13 +192,15 @@ func decodeUIRequest(line []byte) (Event, error) {
 	// extension (U12) lands; decode best-effort by id + common prompt/kind keys
 	// so the awaiting-input transition fires regardless of minor field naming.
 	var p struct {
-		ID     string `json:"id"`
-		Method string `json:"method"`
-		Kind   string `json:"kind"`
-		Prompt string `json:"prompt"`
-		Params struct {
-			Prompt  string `json:"prompt"`
-			Message string `json:"message"`
+		ID      string   `json:"id"`
+		Method  string   `json:"method"`
+		Kind    string   `json:"kind"`
+		Prompt  string   `json:"prompt"`
+		Options []string `json:"options"`
+		Params  struct {
+			Prompt  string   `json:"prompt"`
+			Message string   `json:"message"`
+			Options []string `json:"options"`
 		} `json:"params"`
 	}
 	if err := json.Unmarshal(line, &p); err != nil {
@@ -205,12 +208,17 @@ func decodeUIRequest(line []byte) (Event, error) {
 	}
 	prompt := firstNonEmpty(p.Prompt, p.Params.Prompt, p.Params.Message)
 	kind := firstNonEmpty(p.Kind, p.Method)
+	options := p.Options
+	if len(options) == 0 {
+		options = p.Params.Options
+	}
 	return Event{
 		Kind:        KindAwaitingInput,
 		RawType:     "extension_ui_request",
 		RequestID:   p.ID,
 		RequestKind: kind,
 		Prompt:      prompt,
+		Options:     options,
 	}, nil
 }
 

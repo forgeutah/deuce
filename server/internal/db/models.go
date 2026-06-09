@@ -88,19 +88,21 @@ type SessionMember struct {
 }
 
 type Task struct {
-	ID              uuid.UUID   `json:"id"`
-	SessionID       uuid.UUID   `json:"session_id"`
-	AgentID         uuid.UUID   `json:"agent_id"`
-	RequestedBy     pgtype.UUID `json:"requested_by"`
-	AnchorMessageID pgtype.UUID `json:"anchor_message_id"`
-	Prompt          string      `json:"prompt"`
-	State           string      `json:"state"`
-	Seq             int64       `json:"seq"`
-	PendingQuestion string      `json:"pending_question"`
-	Reply           string      `json:"reply"`
-	Work            []byte      `json:"work"`
-	CreatedAt       time.Time   `json:"created_at"`
-	UpdatedAt       time.Time   `json:"updated_at"`
+	ID                     uuid.UUID   `json:"id"`
+	SessionID              uuid.UUID   `json:"session_id"`
+	AgentID                uuid.UUID   `json:"agent_id"`
+	RequestedBy            pgtype.UUID `json:"requested_by"`
+	AnchorMessageID        pgtype.UUID `json:"anchor_message_id"`
+	Prompt                 string      `json:"prompt"`
+	State                  string      `json:"state"`
+	Seq                    int64       `json:"seq"`
+	PendingQuestion        string      `json:"pending_question"`
+	Reply                  string      `json:"reply"`
+	Work                   []byte      `json:"work"`
+	CreatedAt              time.Time   `json:"created_at"`
+	UpdatedAt              time.Time   `json:"updated_at"`
+	PendingQuestionKind    string      `json:"pending_question_kind"`
+	PendingQuestionOptions []string    `json:"pending_question_options"`
 }
 
 type TaskAction struct {

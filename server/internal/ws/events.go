@@ -61,8 +61,12 @@ type TaskEventPayload struct {
 	State           string `json:"state,omitempty"`
 	Position        int    `json:"position,omitempty"`        // queue #N for queued tasks
 	PendingQuestion string `json:"pendingQuestion,omitempty"` // awaiting_input
-	Reply           string `json:"reply,omitempty"`           // completed
-	Status          string `json:"status,omitempty"`          // completed: done|failed|cancelled
+	// Typed-question metadata (awaiting_input): kind is input|select|confirm
+	// (empty means free-text input); options are the choice labels for a select.
+	PendingQuestionKind    string   `json:"pendingQuestionKind,omitempty"`
+	PendingQuestionOptions []string `json:"pendingQuestionOptions,omitempty"`
+	Reply                  string   `json:"reply,omitempty"`  // completed
+	Status                 string   `json:"status,omitempty"` // completed: done|failed|cancelled
 }
 
 // ActionEventPayload is the JSON payload for action_started / action_completed.

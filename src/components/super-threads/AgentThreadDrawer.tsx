@@ -51,16 +51,67 @@ function RequesterAvatar({ user }: { user?: Pick<User, "name" | "avatar"> }) {
   );
 }
 
+// QuestionControls renders the typed-prompt affordances for an awaiting-input
+// task: choice buttons for a select question, yes/no for a confirm, and nothing
+// extra for free text (the drawer composer below is the text input, and also
+// serves as the "Other" fallback for a select). Answering routes through the
+// same steer path as a typed reply (onAnswer → onSend → steer).
+function QuestionControls({
+  task,
+  onAnswer,
+}: {
+  task: AgentTask;
+  onAnswer: (message: string) => void;
+}) {
+  const kind = task.pendingQuestionKind;
+  const options = task.pendingQuestionOptions ?? [];
+
+  if (kind === "select" && options.length > 0) {
+    return (
+      <div className="q-choices">
+        {options.map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            className="q-choice"
+            onClick={() => onAnswer(opt)}
+          >
+            {opt}
+          </button>
+        ))}
+        <span className="q-choice-hint">or type another answer below</span>
+      </div>
+    );
+  }
+
+  if (kind === "confirm") {
+    return (
+      <div className="q-choices">
+        <button type="button" className="q-choice" onClick={() => onAnswer("yes")}>
+          Yes
+        </button>
+        <button type="button" className="q-choice" onClick={() => onAnswer("no")}>
+          No
+        </button>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 function Turn({
   agent,
   task,
   queuePos,
   lookupUser,
+  onAnswer,
 }: {
   agent: Agent;
   task: AgentTask;
   queuePos?: number;
   lookupUser: UserLookup;
+  onAnswer: (message: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const requester = lookupUser(task.requestedBy);
@@ -100,7 +151,10 @@ function Turn({
               <AlertCircle size={12} />
               {agent.name} needs your input
             </div>
-            {task.pendingQuestion ?? "Reply below to continue."}
+            <div className="q-text">
+              {task.pendingQuestion ?? "Reply below to continue."}
+            </div>
+            <QuestionControls task={task} onAnswer={onAnswer} />
           </div>
         </div>
       )}
@@ -246,6 +300,7 @@ export function AgentThreadDrawer({
               task={t}
               queuePos={queuePositions[t.id]}
               lookupUser={lookupUser}
+              onAnswer={onSend}
             />
           ))
         )}

@@ -26,17 +26,19 @@ type agentActionResp struct {
 }
 
 type agentTaskResp struct {
-	ID              string            `json:"id"`
-	SessionID       string            `json:"sessionId"`
-	AgentID         string            `json:"agentId"`
-	RequestedBy     string            `json:"requestedBy,omitempty"`
-	AnchorMessageID string            `json:"anchorMessageId,omitempty"`
-	Prompt          string            `json:"prompt"`
-	State           string            `json:"state"`
-	Seq             int64             `json:"seq"`
-	PendingQuestion string            `json:"pendingQuestion,omitempty"`
-	Reply           string            `json:"reply,omitempty"`
-	Actions         []agentActionResp `json:"actions"`
+	ID                     string            `json:"id"`
+	SessionID              string            `json:"sessionId"`
+	AgentID                string            `json:"agentId"`
+	RequestedBy            string            `json:"requestedBy,omitempty"`
+	AnchorMessageID        string            `json:"anchorMessageId,omitempty"`
+	Prompt                 string            `json:"prompt"`
+	State                  string            `json:"state"`
+	Seq                    int64             `json:"seq"`
+	PendingQuestion        string            `json:"pendingQuestion,omitempty"`
+	PendingQuestionKind    string            `json:"pendingQuestionKind,omitempty"`
+	PendingQuestionOptions []string          `json:"pendingQuestionOptions,omitempty"`
+	Reply                  string            `json:"reply,omitempty"`
+	Actions                []agentActionResp `json:"actions"`
 }
 
 type agentRunSnapshotResp struct {
@@ -123,7 +125,10 @@ func buildSnapshot(tasks []db.Task, actions []db.TaskAction) agentRunSnapshotRes
 			RequestedBy:     uuidStr(t.RequestedBy.Bytes, t.RequestedBy.Valid),
 			AnchorMessageID: uuidStr(t.AnchorMessageID.Bytes, t.AnchorMessageID.Valid),
 			Prompt:          t.Prompt, State: t.State, Seq: t.Seq,
-			PendingQuestion: t.PendingQuestion, Reply: t.Reply, Actions: acts,
+			PendingQuestion:        t.PendingQuestion,
+			PendingQuestionKind:    t.PendingQuestionKind,
+			PendingQuestionOptions: t.PendingQuestionOptions,
+			Reply:                  t.Reply, Actions: acts,
 		})
 	}
 	resp.LatestSeq = latest
