@@ -14,9 +14,12 @@ import {
   Loader2,
   CircleDot,
   AlertCircle,
+  Square,
   type LucideIcon,
 } from "lucide-react";
-import type { Agent, AgentAction } from "@/types";
+import type { AgentAction } from "@/types";
+import { DEUCE } from "@/lib/deuce";
+import { api } from "@/lib/api";
 
 // Tool → icon, mirroring TOOL_ICON in the prototype. Unknown tools fall back to
 // a neutral dot.
@@ -29,13 +32,14 @@ const TOOL_ICON: Record<string, LucideIcon> = {
   Think: Sparkles,
 };
 
-// AgentAvatar is the colored initial square used wherever an agent appears.
-export function AgentAvatar({ agent, size = 22 }: { agent: Agent; size?: number }) {
+// AgentAvatar is deuce's colored initial square, used wherever the agent
+// appears. There is one agent, so identity comes from the DEUCE constant.
+export function AgentAvatar({ size = 22 }: { size?: number }) {
   return (
     <div
       className="av"
       style={{
-        background: agent.color,
+        background: DEUCE.color,
         width: size,
         height: size,
         fontSize: size * 0.42,
@@ -48,20 +52,20 @@ export function AgentAvatar({ agent, size = 22 }: { agent: Agent; size?: number 
         flexShrink: 0,
       }}
     >
-      {agent.name[0]}
+      {DEUCE.name[0]}
     </div>
   );
 }
 
 // TypingDots renders the three pulsing dots in the agent's color.
-export function TypingDots({ color }: { color: string }) {
+export function TypingDots() {
   return (
     <div style={{ display: "flex", gap: 4 }}>
       {[0, 0.2, 0.4].map((d, i) => (
         <span
           key={i}
           className="tdot"
-          style={{ background: color, animationDelay: `${d}s` }}
+          style={{ background: DEUCE.color, animationDelay: `${d}s` }}
         />
       ))}
     </div>
@@ -69,7 +73,7 @@ export function TypingDots({ color }: { color: string }) {
 }
 
 // Mentioned highlights @mentions inline in the agent's color.
-export function Mentioned({ text, color }: { text: string; color?: string }) {
+export function Mentioned({ text }: { text: string }) {
   return (
     <>
       {text.split(/(@\w+)/g).map((part, i) =>
@@ -77,7 +81,7 @@ export function Mentioned({ text, color }: { text: string; color?: string }) {
           <span
             key={i}
             className="mention"
-            style={{ color: color ?? "var(--color-accent)", fontWeight: 600 }}
+            style={{ color: DEUCE.color, fontWeight: 600 }}
           >
             {part}
           </span>
@@ -86,6 +90,29 @@ export function Mentioned({ text, color }: { text: string; color?: string }) {
         ),
       )}
     </>
+  );
+}
+
+// StopButton cancels the session's running task and drains its queue — the
+// same semantics as the /stop chat command. Shared by the inline task card
+// and the thread-drawer header. stopPropagation keeps it from triggering the
+// click-to-open behavior of whatever container it sits in.
+export function StopButton({ sessionId }: { sessionId: string }) {
+  return (
+    <button
+      type="button"
+      className="tc-stop"
+      title="Stop the agent"
+      aria-label="Stop the agent"
+      onClick={(e) => {
+        e.stopPropagation();
+        api.stopAgent(sessionId).catch((err) => {
+          console.error("Failed to stop agent:", err);
+        });
+      }}
+    >
+      <Square size={11} />
+    </button>
   );
 }
 

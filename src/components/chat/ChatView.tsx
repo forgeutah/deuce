@@ -2,7 +2,6 @@ import { useState, useRef, useEffect } from "react";
 import {
   SendHorizontal,
   Bot,
-  Square,
   Play,
   RefreshCw,
   AlertCircle,
@@ -18,7 +17,8 @@ import { useSessionStore } from "@/stores/session-store";
 import { tasksByAnchor, queuePositions } from "@/stores/agent-runs";
 import { AgentTaskCard } from "@/components/super-threads/AgentTaskCard";
 import { visibleChatMessages } from "@/components/chat/message-visibility";
-import type { Agent, Message, User, Session, WorkspaceStatus } from "@/types";
+import { DEUCE } from "@/lib/deuce";
+import type { Message, User, Session, WorkspaceStatus } from "@/types";
 
 function isWorkspaceLive(status: WorkspaceStatus | undefined): boolean {
   return status === "ready" || status === "starting";
@@ -183,92 +183,19 @@ function JoinSessionGate({ session }: { session: Session }) {
   );
 }
 
-function TypingIndicator({
-  agentName,
-  agentColor,
-  sessionId,
-  streamingOutput,
-}: {
-  agentName: string;
-  agentColor: string;
-  sessionId: string;
-  streamingOutput: { content: string; contentType: string }[];
-}) {
-  const streamEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    streamEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [streamingOutput.length]);
-
-  const handleStop = async () => {
-    try {
-      await api.stopAgent(sessionId);
-    } catch (err) {
-      console.error("Failed to stop agent:", err);
-    }
-  };
-
-  return (
-    <div className="px-4 py-2 animate-fade-in-up">
-      <div className="flex items-center gap-2">
-        <div
-          className="flex h-7 w-7 items-center justify-center rounded text-xs font-semibold text-foreground-on-emphasis shrink-0"
-          style={{ backgroundColor: agentColor }}
-        >
-          {agentName[0]}
-        </div>
-        <span className="text-sm text-foreground-muted">{agentName} is working</span>
-        <div className="flex gap-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-foreground-muted animate-typing-dot" style={{ animationDelay: "0s" }} />
-          <span className="h-1.5 w-1.5 rounded-full bg-foreground-muted animate-typing-dot" style={{ animationDelay: "0.2s" }} />
-          <span className="h-1.5 w-1.5 rounded-full bg-foreground-muted animate-typing-dot" style={{ animationDelay: "0.4s" }} />
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={handleStop}
-          className="ml-auto h-6 w-6 text-danger hover:text-danger hover:bg-danger/10"
-          title="Stop agent"
-        >
-          <Square className="h-3 w-3 fill-current" />
-        </Button>
-      </div>
-
-      {/* Streaming output */}
-      {streamingOutput.length > 0 && (
-        <div className="mt-2 ml-9 max-h-32 overflow-y-auto rounded-md border border-border-muted bg-background-subtle p-2">
-          {streamingOutput.map((item, i) => (
-            <span
-              key={i}
-              className={cn(
-                "text-xs",
-                item.contentType === "tool_use"
-                  ? "text-accent font-medium"
-                  : "text-foreground-muted",
-              )}
-            >
-              {item.contentType === "tool_use" ? `[${item.content}] ` : item.content}
-            </span>
-          ))}
-          <div ref={streamEndRef} />
-        </div>
-      )}
-    </div>
-  );
-}
-
 function MessageBubble({
   message,
   author,
   showHeader,
 }: {
   message: Message;
-  author: Agent | User | undefined;
+  author: User | undefined;
   showHeader: boolean;
 }) {
   const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set());
-  const isAgent = message.authorType === "agent";
-  const agentAuthor = isAgent ? (author as Agent) : undefined;
+  // The only agent-typed messages that pass the visibility filter are system
+  // notices (nil author) — deuce's task replies render on the task cards.
+  const isSystem = message.authorType === "agent";
 
   const toggleExpand = (index: number) => {
     setExpandedItems((prev) => {
@@ -283,35 +210,32 @@ function MessageBubble({
     <div
       className={cn(
         "group px-4 py-1 animate-fade-in-up",
-        isAgent && "border-l-2 bg-opacity-5",
+        isSystem && "border-l-2 bg-opacity-5",
       )}
       style={
-        isAgent && agentAuthor
+        isSystem
           ? {
-              borderLeftColor: agentAuthor.color,
-              backgroundColor: `${agentAuthor.color}08`,
+              borderLeftColor: DEUCE.colorMuted,
+              backgroundColor: `${DEUCE.color}08`,
             }
           : undefined
       }
     >
       {showHeader && (
         <div className="flex items-center gap-2 mb-0.5">
-          {isAgent && agentAuthor ? (
-            <div
-              className="flex h-7 w-7 items-center justify-center rounded text-xs font-semibold text-foreground-on-emphasis shrink-0"
-              style={{ backgroundColor: agentAuthor.color }}
-            >
-              {agentAuthor.name[0]}
+          {isSystem ? (
+            <div className="flex h-7 w-7 items-center justify-center rounded bg-background-emphasis text-foreground-muted shrink-0">
+              <Bot className="h-4 w-4" />
             </div>
           ) : (
             <img
-              src={(author as User)?.avatar ?? ""}
+              src={author?.avatar ?? ""}
               alt=""
               className="h-7 w-7 rounded-full shrink-0"
             />
           )}
           <span className="text-sm font-semibold text-foreground-emphasis">
-            {isAgent ? agentAuthor?.name : (author as User)?.name}
+            {isSystem ? "system" : author?.name}
           </span>
           <span className="text-xs text-foreground-subtle">
             {new Date(message.createdAt).toLocaleTimeString([], {
@@ -353,8 +277,6 @@ export function ChatView() {
     activeSessionId,
     sessions,
     messages,
-    thinkingAgents,
-    agentOutput,
     addMessage,
     agentRuns,
     openAgentThread,
@@ -369,22 +291,11 @@ export function ChatView() {
   const sessionMessages = activeSessionId
     ? (messages[activeSessionId] ?? [])
     : [];
-  const thinking = activeSessionId
-    ? (thinkingAgents[activeSessionId] ?? [])
-    : [];
-  const streamOutput = activeSessionId
-    ? (agentOutput[activeSessionId] ?? [])
-    : [];
 
-  const allParticipants = session
-    ? [...session.agents, ...session.members]
-    : [];
-
-  // Agent task replies render on the super-thread surfaces (inline card +
+  // Deuce's task replies render on the super-thread surfaces (inline card +
   // drawer), not as chat bubbles. System notices (agent-typed, nil author)
-  // are not in agentIds and stay visible.
-  const agentIds = new Set(session?.agents.map((a) => a.id) ?? []);
-  const visibleMessages = visibleChatMessages(sessionMessages, agentIds);
+  // stay visible.
+  const visibleMessages = visibleChatMessages(sessionMessages);
 
   // Super Threads: inline task cards anchored to the message that spawned them.
   const sessionRuns = activeSessionId ? agentRuns[activeSessionId] : undefined;
@@ -403,7 +314,7 @@ export function ChatView() {
     if (isNearBottomRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [sessionMessages.length, thinking.length]);
+  }, [sessionMessages.length]);
 
   // Always scroll to bottom on session switch
   useEffect(() => {
@@ -418,22 +329,10 @@ export function ChatView() {
     const content = input.trim();
     setInput("");
 
-    // Detect @mentions — match agent names to IDs
-    const mentionMatch = content.match(/@(\w+)/g);
-    const mentions: string[] = [];
-    if (mentionMatch) {
-      for (const mention of mentionMatch) {
-        const agentName = mention.slice(1);
-        const agent = session.agents.find(
-          (a) => a.name.toLowerCase() === agentName.toLowerCase(),
-        );
-        if (agent) mentions.push(agent.id);
-      }
-    }
-
     try {
-      // POST to API — server handles persistence, broadcasting, and agent responses
-      const msg = await api.sendMessage(activeSessionId, { content, mentions });
+      // POST to API — the server persists, broadcasts, and detects the @deuce
+      // mention itself (no client-side mention parsing).
+      const msg = await api.sendMessage(activeSessionId, { content });
       // Add our own message locally (server broadcasts to OTHER clients)
       addMessage(msg);
     } catch (err) {
@@ -474,17 +373,22 @@ export function ChatView() {
                 Start a conversation
               </h3>
               <p className="mt-1 text-xs text-foreground-subtle max-w-xs">
-                @mention an agent to get started.
-                {session?.agents.map((a) => (
+                Mention
+                {isMember && workspaceLive ? (
                   <button
-                    key={a.id}
-                    onClick={() => setInput(`@${a.name} `)}
+                    onClick={() => {
+                      setInput(`@${DEUCE.name} `);
+                      inputRef.current?.focus();
+                    }}
                     className="mx-1 rounded-full px-2 py-0.5 text-xs font-medium text-foreground-on-emphasis"
-                    style={{ backgroundColor: a.color }}
+                    style={{ backgroundColor: DEUCE.color }}
                   >
-                    @{a.name}
+                    @{DEUCE.name}
                   </button>
-                ))}
+                ) : (
+                  <span className="mx-1 font-medium">@{DEUCE.name}</span>
+                )}
+                to bring the agent into the conversation.
               </p>
             </div>
           )}
@@ -499,11 +403,10 @@ export function ChatView() {
                 300000;
 
             const author =
-              msg.authorType === "agent"
-                ? session?.agents.find((a) => a.id === msg.authorId)
-                : allParticipants.find(
-                    (p) => "email" in p && p.id === msg.authorId,
-                  ) ?? session?.members.find((m) => m.id === msg.authorId);
+              msg.authorType === "human"
+                ? (session?.members.find((m) => m.id === msg.authorId) ??
+                  (currentUser?.id === msg.authorId ? currentUser : undefined))
+                : undefined;
 
             const anchoredTasks = cardsByAnchor[msg.id] ?? [];
 
@@ -514,41 +417,18 @@ export function ChatView() {
                   author={author}
                   showHeader={showHeader}
                 />
-                {anchoredTasks.map((task) => {
-                  const taskAgent = session?.agents.find(
-                    (a) => a.id === task.agentId,
-                  );
-                  if (!taskAgent) return null;
-                  return (
-                    <AgentTaskCard
-                      key={task.id}
-                      agent={taskAgent}
-                      task={task}
-                      queuePos={queuePos[task.id]}
-                      onOpen={() =>
-                        activeSessionId &&
-                        openAgentThread(activeSessionId, taskAgent.id)
-                      }
-                    />
-                  );
-                })}
+                {anchoredTasks.map((task) => (
+                  <AgentTaskCard
+                    key={task.id}
+                    sessionId={activeSessionId!}
+                    task={task}
+                    queuePos={queuePos[task.id]}
+                    onOpen={() =>
+                      activeSessionId && openAgentThread(activeSessionId)
+                    }
+                  />
+                ))}
               </div>
-            );
-          })}
-
-          {/* Typing indicators with streaming output */}
-          {thinking.map((agentId) => {
-            const agent = session?.agents.find((a) => a.id === agentId);
-            if (!agent) return null;
-            const agentStream = streamOutput.filter((o) => o.agentId === agentId);
-            return (
-              <TypingIndicator
-                key={agentId}
-                agentName={agent.name}
-                agentColor={agent.color}
-                sessionId={activeSessionId!}
-                streamingOutput={agentStream}
-              />
             );
           })}
 
@@ -581,7 +461,7 @@ export function ChatView() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Message (@ to mention an agent)"
+              placeholder="Message (@deuce to bring in the agent)"
               rows={1}
               className="flex-1 resize-none rounded-md border border-border-muted bg-background-input px-3 py-2 text-sm text-foreground placeholder:text-foreground-subtle focus:border-accent focus:outline-none"
             />

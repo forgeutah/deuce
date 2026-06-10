@@ -1,7 +1,8 @@
-// AgentThreadDrawer — the per-agent global thread shown in the right panel.
-// Lists every task for one agent in chronological order (the agent's whole
-// history in this session), with a Claude Code-style action log per turn and a
-// composer that steers the agent (or enqueues a new task when it's idle).
+// AgentThreadDrawer — the session's deuce thread shown in the right panel.
+// Lists every task in chronological order (the session's whole agent history),
+// with a Claude Code-style action log per turn and a composer that steers the
+// agent (or enqueues a new task when it's idle). The header carries a Stop
+// button while a run is live.
 //
 // Ported from the prototype's Drawer + Turn (queue-app.jsx), wired to real
 // reducer state and the store's steer() action.
@@ -15,8 +16,10 @@ import {
   ChevronDown,
   AlertCircle,
 } from "lucide-react";
-import type { Agent, AgentTask, User } from "@/types";
-import { AgentAvatar, TypingDots, Mentioned, ActionLog } from "./atoms";
+import type { AgentTask, User } from "@/types";
+import { DEUCE } from "@/lib/deuce";
+import { statusOfTasks } from "@/stores/agent-runs";
+import { AgentAvatar, StopButton, TypingDots, Mentioned, ActionLog } from "./atoms";
 
 type UserLookup = (id?: string) => Pick<User, "name" | "avatar"> | undefined;
 
@@ -101,13 +104,11 @@ function QuestionControls({
 }
 
 function Turn({
-  agent,
   task,
   queuePos,
   lookupUser,
   onAnswer,
 }: {
-  agent: Agent;
   task: AgentTask;
   queuePos?: number;
   lookupUser: UserLookup;
@@ -128,28 +129,28 @@ function Turn({
           <span className="nm">{requester?.name ?? "Someone"}</span>
         </div>
         <div className="bd">
-          <Mentioned text={task.prompt} color={agent.color} />
+          <Mentioned text={task.prompt} />
         </div>
       </div>
 
       {task.state === "running" && (
-        <div className="q-resp" style={{ "--ac": agent.color } as React.CSSProperties}>
+        <div className="q-resp" style={{ "--ac": DEUCE.color } as React.CSSProperties}>
           <div className="q-typingline">
-            <AgentAvatar agent={agent} size={22} />
-            <TypingDots color={agent.color} />
-            <span className="lbl">{agent.name} is working…</span>
+            <AgentAvatar size={22} />
+            <TypingDots />
+            <span className="lbl">{DEUCE.name} is working…</span>
           </div>
           <ActionLog actions={task.actions} />
         </div>
       )}
 
       {task.state === "awaiting_input" && (
-        <div className="q-resp" style={{ "--ac": agent.color } as React.CSSProperties}>
+        <div className="q-resp" style={{ "--ac": DEUCE.color } as React.CSSProperties}>
           <ActionLog actions={task.actions} />
           <div className="q-pending-q">
             <div className="l1">
               <AlertCircle size={12} />
-              {agent.name} needs your input
+              {DEUCE.name} needs your input
             </div>
             <div className="q-text">
               {task.pendingQuestion ?? "Reply below to continue."}
@@ -160,10 +161,10 @@ function Turn({
       )}
 
       {terminal && (
-        <div className="q-resp" style={{ "--ac": agent.color } as React.CSSProperties}>
+        <div className="q-resp" style={{ "--ac": DEUCE.color } as React.CSSProperties}>
           <div className="agent-line">
-            <AgentAvatar agent={agent} size={22} />
-            <span className="nm">{agent.name}</span>
+            <AgentAvatar size={22} />
+            <span className="nm">{DEUCE.name}</span>
           </div>
           {task.actions.length > 0 && (
             <>
@@ -193,14 +194,14 @@ function Turn({
 
       {task.state === "queued" && (
         <div className="q-queued-card">
-          <AgentAvatar agent={agent} size={22} />
+          <AgentAvatar size={22} />
           <div className="info">
             <div className="l1">
               <Clock size={12} />
               Queued{queuePos != null ? ` · position ${queuePos}` : ""}
             </div>
             <div className="l2">
-              Waiting for {agent.name}'s current task to finish, then starts
+              Waiting for {DEUCE.name}'s current task to finish, then starts
               automatically.
             </div>
           </div>
@@ -211,14 +212,14 @@ function Turn({
 }
 
 export function AgentThreadDrawer({
-  agent,
+  sessionId,
   tasks,
   queuePositions,
   lookupUser,
   onClose,
   onSend,
 }: {
-  agent: Agent;
+  sessionId: string;
   tasks: AgentTask[];
   queuePositions: Record<string, number>;
   lookupUser: UserLookup;
@@ -228,8 +229,8 @@ export function AgentThreadDrawer({
   const [val, setVal] = useState("");
   const bodyRef = useRef<HTMLDivElement>(null);
 
-  const running = tasks.some((t) => t.state === "running");
-  const awaiting = tasks.some((t) => t.state === "awaiting_input");
+  const status = statusOfTasks(tasks);
+  const busy = status !== "idle";
 
   // Keep the thread pinned to the latest activity.
   const actionSig = tasks.map((t) => `${t.state}:${t.actions.length}`).join("|");
@@ -245,26 +246,27 @@ export function AgentThreadDrawer({
     setVal("");
   };
 
-  const subLabel = awaiting
-    ? "Needs input · global thread"
-    : running
-      ? "Working · global thread"
-      : "Idle · global thread";
+  const subLabel =
+    status === "waiting"
+      ? "Needs input · global thread"
+      : status === "working"
+        ? "Working · global thread"
+        : "Idle · global thread";
 
   return (
-    <div className="q-drawer" style={{ "--ac": agent.color } as React.CSSProperties}>
+    <div className="q-drawer" style={{ "--ac": DEUCE.color } as React.CSSProperties}>
       <div className="q-drawer-hd">
-        <AgentAvatar agent={agent} size={26} />
+        <AgentAvatar size={26} />
         <div style={{ minWidth: 0 }}>
-          <div className="nm">{agent.name}</div>
+          <div className="nm">{DEUCE.name}</div>
           <div className="sub">
-            {(running || awaiting) && (
+            {busy && (
               <span
                 style={{
                   width: 7,
                   height: 7,
                   borderRadius: "50%",
-                  background: agent.color,
+                  background: DEUCE.color,
                   display: "inline-block",
                 }}
               />
@@ -272,6 +274,7 @@ export function AgentThreadDrawer({
             {subLabel}
           </div>
         </div>
+        {busy && <StopButton sessionId={sessionId} />}
         <button className="x" onClick={onClose} aria-label="Close thread">
           <X size={17} />
         </button>
@@ -279,7 +282,7 @@ export function AgentThreadDrawer({
 
       <div className="q-thread" ref={bodyRef}>
         <div className="q-thread-foot" style={{ paddingTop: 0 }}>
-          Start of thread with {agent.name}
+          Start of thread with {DEUCE.name}
         </div>
         {tasks.length === 0 ? (
           <div
@@ -290,13 +293,12 @@ export function AgentThreadDrawer({
               color: "var(--color-foreground-subtle)",
             }}
           >
-            No tasks yet. Send {agent.name} a message below.
+            No tasks yet. Send {DEUCE.name} a message below.
           </div>
         ) : (
           tasks.map((t) => (
             <Turn
               key={t.id}
-              agent={agent}
               task={t}
               queuePos={queuePositions[t.id]}
               lookupUser={lookupUser}
@@ -311,7 +313,7 @@ export function AgentThreadDrawer({
           <textarea
             rows={1}
             value={val}
-            placeholder={`Reply to ${agent.name}…`}
+            placeholder={`Reply to ${DEUCE.name}…`}
             onChange={(e) => setVal(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {

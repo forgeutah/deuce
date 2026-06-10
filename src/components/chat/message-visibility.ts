@@ -1,25 +1,22 @@
 import type { Message } from "@/types";
+import { SYSTEM_AUTHOR_ID } from "@/lib/deuce";
 
-// Agent task replies are surfaced on the super-thread surfaces (the inline
-// AgentTaskCard and the agent thread drawer), so their chat-bubble copy is
-// hidden from the main chat list. System/operational notices are posted with
-// authorType "agent" but a nil author ID that matches no session agent
-// (postSystemMessage in server/internal/handler/messages.go) — they fall
-// through the agentIds check and stay visible, as do all human messages.
-export function isVisibleInChat(
-  message: Message,
-  agentIds: Set<string>,
-): boolean {
-  return !(message.authorType === "agent" && agentIds.has(message.authorId));
+// Deuce's task replies are surfaced on the super-thread surfaces (the inline
+// AgentTaskCard and the thread drawer), so their chat-bubble copy is hidden
+// from the main chat list. System/operational notices are posted with
+// authorType "agent" but the nil author ID (postSystemMessage in
+// server/internal/handler/messages.go) — they stay visible, as do all human
+// messages. Agent-typed messages with any other author should not exist
+// post-migration (013 repoints history to DEUCE.id), but hide them too so an
+// unexpected author can't leak a duplicate reply into chat.
+export function isVisibleInChat(message: Message): boolean {
+  return !(
+    message.authorType === "agent" && message.authorId !== SYSTEM_AUTHOR_ID
+  );
 }
 
 // visibleChatMessages filters a message list for the main chat surface,
-// preserving order and never mutating the input. agentIds is the set of the
-// session's agent IDs (derived from session.agents by the caller — this
-// module stays free of store/session imports).
-export function visibleChatMessages(
-  messages: Message[],
-  agentIds: Set<string>,
-): Message[] {
-  return messages.filter((m) => isVisibleInChat(m, agentIds));
+// preserving order and never mutating the input.
+export function visibleChatMessages(messages: Message[]): Message[] {
+  return messages.filter(isVisibleInChat);
 }

@@ -1,9 +1,7 @@
 // AgentTaskCard — the inline card rendered beneath the chat message that
-// spawned an agent task (anchorMessageId). One card per task; its appearance
-// switches on task.state. Clicking opens the agent's thread drawer.
-//
-// Ported from the prototype's TaskCard (queue-app.jsx), wired to real
-// AgentTask/AgentAction reducer state instead of the demo's timer simulation.
+// spawned a deuce task (anchorMessageId). One card per task; its appearance
+// switches on task.state. Clicking opens the session's thread drawer; the
+// Stop button on a live card cancels the run without opening the drawer.
 
 import {
   Loader,
@@ -13,17 +11,18 @@ import {
   AlertCircle,
   XCircle,
 } from "lucide-react";
-import type { Agent, AgentTask } from "@/types";
-import { AgentAvatar, TypingDots } from "./atoms";
+import type { AgentTask } from "@/types";
+import { DEUCE } from "@/lib/deuce";
+import { AgentAvatar, StopButton, TypingDots } from "./atoms";
 import { stripMention } from "./utils";
 
 export function AgentTaskCard({
-  agent,
+  sessionId,
   task,
   queuePos,
   onOpen,
 }: {
-  agent: Agent;
+  sessionId: string;
   task: AgentTask;
   queuePos?: number;
   onOpen: () => void;
@@ -32,19 +31,24 @@ export function AgentTaskCard({
   const latest = task.actions[task.actions.length - 1];
 
   return (
-    <div className={`tc ${state}`} style={{ "--ac": agent.color } as React.CSSProperties} onClick={onOpen}>
+    <div
+      className={`tc ${state}`}
+      style={{ "--ac": DEUCE.color } as React.CSSProperties}
+      onClick={onOpen}
+    >
       <div className="tc-inner">
         {state === "running" && (
           <>
             <div className="tc-hd">
-              <AgentAvatar agent={agent} size={22} />
-              <span className="nm">{agent.name}</span>
+              <AgentAvatar size={22} />
+              <span className="nm">{DEUCE.name}</span>
               <span className="role">· session thread</span>
               <span className="spacer" />
               <span className="q-badge working">
                 <Loader size={11} className="spin" />
                 Working
               </span>
+              <StopButton sessionId={sessionId} />
               <span className="chev">
                 <ChevronRight size={15} />
               </span>
@@ -59,19 +63,19 @@ export function AgentTaskCard({
               </span>
             </div>
             <div className="tc-typing">
-              <TypingDots color={agent.color} />
-              <span className="lbl">{agent.name} is working — open to watch</span>
+              <TypingDots />
+              <span className="lbl">{DEUCE.name} is working — open to watch</span>
             </div>
           </>
         )}
 
         {state === "awaiting_input" && (
           <div className="tc-q">
-            <AgentAvatar agent={agent} size={22} />
+            <AgentAvatar size={22} />
             <div className="info">
               <div className="l1">
                 <AlertCircle size={12} />
-                {agent.name} needs your input — open to answer
+                {DEUCE.name} needs your input — open to answer
               </div>
               <div className="l2">
                 {task.pendingQuestion ?? stripMention(task.prompt)}
@@ -85,11 +89,11 @@ export function AgentTaskCard({
 
         {state === "queued" && (
           <div className="tc-q">
-            <AgentAvatar agent={agent} size={22} />
+            <AgentAvatar size={22} />
             <div className="info">
               <div className="l1">
                 <Clock size={12} />
-                Queued for {agent.name} · waiting for current task
+                Queued for {DEUCE.name} · waiting for current task
               </div>
               <div className="l2">{stripMention(task.prompt)}</div>
             </div>
@@ -99,7 +103,7 @@ export function AgentTaskCard({
 
         {(state === "done" || state === "failed" || state === "cancelled") && (
           <div className={`tc-d ${state}`}>
-            <AgentAvatar agent={agent} size={18} />
+            <AgentAvatar size={18} />
             <span className="ck">
               {state === "done" ? (
                 <Check size={13} />
@@ -110,7 +114,7 @@ export function AgentTaskCard({
               )}
             </span>
             <span className="l">
-              <b>{agent.name}</b>{" "}
+              <b>{DEUCE.name}</b>{" "}
               {task.reply ??
                 (state === "failed"
                   ? "Run failed."

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useSessionStore } from "@/stores/session-store";
 import type {
-  AgentStatus,
   Message,
   ActivityItem,
   TaskEventPayload,
@@ -61,13 +60,8 @@ export function useWebSocket() {
   const {
     activeSessionId,
     addMessage,
-    setThinkingAgent,
-    clearThinkingAgent,
-    updateAgentStatus,
     addActivity,
     appendWorkspaceLog,
-    appendAgentOutput,
-    clearAgentOutput,
   } = useSessionStore();
 
   // Refs hold the latest version of handleMessage and connect so the
@@ -91,37 +85,10 @@ export function useWebSocket() {
             authorType: message.authorType,
             content: message.content,
             expandableContent: message.expandableContent,
-            mentions: message.mentions ?? [],
             createdAt: message.createdAt,
             status: message.status ?? "sent",
           };
           addMessage(normalized);
-          break;
-        }
-
-        case "agent_status": {
-          const { agentId, status } = msg.payload as {
-            agentId: string;
-            status: AgentStatus;
-          };
-          updateAgentStatus(msg.sessionId, agentId, status);
-          // Clear streaming output when agent finishes
-          if (status === "idle" || status === "error") {
-            clearAgentOutput(msg.sessionId);
-          }
-          break;
-        }
-
-        case "typing_indicator": {
-          const { agentId, active } = msg.payload as {
-            agentId: string;
-            active: boolean;
-          };
-          if (active) {
-            setThinkingAgent(msg.sessionId, agentId);
-          } else {
-            clearThinkingAgent(msg.sessionId, agentId);
-          }
           break;
         }
 
@@ -136,16 +103,6 @@ export function useWebSocket() {
           // backend's per-session walk lock collapses any overlap if the
           // debounce window misses.
           scheduleFilesRefresh(sessionId);
-          break;
-        }
-
-        case "agent_output": {
-          const { agentId, content, contentType } = msg.payload as {
-            agentId: string;
-            content: string;
-            contentType: string;
-          };
-          appendAgentOutput(msg.sessionId, { agentId, content, contentType });
           break;
         }
 
@@ -191,7 +148,7 @@ export function useWebSocket() {
         }
       }
     },
-    [addMessage, updateAgentStatus, setThinkingAgent, clearThinkingAgent, addActivity, appendWorkspaceLog, appendAgentOutput, clearAgentOutput],
+    [addMessage, addActivity, appendWorkspaceLog],
   );
 
   // Keep the latest handleMessage reachable from the long-lived ws.onmessage
@@ -311,14 +268,11 @@ export function useWebSocket() {
   // sendSteer delivers a drawer reply to a live agent run (feed/answer) or, if
   // the agent is idle, enqueues a new task server-side (R15/R19). The server
   // also posts the reply to the channel for shared visibility.
-  const sendSteer = useCallback(
-    (sessionId: string, agentId: string, message: string) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      ws.send(JSON.stringify({ type: "steer", sessionId, agentId, message }));
-    },
-    [],
-  );
+  const sendSteer = useCallback((sessionId: string, message: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: "steer", sessionId, message }));
+  }, []);
 
   // Register sendSteer into the store so the thread-drawer composer can steer
   // agents without re-instantiating this hook (it's mounted once in App). The

@@ -6,7 +6,6 @@ import type {
   Project,
   Team,
   Message,
-  Agent,
   ActivityItem,
   TabType,
   FileNode,
@@ -31,9 +30,7 @@ interface SessionState {
   messages: Record<string, Message[]>;
   activities: Record<string, ActivityItem[]>;
   fileTrees: Record<string, FileNode[]>;
-  thinkingAgents: Record<string, string[]>;
   workspaceLogs: Record<string, string[]>;
-  agentOutput: Record<string, { agentId: string; content: string; contentType: string }[]>;
   // Super Threads: per-session reduced agent-run (task/action) state.
   agentRuns: Record<string, SessionAgentRuns>;
 
@@ -42,15 +39,13 @@ interface SessionState {
   activeTabMap: Record<string, TabType>;
   showLogs: boolean;
   searchQuery: string;
-  // Super Threads: which agent's per-agent thread drawer is open (right panel).
+  // Super Threads: which session's deuce thread drawer is open (right panel).
   // Null when no drawer is open. Reset whenever the active session changes.
-  openThread: { sessionId: string; agentId: string } | null;
+  openThread: { sessionId: string } | null;
   // steerSender is registered by the WebSocket hook (use-websocket) so the
   // store can forward steer/reply messages without ChatView needing its own
   // socket. Null until the hook mounts.
-  steerSender:
-    | ((sessionId: string, agentId: string, message: string) => void)
-    | null;
+  steerSender: ((sessionId: string, message: string) => void) | null;
   // wsResubscribe is registered by the WebSocket hook so joining a session
   // (without switching the active session) can start the live subscription
   // immediately. Null until the hook mounts.
@@ -63,33 +58,22 @@ interface SessionState {
   setSearchQuery: (query: string) => void;
   clearUnread: (sessionId: string) => void;
   addMessage: (message: Message) => void;
-  setThinkingAgent: (sessionId: string, agentId: string) => void;
-  clearThinkingAgent: (sessionId: string, agentId: string) => void;
-  updateAgentStatus: (
-    sessionId: string,
-    agentId: string,
-    status: Agent["status"],
-  ) => void;
   addActivity: (activity: ActivityItem) => void;
   updateSessionPlan: (sessionId: string, content: string) => void;
   updateSessionDescription: (sessionId: string, description: string) => void;
   appendWorkspaceLog: (sessionId: string, line: string) => void;
-  appendAgentOutput: (sessionId: string, output: { agentId: string; content: string; contentType: string }) => void;
-  clearAgentOutput: (sessionId: string) => void;
   applyAgentRunEvent: (
     sessionId: string,
     type: AgentRunEventType,
     payload: TaskEventPayload | ActionEventPayload,
   ) => void;
   fetchAgentRuns: (sessionId: string) => Promise<void>;
-  openAgentThread: (sessionId: string, agentId: string) => void;
+  openAgentThread: (sessionId: string) => void;
   closeAgentThread: () => void;
   setSteerSender: (
-    fn:
-      | ((sessionId: string, agentId: string, message: string) => void)
-      | null,
+    fn: ((sessionId: string, message: string) => void) | null,
   ) => void;
-  steer: (sessionId: string, agentId: string, message: string) => void;
+  steer: (sessionId: string, message: string) => void;
   setShowLogs: (show: boolean) => void;
   setWsResubscribe: (fn: ((sessionId: string) => void) | null) => void;
   joinSession: (sessionId: string) => Promise<void>;
@@ -122,9 +106,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   messages: {},
   activities: {},
   fileTrees: {},
-  thinkingAgents: {},
   workspaceLogs: {},
-  agentOutput: {},
   agentRuns: {},
 
   activeSessionId: null,
@@ -232,43 +214,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       };
     }),
 
-  setThinkingAgent: (sessionId, agentId) =>
-    set((state) => {
-      const current = state.thinkingAgents[sessionId] ?? [];
-      if (current.includes(agentId)) return state;
-      return {
-        thinkingAgents: {
-          ...state.thinkingAgents,
-          [sessionId]: [...current, agentId],
-        },
-      };
-    }),
-
-  clearThinkingAgent: (sessionId, agentId) =>
-    set((state) => {
-      const current = state.thinkingAgents[sessionId] ?? [];
-      return {
-        thinkingAgents: {
-          ...state.thinkingAgents,
-          [sessionId]: current.filter((id) => id !== agentId),
-        },
-      };
-    }),
-
-  updateAgentStatus: (sessionId, agentId, status) =>
-    set((state) => ({
-      sessions: state.sessions.map((s) =>
-        s.id === sessionId
-          ? {
-              ...s,
-              agents: s.agents.map((a) =>
-                a.id === agentId ? { ...a, status } : a,
-              ),
-            }
-          : s,
-      ),
-    })),
-
   addActivity: (activity) =>
     set((state) => {
       const current = state.activities[activity.sessionId] ?? [];
@@ -306,22 +251,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       };
     }),
 
-  appendAgentOutput: (sessionId, output) =>
-    set((state) => {
-      const current = state.agentOutput[sessionId] ?? [];
-      return {
-        agentOutput: {
-          ...state.agentOutput,
-          [sessionId]: [...current, output],
-        },
-      };
-    }),
-
-  clearAgentOutput: (sessionId) =>
-    set((state) => ({
-      agentOutput: { ...state.agentOutput, [sessionId]: [] },
-    })),
-
   applyAgentRunEvent: (sessionId, type, payload) => {
     const prev = get().agentRuns[sessionId] ?? emptyAgentRuns();
     const { state: next, needsResync } = applyEvent(prev, type, payload);
@@ -346,20 +275,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  openAgentThread: (sessionId, agentId) =>
-    set({ openThread: { sessionId, agentId } }),
+  openAgentThread: (sessionId) => set({ openThread: { sessionId } }),
 
   closeAgentThread: () => set({ openThread: null }),
 
   setSteerSender: (fn) => set({ steerSender: fn }),
 
-  steer: (sessionId, agentId, message) => {
+  steer: (sessionId, message) => {
     const send = get().steerSender;
     if (!send) {
       console.warn("steer dropped: no WebSocket sender registered");
       return;
     }
-    send(sessionId, agentId, message);
+    send(sessionId, message);
   },
 
   setShowLogs: (show) => set({ showLogs: show }),
