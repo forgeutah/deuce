@@ -14,12 +14,14 @@ import {
   Loader2,
   CircleDot,
   AlertCircle,
+  MessageCircleQuestion,
   Square,
   type LucideIcon,
 } from "lucide-react";
 import type { AgentAction } from "@/types";
 import { DEUCE } from "@/lib/deuce";
 import { api } from "@/lib/api";
+import { askUserQuestion } from "./utils";
 
 // Tool → icon, mirroring TOOL_ICON in the prototype. Unknown tools fall back to
 // a neutral dot.
@@ -145,6 +147,36 @@ function ActionItem({ action }: { action: AgentAction }) {
             </span>
           )}
         </div>
+      </div>
+    );
+  }
+
+  // ask_user calls render as a question row, never as tool(rawArgs) — covers
+  // both post-fix "Ask" rows and legacy persisted "Ask_user" rows whose arg is
+  // still the raw JSON (R9). No spinner while started: the "needs your input"
+  // prompt below the log is the waiting affordance, and a question that never
+  // completed shouldn't spin forever in a terminal task's history. The
+  // completed row keeps its q-out block, pairing the question with the answer.
+  const question = askUserQuestion(action.tool, action.arg);
+  if (question !== null) {
+    return (
+      <div className="q-act">
+        <div className="q-act-row">
+          <span className="q-act-ic">
+            <MessageCircleQuestion size={13} />
+          </span>
+          <span>
+            <span className="tool">Asked</span>
+            <span className="paren"> — </span>
+            <span className="arg">{question}</span>
+          </span>
+          {cls !== "run" && (
+            <span className={`q-act-stat ${cls}`}>
+              <StatIcon size={13} />
+            </span>
+          )}
+        </div>
+        {cls !== "run" && action.text && <pre className="q-out">{action.text}</pre>}
       </div>
     );
   }
