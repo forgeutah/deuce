@@ -107,6 +107,8 @@ func normalizeTool(name string) string {
 		return "Bash"
 	case "think":
 		return "Think"
+	case "ask_user":
+		return "Ask"
 	case "":
 		return ""
 	default:
@@ -117,6 +119,24 @@ func normalizeTool(name string) string {
 // argKeys are the Pi tool-argument keys we surface as the action's headline
 // argument, in priority order. bash uses "command"; file tools use a path key.
 var argKeys = []string{"command", "path", "file_path", "filePath", "pattern", "url"}
+
+// askUserPlaceholder is the headline arg for an ask_user call whose question
+// can't be extracted. The question must never surface as raw JSON (R9), so the
+// generic compact-JSON fallback is off-limits for this tool.
+const askUserPlaceholder = "(question unavailable)"
+
+// askUserHeadline extracts the question text from an ask_user call's args. The
+// extension schema requires "question" as a string; anything else degrades to a
+// readable placeholder, never the args JSON.
+func askUserHeadline(args map[string]json.RawMessage) string {
+	if v, ok := args["question"]; ok {
+		var s string
+		if err := json.Unmarshal(v, &s); err == nil && strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s)
+		}
+	}
+	return askUserPlaceholder
+}
 
 // headlineArg picks a single human-readable argument string from a tool's args
 // object: a known key if present, otherwise the compact JSON of the whole map
