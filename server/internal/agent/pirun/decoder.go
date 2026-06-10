@@ -134,12 +134,18 @@ func decodeToolStart(line []byte) (Event, error) {
 	if err := json.Unmarshal(line, &p); err != nil {
 		return Event{Kind: KindUnknown, RawType: "tool_execution_start"}, err
 	}
+	// ask_user is question-bearing: surface the question text, never the args
+	// JSON (R9 — a question must not render as a raw tool-call string).
+	arg := headlineArg(p.Args)
+	if strings.EqualFold(p.ToolName, "ask_user") {
+		arg = askUserHeadline(p.Args)
+	}
 	return Event{
 		Kind:       KindToolStarted,
 		RawType:    "tool_execution_start",
 		ToolCallID: p.ToolCallID,
 		Tool:       normalizeTool(p.ToolName),
-		Arg:        headlineArg(p.Args),
+		Arg:        arg,
 	}, nil
 }
 

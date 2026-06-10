@@ -173,11 +173,93 @@ func TestNormalizeTool(t *testing.T) {
 	cases := map[string]string{
 		"bash": "Bash", "read": "Read", "write": "Write", "edit": "Edit",
 		"grep": "Grep", "BASH": "Bash", "custom_tool": "Custom_tool", "": "",
+		"ask_user": "Ask", "Ask_user": "Ask",
 	}
 	for in, want := range cases {
 		if got := normalizeTool(in); got != want {
 			t.Errorf("normalizeTool(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestDecodeAskUserToolStart pins the no-JSON guarantee on the action-log path
+// (R9): an ask_user tool call surfaces the question text as its arg, never the
+// args object dumped as JSON.
+func TestDecodeAskUserToolStart(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+		want string
+	}{
+		{
+			name: "question only",
+			line: `{"type":"tool_execution_start","toolCallId":"t1","toolName":"ask_user","args":{"question":"Which file?"}}`,
+			want: "Which file?",
+		},
+		{
+			name: "question with kind and options",
+			line: `{"type":"tool_execution_start","toolCallId":"t2","toolName":"ask_user","args":{"question":"Which framework?","kind":"select","options":["React","Vue"]}}`,
+			want: "Which framework?",
+		},
+		{
+			name: "JSON-ish question text passes through verbatim",
+			line: `{"type":"tool_execution_start","toolCallId":"t3","toolName":"ask_user","args":{"question":"Use {\"mode\":\"strict\"} here?"}}`,
+			want: `Use {"mode":"strict"} here?`,
+		},
+		{
+			name: "missing question degrades to placeholder",
+			line: `{"type":"tool_execution_start","toolCallId":"t4","toolName":"ask_user","args":{"kind":"confirm"}}`,
+			want: askUserPlaceholder,
+		},
+		{
+			name: "non-string question degrades to placeholder",
+			line: `{"type":"tool_execution_start","toolCallId":"t5","toolName":"ask_user","args":{"question":{"nested":true}}}`,
+			want: askUserPlaceholder,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ev, err := Decode([]byte(tc.line))
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if ev.Kind != KindToolStarted || ev.Tool != "Ask" {
+				t.Fatalf("decoded as kind=%q tool=%q, want tool_started/Ask", ev.Kind, ev.Tool)
+			}
+			if ev.Arg != tc.want {
+				t.Errorf("arg = %q, want %q", ev.Arg, tc.want)
+			}
+			if strings.Contains(ev.Arg, `"question"`) {
+				t.Errorf("arg leaked raw args JSON: %q", ev.Arg)
+			}
+		})
+	}
+}
+
+// TestDecodeAskUserToolEnd: the tool result (the user's answer) rides through
+// unchanged under the normalized name.
+func TestDecodeAskUserToolEnd(t *testing.T) {
+	ev, err := Decode([]byte(`{"type":"tool_execution_end","toolCallId":"t1","toolName":"ask_user","isError":false,"result":{"content":[{"type":"text","text":"Vue"}]}}`))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if ev.Kind != KindToolCompleted || ev.Tool != "Ask" || ev.Output != "Vue" || ev.IsError {
+		t.Errorf("decoded as %+v, want completed Ask with output Vue", ev)
+	}
+}
+
+// TestDecodeOtherToolsKeepJSONFallback: the generic compact-JSON arg fallback
+// is unchanged for tools that aren't question-bearing.
+func TestDecodeOtherToolsKeepJSONFallback(t *testing.T) {
+	ev, err := Decode([]byte(`{"type":"tool_execution_start","toolCallId":"t9","toolName":"custom_tool","args":{"question":"not special here","foo":1}}`))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if ev.Tool != "Custom_tool" {
+		t.Fatalf("tool = %q, want Custom_tool", ev.Tool)
+	}
+	if !strings.Contains(ev.Arg, `"foo":1`) {
+		t.Errorf("generic fallback arg = %q, want compact JSON of all args", ev.Arg)
 	}
 }
 

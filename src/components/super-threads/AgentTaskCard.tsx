@@ -14,7 +14,7 @@ import {
 import type { AgentTask } from "@/types";
 import { DEUCE } from "@/lib/deuce";
 import { AgentAvatar, StopButton, TypingDots } from "./atoms";
-import { stripMention } from "./utils";
+import { askUserQuestion, stripMention } from "./utils";
 
 export function AgentTaskCard({
   sessionId,
@@ -29,6 +29,9 @@ export function AgentTaskCard({
 }) {
   const state = task.state;
   const latest = task.actions[task.actions.length - 1];
+  // An in-flight ask_user call shows its question on the live line, never the
+  // raw tool args (R9). Covers post-fix "Ask" rows and legacy "Ask_user" rows.
+  const latestQuestion = latest ? askUserQuestion(latest.tool, latest.arg) : null;
 
   return (
     <div
@@ -56,10 +59,16 @@ export function AgentTaskCard({
             <div className="tc-live">
               <span className="pip" />
               <span className="tool">
-                {latest?.tool === "Think" ? "Thinking" : latest?.tool ?? "Starting"}
+                {latest?.tool === "Think"
+                  ? "Thinking"
+                  : latestQuestion !== null
+                    ? "Asked"
+                    : latest?.tool ?? "Starting"}
               </span>
               <span className="arg">
-                {latest && latest.tool !== "Think" ? latest.arg : ""}
+                {latest && latest.tool !== "Think"
+                  ? latestQuestion ?? latest.arg
+                  : ""}
               </span>
             </div>
             <div className="tc-typing">
