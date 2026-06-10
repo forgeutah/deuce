@@ -1,7 +1,7 @@
 ---
 title: "refactor: Collapse multi-agent model into a single @deuce agent"
 type: refactor
-status: active
+status: completed
 date: 2026-06-09
 ---
 
