@@ -33,11 +33,12 @@ WHERE author_type = 'agent'
 --    when actually implemented).
 DROP TABLE session_agents;
 
--- 5. Reshape agents to the single built-in row: id + name + system_prompt.
---    Role/color render from a frontend constant; provider/model are owned by
---    DEUCE_PI_PROVIDER / DEUCE_PI_MODEL.
+-- 5. Reshape agents to the single built-in row: id + system_prompt. Name and
+--    color render from constants (agent.DeuceAgentName / the frontend DEUCE
+--    constant); provider/model are owned by DEUCE_PI_PROVIDER / DEUCE_PI_MODEL.
 DELETE FROM agents;
 ALTER TABLE agents
+    DROP COLUMN name,
     DROP COLUMN role,
     DROP COLUMN color,
     DROP COLUMN color_muted,
@@ -47,8 +48,8 @@ ALTER TABLE agents
     DROP COLUMN deleted_at,
     DROP COLUMN created_at,
     DROP COLUMN updated_at;
-INSERT INTO agents (id, name, system_prompt)
-VALUES ('00000000-0000-0000-0000-00000000000d', 'deuce', '');
+INSERT INTO agents (id, system_prompt)
+VALUES ('00000000-0000-0000-0000-00000000000d', '');
 
 -- 6. Mention plumbing is gone — the server parses @deuce from message content.
 ALTER TABLE messages DROP COLUMN mentions;
@@ -68,6 +69,7 @@ ALTER TABLE messages ADD COLUMN mentions TEXT[] NOT NULL DEFAULT '{}';
 -- (002 seed values + 004's empty system_prompt defaults).
 DELETE FROM agents;
 ALTER TABLE agents
+    ADD COLUMN name TEXT NOT NULL DEFAULT '',
     ADD COLUMN role TEXT NOT NULL DEFAULT '',
     ADD COLUMN color TEXT NOT NULL DEFAULT '',
     ADD COLUMN color_muted TEXT NOT NULL DEFAULT '',

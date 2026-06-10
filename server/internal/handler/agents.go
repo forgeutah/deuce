@@ -5,12 +5,11 @@ import (
 	"net/http"
 )
 
-// agentSettingsResponse is the GET/PUT /api/agent shape: the single built-in
-// deuce agent's identity and configurable system prompt. Name/color render
-// from the frontend DEUCE constant; only the prompt is editable.
+// agentSettingsResponse is the GET/PUT /api/agent shape: deuce's configurable
+// system prompt. Identity (id/name/color) renders from constants
+// (agent.DeuceAgentID / DeuceAgentName, the frontend DEUCE constant) and is
+// not part of the contract.
 type agentSettingsResponse struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
 	SystemPrompt string `json:"systemPrompt"`
 }
 
@@ -22,9 +21,7 @@ func (h *Handler) GetAgentSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to load agent settings")
 		return
 	}
-	writeJSON(w, http.StatusOK, agentSettingsResponse{
-		ID: ag.ID.String(), Name: ag.Name, SystemPrompt: ag.SystemPrompt,
-	})
+	writeJSON(w, http.StatusOK, agentSettingsResponse{SystemPrompt: ag.SystemPrompt})
 }
 
 type updateAgentSettingsRequest struct {
@@ -54,7 +51,5 @@ func (h *Handler) UpdateAgentSettings(w http.ResponseWriter, r *http.Request) {
 		h.runtime.RecycleIdleProcesses()
 	}
 
-	writeJSON(w, http.StatusOK, agentSettingsResponse{
-		ID: ag.ID.String(), Name: ag.Name, SystemPrompt: ag.SystemPrompt,
-	})
+	writeJSON(w, http.StatusOK, agentSettingsResponse{SystemPrompt: ag.SystemPrompt})
 }

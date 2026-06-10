@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -115,26 +116,16 @@ func (s *fakeStore) NextQueuedTask(_ context.Context, sessionID string) (string,
 func (s *fakeStore) QueuedTaskIDs(_ context.Context, sessionID string) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	type ot struct {
-		id    string
-		order int
-	}
-	var queued []ot
+	var queued []*fakeTask
 	for _, t := range s.tasks {
 		if t.sessionID == sessionID && t.state == StateQueued {
-			queued = append(queued, ot{t.id, t.order})
+			queued = append(queued, t)
 		}
 	}
+	sort.Slice(queued, func(i, j int) bool { return queued[i].order < queued[j].order })
 	ids := make([]string, 0, len(queued))
-	for len(queued) > 0 {
-		bi := 0
-		for i := range queued {
-			if queued[i].order < queued[bi].order {
-				bi = i
-			}
-		}
-		ids = append(ids, queued[bi].id)
-		queued = append(queued[:bi], queued[bi+1:]...)
+	for _, t := range queued {
+		ids = append(ids, t.id)
 	}
 	return ids, nil
 }

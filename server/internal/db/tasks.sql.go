@@ -88,6 +88,17 @@ func (q *Queries) CompleteAction(ctx context.Context, arg CompleteActionParams) 
 	return err
 }
 
+const countQueuedTasks = `-- name: CountQueuedTasks :one
+SELECT count(*) FROM tasks WHERE session_id = $1 AND state = 'queued'
+`
+
+func (q *Queries) CountQueuedTasks(ctx context.Context, sessionID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countQueuedTasks, sessionID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createTask = `-- name: CreateTask :one
 INSERT INTO tasks (session_id, requested_by, anchor_message_id, prompt, state, seq)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -180,6 +191,69 @@ func (q *Queries) ForceResolveOpenActions(ctx context.Context, taskID uuid.UUID)
 	return err
 }
 
+const getActiveTaskID = `-- name: GetActiveTaskID :many
+
+SELECT id FROM tasks
+WHERE session_id = $1 AND state IN ('running', 'awaiting_input')
+ORDER BY created_at ASC LIMIT 1
+`
+
+// The scheduler's hot-path lookups below are filtered server-side against the
+// (session_id, state) index from migration 013 instead of walking the
+// session's whole task history.
+// The session's running-or-awaiting task (at most one, R11). LIMIT 1 + :many
+// instead of :one so "no active task" is an empty slice, not an error.
+func (q *Queries) GetActiveTaskID(ctx context.Context, sessionID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, getActiveTaskID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getNextQueuedTask = `-- name: GetNextQueuedTask :many
+SELECT id, prompt FROM tasks
+WHERE session_id = $1 AND state = 'queued'
+ORDER BY created_at ASC LIMIT 1
+`
+
+type GetNextQueuedTaskRow struct {
+	ID     uuid.UUID `json:"id"`
+	Prompt string    `json:"prompt"`
+}
+
+func (q *Queries) GetNextQueuedTask(ctx context.Context, sessionID uuid.UUID) ([]GetNextQueuedTaskRow, error) {
+	rows, err := q.db.Query(ctx, getNextQueuedTask, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetNextQueuedTaskRow{}
+	for rows.Next() {
+		var i GetNextQueuedTaskRow
+		if err := rows.Scan(&i.ID, &i.Prompt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getTask = `-- name: GetTask :one
 SELECT id, session_id, requested_by, anchor_message_id, prompt, state, seq, pending_question, reply, work, created_at, updated_at, pending_question_kind, pending_question_options FROM tasks WHERE id = $1
 `
@@ -223,6 +297,32 @@ func (q *Queries) IsSessionMember(ctx context.Context, arg IsSessionMemberParams
 	var is_member bool
 	err := row.Scan(&is_member)
 	return is_member, err
+}
+
+const listQueuedTaskIDs = `-- name: ListQueuedTaskIDs :many
+SELECT id FROM tasks
+WHERE session_id = $1 AND state = 'queued'
+ORDER BY created_at ASC
+`
+
+func (q *Queries) ListQueuedTaskIDs(ctx context.Context, sessionID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listQueuedTaskIDs, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listSessionTaskActions = `-- name: ListSessionTaskActions :many
@@ -272,8 +372,7 @@ const listSessionTasks = `-- name: ListSessionTasks :many
 SELECT id, session_id, requested_by, anchor_message_id, prompt, state, seq, pending_question, reply, work, created_at, updated_at, pending_question_kind, pending_question_options FROM tasks WHERE session_id = $1 ORDER BY created_at ASC
 `
 
-// A session's tasks in creation order — drives queue-position derivation (R12)
-// and promotion (R13) in the scheduler, plus the snapshot read.
+// A session's tasks in creation order — the snapshot read.
 func (q *Queries) ListSessionTasks(ctx context.Context, sessionID uuid.UUID) ([]Task, error) {
 	rows, err := q.db.Query(ctx, listSessionTasks, sessionID)
 	if err != nil {

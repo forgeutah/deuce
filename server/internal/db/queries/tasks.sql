@@ -51,9 +51,32 @@ WHERE task_id = $1 AND call_id = $2;
 UPDATE task_actions SET status = 'interrupted' WHERE task_id = $1 AND status = 'started';
 
 -- name: ListSessionTasks :many
--- A session's tasks in creation order — drives queue-position derivation (R12)
--- and promotion (R13) in the scheduler, plus the snapshot read.
+-- A session's tasks in creation order — the snapshot read.
 SELECT * FROM tasks WHERE session_id = $1 ORDER BY created_at ASC;
+
+-- The scheduler's hot-path lookups below are filtered server-side against the
+-- (session_id, state) index from migration 013 instead of walking the
+-- session's whole task history.
+
+-- name: GetActiveTaskID :many
+-- The session's running-or-awaiting task (at most one, R11). LIMIT 1 + :many
+-- instead of :one so "no active task" is an empty slice, not an error.
+SELECT id FROM tasks
+WHERE session_id = $1 AND state IN ('running', 'awaiting_input')
+ORDER BY created_at ASC LIMIT 1;
+
+-- name: GetNextQueuedTask :many
+SELECT id, prompt FROM tasks
+WHERE session_id = $1 AND state = 'queued'
+ORDER BY created_at ASC LIMIT 1;
+
+-- name: ListQueuedTaskIDs :many
+SELECT id FROM tasks
+WHERE session_id = $1 AND state = 'queued'
+ORDER BY created_at ASC;
+
+-- name: CountQueuedTasks :one
+SELECT count(*) FROM tasks WHERE session_id = $1 AND state = 'queued';
 
 -- name: ListTaskActions :many
 SELECT * FROM task_actions WHERE task_id = $1 ORDER BY seq ASC, created_at ASC;

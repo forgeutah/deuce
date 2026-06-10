@@ -214,13 +214,13 @@ func (r *Runtime) RouteOrEnqueue(ctx context.Context, p EnqueueParams) (RouteRes
 				// even if the DB resolve below fails (the next event reconciles).
 				r.clearPending(taskID)
 				r.exitAwaiting(key, taskID)
-				seq, rerr := r.store.ResolveAwaitingInput(ctx, key.SessionID(), taskID)
+				seq, rerr := r.store.ResolveAwaitingInput(ctx, string(key), taskID)
 				if rerr != nil {
 					slog.Error("runtime: resolve awaiting input", "task", taskID, "error", rerr)
 				} else {
 					r.broadcastTask(ws.TypeTaskStarted, ws.TaskEventPayload{
 						Seq: seq, TaskID: taskID, State: StateRunning,
-					}, key.SessionID())
+					}, string(key))
 				}
 				return RouteFed, nil
 			}
@@ -252,13 +252,13 @@ func (r *Runtime) promote(ctx context.Context, key pirun.Key) {
 
 // promoteLocked assumes the per-key lock is held.
 func (r *Runtime) promoteLocked(ctx context.Context, key pirun.Key) {
-	if _, busy, err := r.store.RunningTask(ctx, key.SessionID()); err != nil {
+	if _, busy, err := r.store.RunningTask(ctx, string(key)); err != nil {
 		slog.Error("runtime: running-task lookup", "key", key.String(), "error", err)
 		return
 	} else if busy {
 		return // one running task per session (R11)
 	}
-	taskID, prompt, ok, err := r.store.NextQueuedTask(ctx, key.SessionID())
+	taskID, prompt, ok, err := r.store.NextQueuedTask(ctx, string(key))
 	if err != nil {
 		slog.Error("runtime: next-queued lookup", "key", key.String(), "error", err)
 		return
@@ -267,7 +267,7 @@ func (r *Runtime) promoteLocked(ctx context.Context, key pirun.Key) {
 		return
 	}
 
-	seq, err := r.store.MarkRunning(ctx, key.SessionID(), taskID)
+	seq, err := r.store.MarkRunning(ctx, string(key), taskID)
 	if err != nil {
 		slog.Error("runtime: mark running", "task", taskID, "error", err)
 		return
@@ -275,7 +275,7 @@ func (r *Runtime) promoteLocked(ctx context.Context, key pirun.Key) {
 	r.setRunning(key, taskID)
 	r.broadcastTask(ws.TypeTaskStarted, ws.TaskEventPayload{
 		Seq: seq, TaskID: taskID, State: StateRunning,
-	}, key.SessionID())
+	}, string(key))
 
 	// Ensure the Pi process + its consumer, then send the prompt. Continuity
 	// across a process restart is a tolerated v1 degradation — within a
@@ -356,27 +356,27 @@ func (r *Runtime) translate(key pirun.Key, ev pirun.Event) {
 	ctx := r.ctx
 	switch ev.Kind {
 	case pirun.KindToolStarted:
-		seq, err := r.store.AppendActionStarted(ctx, key.SessionID(), taskID, ev.ToolCallID, ev.Tool, ev.Arg)
+		seq, err := r.store.AppendActionStarted(ctx, string(key), taskID, ev.ToolCallID, ev.Tool, ev.Arg)
 		if err != nil {
 			slog.Error("runtime: append action", "task", taskID, "error", err)
 			return
 		}
 		r.broadcastAction(ws.TypeActionStarted, ws.ActionEventPayload{
 			Seq: seq, TaskID: taskID, CallID: ev.ToolCallID, Tool: ev.Tool, Arg: ev.Arg,
-		}, key.SessionID())
+		}, string(key))
 	case pirun.KindToolCompleted:
-		seq, err := r.store.CompleteAction(ctx, key.SessionID(), taskID, ev.ToolCallID, ev.Output, ev.IsError)
+		seq, err := r.store.CompleteAction(ctx, string(key), taskID, ev.ToolCallID, ev.Output, ev.IsError)
 		if err != nil {
 			slog.Error("runtime: complete action", "task", taskID, "error", err)
 			return
 		}
 		r.broadcastAction(ws.TypeActionCompleted, ws.ActionEventPayload{
 			Seq: seq, TaskID: taskID, CallID: ev.ToolCallID, Tool: ev.Tool, Text: ev.Output, IsError: ev.IsError,
-		}, key.SessionID())
+		}, string(key))
 	case pirun.KindAssistantText:
 		r.appendReply(taskID, ev.Text)
 	case pirun.KindAwaitingInput:
-		seq, err := r.store.SetAwaitingInput(ctx, key.SessionID(), taskID, ev.Prompt, ev.RequestKind, ev.Options)
+		seq, err := r.store.SetAwaitingInput(ctx, string(key), taskID, ev.Prompt, ev.RequestKind, ev.Options)
 		if err != nil {
 			slog.Error("runtime: set awaiting input", "task", taskID, "error", err)
 			return
@@ -386,7 +386,7 @@ func (r *Runtime) translate(key pirun.Key, ev pirun.Event) {
 		r.broadcastTask(ws.TypeTaskAwaitingInput, ws.TaskEventPayload{
 			Seq: seq, TaskID: taskID, State: StateAwaitingInput,
 			PendingQuestion: ev.Prompt, PendingQuestionKind: ev.RequestKind, PendingQuestionOptions: ev.Options,
-		}, key.SessionID())
+		}, string(key))
 	case pirun.KindRunCompleted:
 		unlock := r.keys.lock(key)
 		// Pi finished cleanly: reuse the live process for the next task (promote
@@ -442,7 +442,7 @@ func (r *Runtime) finalizeLocked(ctx context.Context, key pirun.Key, taskID, sta
 	// (the ask-user extension didn't fire), rewrite it to the plain question
 	// before it is persisted, broadcast, and posted to chat (R9/R11/R12).
 	reply = sanitizeNarratedQuestion(reply)
-	seq, err := r.store.FinishTask(ctx, key.SessionID(), taskID, state, reply)
+	seq, err := r.store.FinishTask(ctx, string(key), taskID, state, reply)
 	if err != nil {
 		slog.Error("runtime: finish task", "task", taskID, "state", state, "error", err)
 		return
@@ -458,7 +458,7 @@ func (r *Runtime) finalizeLocked(ctx context.Context, key pirun.Key, taskID, sta
 	}
 	r.broadcastTask(ws.TypeTaskCompleted, ws.TaskEventPayload{
 		Seq: seq, TaskID: taskID, State: state, Status: state, Reply: reply,
-	}, key.SessionID())
+	}, string(key))
 	slog.Info("runtime: task finalized", "key", key.String(), "task", taskID, "state", state, "replyLen", len(reply))
 	// Surface the result in the existing chat. For a done task with no streamed
 	// text (e.g. the model produced only tool calls, or the run errored without
@@ -469,7 +469,7 @@ func (r *Runtime) finalizeLocked(ctx context.Context, key pirun.Key, taskID, sta
 			msg = "(The agent finished without a text response.)"
 		}
 		if msg != "" {
-			r.replyPoster(key.SessionID(), msg)
+			r.replyPoster(string(key), msg)
 		}
 	}
 }
@@ -495,20 +495,20 @@ func (r *Runtime) CancelSession(ctx context.Context, sessionID string) {
 // chat notice for the running task is enough; queued-card state changes carry
 // the rest. Assumes the per-key lock is held.
 func (r *Runtime) cancelQueuedLocked(ctx context.Context, key pirun.Key) {
-	ids, err := r.store.QueuedTaskIDs(ctx, key.SessionID())
+	ids, err := r.store.QueuedTaskIDs(ctx, string(key))
 	if err != nil {
 		slog.Error("runtime: queued-task lookup", "key", key.String(), "error", err)
 		return
 	}
 	for _, taskID := range ids {
-		seq, err := r.store.FinishTask(ctx, key.SessionID(), taskID, StateCancelled, "")
+		seq, err := r.store.FinishTask(ctx, string(key), taskID, StateCancelled, "")
 		if err != nil {
 			slog.Error("runtime: cancel queued task", "task", taskID, "error", err)
 			continue
 		}
 		r.broadcastTask(ws.TypeTaskCompleted, ws.TaskEventPayload{
 			Seq: seq, TaskID: taskID, State: StateCancelled, Status: StateCancelled,
-		}, key.SessionID())
+		}, string(key))
 	}
 }
 
@@ -696,8 +696,8 @@ func (r *Runtime) broadcastAction(typ string, p ws.ActionEventPayload, sessionID
 	r.bc.BroadcastToSession(sessionID, msg, nil)
 }
 
-// keyedMutex provides a mutex per key so transitions on distinct (session,
-// agent) keys run concurrently while a single key stays serial.
+// keyedMutex provides a mutex per session key so transitions on distinct
+// sessions run concurrently while a single session stays serial.
 type keyedMutex struct {
 	mu sync.Mutex
 	m  map[pirun.Key]*sync.Mutex

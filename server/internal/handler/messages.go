@@ -50,7 +50,23 @@ func toMessageResponse(m db.Message) messageResponse {
 // (R5). The left guard (start-of-string or a non-word character) keeps email
 // addresses like clint@deuce.dev from triggering; the trailing \b keeps
 // near-misses like @deucebot from triggering. Case-insensitive.
-var deuceMentionRE = regexp.MustCompile(`(?i)(^|\W)@deuce\b`)
+var deuceMentionRE = regexp.MustCompile(`(?i)(^|\W)@` + agentpkg.DeuceAgentName + `\b`)
+
+// gateWorkspaceForAgent reports whether the session's workspace can run the
+// agent, posting the appropriate system notice when it cannot. Shared by the
+// chat mention path and the drawer steer path (R8) so the gate and its
+// user-facing copy cannot drift.
+func (h *Handler) gateWorkspaceForAgent(sessionID uuid.UUID, workspaceStatus string) bool {
+	switch workspaceStatus {
+	case "ready":
+		return true
+	case "starting":
+		h.postSystemMessage(sessionID, "Workspace is still starting — your agent request will run when it's ready.")
+	case "failed", "suspended":
+		h.postSystemMessage(sessionID, "Workspace is not available. Please restart the workspace before using the agent.")
+	}
+	return false
+}
 
 // isStopCommand reports whether a message is the exact /stop command (R6).
 // Exact match only — "@deuce make the flicker stop" must enqueue work, not
@@ -203,23 +219,16 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	// @deuce mention → enqueue a task through the Pi runtime (R5).
 	if deuceMentionRE.MatchString(req.Content) && h.runtime != nil {
 		session, err := h.queries.GetSession(r.Context(), sessionID)
-		if err == nil {
-			switch session.WorkspaceStatus {
-			case "starting":
-				h.postSystemMessage(sessionID, "Workspace is still starting — your agent request will run when it's ready.")
-			case "failed", "suspended":
-				h.postSystemMessage(sessionID, "Workspace is not available. Please restart the workspace before using the agent.")
-			case "ready":
-				if _, err := h.runtime.Enqueue(r.Context(), agentpkg.EnqueueParams{
-					SessionID:       sessionID.String(),
-					RequestedBy:     userID.String(),
-					AnchorMessageID: msg.ID.String(),
-					Prompt:          req.Content,
-					WorkspaceID:     session.Name,
-				}); err != nil {
-					slog.Error("failed to enqueue agent task", "error", err)
-					h.postSystemMessage(sessionID, "Could not start the agent. Please try again.")
-				}
+		if err == nil && h.gateWorkspaceForAgent(sessionID, session.WorkspaceStatus) {
+			if _, err := h.runtime.Enqueue(r.Context(), agentpkg.EnqueueParams{
+				SessionID:       sessionID.String(),
+				RequestedBy:     userID.String(),
+				AnchorMessageID: msg.ID.String(),
+				Prompt:          req.Content,
+				WorkspaceID:     session.Name,
+			}); err != nil {
+				slog.Error("failed to enqueue agent task", "error", err)
+				h.postSystemMessage(sessionID, "Could not start the agent. Please try again.")
 			}
 		}
 	}
@@ -300,4 +309,3 @@ func (h *Handler) postSystemMessage(sessionID uuid.UUID, content string) {
 	wsMsg, _ := ws.NewServerMessage(ws.TypeNewMessage, sessionID.String(), toMessageResponse(msg))
 	h.hub.BroadcastToSession(sessionID.String(), wsMsg, nil)
 }
-

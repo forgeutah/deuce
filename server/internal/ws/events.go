@@ -68,9 +68,9 @@ type TaskEventPayload struct {
 
 // ActionEventPayload is the JSON payload for action_started / action_completed.
 type ActionEventPayload struct {
-	Seq    int64  `json:"seq"`
-	TaskID string `json:"taskId"`
-	CallID string `json:"callId"`
+	Seq     int64  `json:"seq"`
+	TaskID  string `json:"taskId"`
+	CallID  string `json:"callId"`
 	Tool    string `json:"tool,omitempty"`
 	Arg     string `json:"arg,omitempty"`
 	Text    string `json:"text,omitempty"`

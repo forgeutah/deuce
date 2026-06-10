@@ -22,7 +22,6 @@ type ActivityItem struct {
 
 type Agent struct {
 	ID           uuid.UUID `json:"id"`
-	Name         string    `json:"name"`
 	SystemPrompt string    `json:"system_prompt"`
 }
 

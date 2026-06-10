@@ -81,20 +81,13 @@ func (h *Handler) handleSteer(c *ws.Client, sessionID, message string) {
 	}
 
 	session, err := h.queries.GetSession(ctx, sid)
-	if err != nil {
+	if err != nil || !h.gateWorkspaceForAgent(sid, session.WorkspaceStatus) {
 		return
 	}
-	switch session.WorkspaceStatus {
-	case "starting":
-		h.postSystemMessage(sid, "Workspace is still starting — your agent request will run when it's ready.")
-	case "failed", "suspended":
-		h.postSystemMessage(sid, "Workspace is not available. Please restart the workspace before using the agent.")
-	case "ready":
-		_, _ = h.runtime.RouteOrEnqueue(ctx, agentpkg.EnqueueParams{
-			SessionID:   sessionID,
-			RequestedBy: c.UserID,
-			Prompt:      message,
-			WorkspaceID: session.Name,
-		})
-	}
+	_, _ = h.runtime.RouteOrEnqueue(ctx, agentpkg.EnqueueParams{
+		SessionID:   sessionID,
+		RequestedBy: c.UserID,
+		Prompt:      message,
+		WorkspaceID: session.Name,
+	})
 }

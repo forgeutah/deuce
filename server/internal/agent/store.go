@@ -64,6 +64,11 @@ type Store interface {
 // stays reserved as the system-notice author sentinel.
 const DeuceAgentID = "00000000-0000-0000-0000-00000000000d"
 
+// DeuceAgentName is the agent's name — the @mention token the server detects
+// and the display name the frontend DEUCE constant mirrors. The DB row does
+// not carry a name; this constant is the single server-side source.
+const DeuceAgentName = "deuce"
+
 // EnqueueParams describes a new task to enqueue.
 type EnqueueParams struct {
 	SessionID       string

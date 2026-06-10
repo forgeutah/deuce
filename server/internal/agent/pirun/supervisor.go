@@ -17,9 +17,6 @@ type Key string
 
 func (k Key) String() string { return string(k) }
 
-// SessionID returns the session the process belongs to.
-func (k Key) SessionID() string { return string(k) }
-
 // Handle is one launched Pi process's I/O plus lifecycle control. The real
 // implementation (devpodLauncher) wraps `devpod ssh --command "pi --mode rpc"`;
 // tests inject an in-memory fake. Stop must signal the process group
@@ -117,7 +114,7 @@ func (p *Process) resetIdle() {
 
 // Supervisor owns the lifecycle of all Pi processes. Modeled on sshproxy.Server:
 // a base context cancelled on Shutdown, a WaitGroup draining the per-process
-// pumps, and a registry keyed by (session, agent).
+// pumps, and a registry keyed by session.
 type Supervisor struct {
 	launcher Launcher
 	apiKey   string
@@ -318,6 +315,11 @@ func (s *Supervisor) Stop(key Key) {
 	if !ok {
 		return
 	}
+	stopHandle(p)
+}
+
+// stopHandle signals one process (SIGTERM→SIGKILL) bounded by the stop grace.
+func stopHandle(p *Process) {
 	ctx, cancel := context.WithTimeout(context.Background(), stopGrace+2*time.Second)
 	defer cancel()
 	_ = p.h.Stop(ctx)
@@ -334,13 +336,15 @@ func (s *Supervisor) LiveKeys() []Key {
 	return keys
 }
 
-// StopAndForget removes the registry entry synchronously, THEN signals the
-// process. Deregistration before the signal means a racing Ensure launches a
-// fresh process instead of adopting the dying one (a Stop'd process stays in
-// the registry for seconds until the pump reaps it over devpod ssh). Used by
-// the prompt-edit recycle path. The pump's registry delete is guarded by
-// identity (cur == p), so the double-remove is safe; the Exit signal still
-// fires so the scheduler can promote.
+// StopAndForget removes the registry entry synchronously, then signals the
+// process WITHOUT waiting for it to die. Deregistration before the signal
+// means a racing Ensure launches a fresh process instead of adopting the
+// dying one (a Stop'd process stays in the registry for seconds until the
+// pump reaps it over devpod ssh); the async signal keeps the caller — the
+// prompt-edit recycle inside an HTTP handler — from blocking on the stop
+// grace per process. The pump's registry delete is guarded by identity
+// (cur == p), so the double-remove is safe; the Exit signal still fires so
+// the scheduler can promote.
 func (s *Supervisor) StopAndForget(key Key) {
 	s.mu.Lock()
 	p, ok := s.procs[key]
@@ -351,9 +355,7 @@ func (s *Supervisor) StopAndForget(key Key) {
 	if !ok {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), stopGrace+2*time.Second)
-	defer cancel()
-	_ = p.h.Stop(ctx)
+	go stopHandle(p)
 }
 
 // Shutdown stops every process and waits for the pumps to drain, bounded by ctx.

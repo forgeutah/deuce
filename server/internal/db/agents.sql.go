@@ -10,26 +10,27 @@ import (
 )
 
 const getDeuceAgent = `-- name: GetDeuceAgent :one
-SELECT id, name, system_prompt FROM agents LIMIT 1
+SELECT id, system_prompt FROM agents LIMIT 1
 `
 
 // The agents table holds exactly one row — the built-in "deuce" agent
-// (migration 013). Single-row read backs GET /api/agent and the runtime's
-// launch-time system-prompt fetch.
+// (migration 013; id + system_prompt only, identity renders from constants).
+// Single-row read backs GET /api/agent and the runtime's launch-time
+// system-prompt fetch.
 func (q *Queries) GetDeuceAgent(ctx context.Context) (Agent, error) {
 	row := q.db.QueryRow(ctx, getDeuceAgent)
 	var i Agent
-	err := row.Scan(&i.ID, &i.Name, &i.SystemPrompt)
+	err := row.Scan(&i.ID, &i.SystemPrompt)
 	return i, err
 }
 
 const updateDeuceSystemPrompt = `-- name: UpdateDeuceSystemPrompt :one
-UPDATE agents SET system_prompt = $1 RETURNING id, name, system_prompt
+UPDATE agents SET system_prompt = $1 RETURNING id, system_prompt
 `
 
 func (q *Queries) UpdateDeuceSystemPrompt(ctx context.Context, systemPrompt string) (Agent, error) {
 	row := q.db.QueryRow(ctx, updateDeuceSystemPrompt, systemPrompt)
 	var i Agent
-	err := row.Scan(&i.ID, &i.Name, &i.SystemPrompt)
+	err := row.Scan(&i.ID, &i.SystemPrompt)
 	return i, err
 }
