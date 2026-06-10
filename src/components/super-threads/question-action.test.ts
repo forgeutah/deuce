@@ -1,9 +1,5 @@
 // askUserQuestion — display extraction for ask_user tool actions (R9: a
 // question never renders as raw JSON in the action log or task card).
-//
-// NOTE: The frontend has no test runner wired up yet (see agent-runs.test.ts).
-// These Vitest-style specs capture the intended behavior and run as soon as a
-// runner is added.
 
 import { describe, expect, it } from "vitest";
 
@@ -54,6 +50,20 @@ describe("askUserQuestion", () => {
 
   it("degrades a legacy arg with a non-string question to a readable label", () => {
     expect(askUserQuestion("Ask_user", '{"question":{"nested":true}}')).toBe(
+      "(question unavailable)",
+    );
+  });
+
+  it("degrades an Ask row with a missing or empty arg to the readable label", () => {
+    // A synthesized row (action_completed seen without its action_started)
+    // carries no arg.
+    expect(askUserQuestion("Ask", undefined)).toBe("(question unavailable)");
+    expect(askUserQuestion("Ask", "")).toBe("(question unavailable)");
+    expect(askUserQuestion("Ask", "   ")).toBe("(question unavailable)");
+  });
+
+  it("degrades an Ask_user row with a missing arg, never throws", () => {
+    expect(askUserQuestion("Ask_user", undefined)).toBe(
       "(question unavailable)",
     );
   });

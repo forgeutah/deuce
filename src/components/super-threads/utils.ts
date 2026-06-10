@@ -15,11 +15,18 @@ export function stripMention(text: string): string {
 //   - "Ask_user": legacy persisted rows whose arg is the raw args object
 //     (`{"question":"..."}`); parse it for the question, degrading to a
 //     readable label when the JSON is truncated or the key is missing.
-export function askUserQuestion(tool: string, arg: string): string | null {
-  if (tool === "Ask") return arg;
+// arg can be undefined (a synthesized row from an action_completed seen
+// without its action_started carries no arg) — degrade to the label.
+export function askUserQuestion(
+  tool: string,
+  arg: string | undefined,
+): string | null {
+  if (tool === "Ask") {
+    return arg && arg.trim() !== "" ? arg : "(question unavailable)";
+  }
   if (tool !== "Ask_user") return null;
   try {
-    const parsed: unknown = JSON.parse(arg);
+    const parsed: unknown = JSON.parse(arg ?? "");
     if (parsed && typeof parsed === "object") {
       const q = (parsed as { question?: unknown }).question;
       if (typeof q === "string" && q.trim() !== "") return q.trim();
