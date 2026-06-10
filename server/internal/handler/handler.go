@@ -24,11 +24,8 @@ type Handler struct {
 	githubToken string
 	workspaces  *workspace.Manager
 	terminals   *terminal.Manager
-	executor    *agent.Executor
-	agentQueue  *agent.Queue
-	// runtime is the Pi-harness engine (KTD11). Non-nil when
-	// DEUCE_AGENT_HARNESS=pi (default); nil in legacy "claude" mode, where the
-	// executor/agentQueue path runs instead. Installed via SetRuntime.
+	// runtime is the Pi-harness engine (KTD11). Installed via SetRuntime;
+	// nil only in tests that don't wire it.
 	runtime        *agent.Runtime
 	wsOrigins      []string
 	publicHostname string
@@ -72,7 +69,7 @@ func (h *Handler) WaitWorkspaceActions(ctx context.Context) error {
 // header in dev; required-in-proxy is enforced by config.Validate).
 // sshListenAddr is used to derive the URI port. sshAvailable lets main.go
 // flip the SSH state; nil means always-available (test default).
-func New(queries *db.Queries, pool *pgxpool.Pool, hub *ws.Hub, githubToken string, wm *workspace.Manager, tm *terminal.Manager, exec *agent.Executor, aq *agent.Queue, wsOrigins []string, publicHostname, sshListenAddr string) *Handler {
+func New(queries *db.Queries, pool *pgxpool.Pool, hub *ws.Hub, githubToken string, wm *workspace.Manager, tm *terminal.Manager, wsOrigins []string, publicHostname, sshListenAddr string) *Handler {
 	return &Handler{
 		queries:        queries,
 		pool:           pool,
@@ -80,8 +77,6 @@ func New(queries *db.Queries, pool *pgxpool.Pool, hub *ws.Hub, githubToken strin
 		githubToken:    githubToken,
 		workspaces:     wm,
 		terminals:      tm,
-		executor:       exec,
-		agentQueue:     aq,
 		wsOrigins:      wsOrigins,
 		publicHostname: publicHostname,
 		sshListenAddr:  sshListenAddr,

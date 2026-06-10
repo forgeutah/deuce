@@ -27,14 +27,6 @@ interface GitHubRepo {
   defaultBranch: string;
 }
 
-interface AgentPreset {
-  id: string;
-  name: string;
-  role: string;
-  color: string;
-  description: string;
-}
-
 function slugify(input: string): string {
   return input
     .toLowerCase()
@@ -74,11 +66,6 @@ export function CreateSessionDialog({
   const [selectedRepo, setSelectedRepo] = useState<GitHubRepo | null>(null);
   const [repoSearch, setRepoSearch] = useState("");
 
-  // Agents
-  const [agents, setAgents] = useState<AgentPreset[]>([]);
-  const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(
-    new Set(),
-  );
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -98,7 +85,7 @@ export function CreateSessionDialog({
     );
   }, [repos, repoSearch]);
 
-  // Load orgs and agents when dialog opens
+  // Load orgs when dialog opens
   useEffect(() => {
     if (!open) return;
 
@@ -117,14 +104,6 @@ export function CreateSessionDialog({
       })
       .catch(() => {})
       .finally(() => setOrgsLoading(false));
-
-    api.listAgents().then((agentList) => {
-      setAgents(agentList);
-      const coder = agentList.find((a: AgentPreset) => a.role === "coder");
-      if (coder) {
-        setSelectedAgentIds(new Set([coder.id]));
-      }
-    });
   }, [open]);
 
   // Load repos when org changes
@@ -147,15 +126,6 @@ export function CreateSessionDialog({
       .finally(() => setReposLoading(false));
   }, [selectedOrg]);
 
-  const toggleAgent = (id: string) => {
-    setSelectedAgentIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
   const handleCreate = async () => {
     if (!slugValid || !selectedRepo) return;
     setCreating(true);
@@ -174,7 +144,6 @@ export function CreateSessionDialog({
         description: description.trim(),
         projectId,
         repoUrl: selectedRepo.cloneUrl,
-        agentIds: Array.from(selectedAgentIds),
         memberIds: [],
       });
 
@@ -197,7 +166,6 @@ export function CreateSessionDialog({
     setSelectedOrg(null);
     setSelectedRepo(null);
     setRepoSearch("");
-    setSelectedAgentIds(new Set());
     setError(null);
   };
 
@@ -410,40 +378,6 @@ export function CreateSessionDialog({
                 Selected: {selectedRepo.fullName}
               </div>
             )}
-          </div>
-
-          {/* Agents */}
-          <div>
-            <label className="mb-1 block text-xs font-medium text-foreground-muted">
-              Agents
-            </label>
-            <div className="flex flex-col gap-1">
-              {agents.map((agent) => (
-                <label
-                  key={agent.id}
-                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-background-hover"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedAgentIds.has(agent.id)}
-                    onChange={() => toggleAgent(agent.id)}
-                    className="accent-accent"
-                  />
-                  <div
-                    className="flex h-5 w-5 items-center justify-center rounded text-[10px] font-semibold text-foreground-on-emphasis"
-                    style={{ backgroundColor: agent.color }}
-                  >
-                    {agent.name[0]}
-                  </div>
-                  <span className="text-xs font-medium text-foreground">
-                    {agent.name}
-                  </span>
-                  <span className="text-[10px] text-foreground-subtle">
-                    {agent.description}
-                  </span>
-                </label>
-              ))}
-            </div>
           </div>
 
           {/* Error */}

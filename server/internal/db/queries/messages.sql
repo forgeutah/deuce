@@ -12,6 +12,6 @@ ORDER BY messages.created_at DESC
 LIMIT $3;
 
 -- name: CreateMessage :one
-INSERT INTO messages (session_id, author_id, author_type, content, expandable_content, mentions, status)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO messages (session_id, author_id, author_type, content, expandable_content, status)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;

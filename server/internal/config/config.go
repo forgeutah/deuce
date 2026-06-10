@@ -42,13 +42,10 @@ type Config struct {
 	DevPodProvider  string `env:"DEVPOD_PROVIDER" envDefault:"docker"`
 	AnthropicAPIKey string `env:"ANTHROPIC_API_KEY" envDefault:""`
 
-	// AgentHarness selects the agent backend: "pi" (default, Pi RPC) or
-	// "claude" (the legacy claude -p executor, kept one release as an emergency
-	// rollback — KTD11). PiProvider/PiModel configure the Pi backend; v1 runs
-	// Claude models through Pi.
-	AgentHarness string `env:"DEUCE_AGENT_HARNESS" envDefault:"pi"`
-	PiProvider   string `env:"DEUCE_PI_PROVIDER" envDefault:"anthropic"`
-	PiModel      string `env:"DEUCE_PI_MODEL" envDefault:"claude-haiku-4-5"`
+	// PiProvider/PiModel configure the Pi agent backend (the sole harness);
+	// v1 runs Claude models through Pi.
+	PiProvider string `env:"DEUCE_PI_PROVIDER" envDefault:"anthropic"`
+	PiModel    string `env:"DEUCE_PI_MODEL" envDefault:"claude-haiku-4-5"`
 
 	// AgentSystemPrompt is a global system prompt prepended to every agent's own
 	// system_prompt on the Pi path. Empty means use agent.DefaultBaseSystemPrompt

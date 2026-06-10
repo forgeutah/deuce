@@ -12,9 +12,9 @@ import (
 )
 
 const createMessage = `-- name: CreateMessage :one
-INSERT INTO messages (session_id, author_id, author_type, content, expandable_content, mentions, status)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, session_id, author_id, author_type, content, expandable_content, mentions, status, created_at
+INSERT INTO messages (session_id, author_id, author_type, content, expandable_content, status)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, session_id, author_id, author_type, content, expandable_content, status, created_at
 `
 
 type CreateMessageParams struct {
@@ -23,7 +23,6 @@ type CreateMessageParams struct {
 	AuthorType        string    `json:"author_type"`
 	Content           string    `json:"content"`
 	ExpandableContent []byte    `json:"expandable_content"`
-	Mentions          []string  `json:"mentions"`
 	Status            string    `json:"status"`
 }
 
@@ -34,7 +33,6 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (M
 		arg.AuthorType,
 		arg.Content,
 		arg.ExpandableContent,
-		arg.Mentions,
 		arg.Status,
 	)
 	var i Message
@@ -45,7 +43,6 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (M
 		&i.AuthorType,
 		&i.Content,
 		&i.ExpandableContent,
-		&i.Mentions,
 		&i.Status,
 		&i.CreatedAt,
 	)
@@ -53,7 +50,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (M
 }
 
 const listMessages = `-- name: ListMessages :many
-SELECT id, session_id, author_id, author_type, content, expandable_content, mentions, status, created_at FROM messages
+SELECT id, session_id, author_id, author_type, content, expandable_content, status, created_at FROM messages
 WHERE session_id = $1
 ORDER BY created_at DESC
 LIMIT $2
@@ -80,7 +77,6 @@ func (q *Queries) ListMessages(ctx context.Context, arg ListMessagesParams) ([]M
 			&i.AuthorType,
 			&i.Content,
 			&i.ExpandableContent,
-			&i.Mentions,
 			&i.Status,
 			&i.CreatedAt,
 		); err != nil {
@@ -95,7 +91,7 @@ func (q *Queries) ListMessages(ctx context.Context, arg ListMessagesParams) ([]M
 }
 
 const listMessagesBefore = `-- name: ListMessagesBefore :many
-SELECT messages.id, messages.session_id, messages.author_id, messages.author_type, messages.content, messages.expandable_content, messages.mentions, messages.status, messages.created_at FROM messages
+SELECT messages.id, messages.session_id, messages.author_id, messages.author_type, messages.content, messages.expandable_content, messages.status, messages.created_at FROM messages
 WHERE messages.session_id = $1
   AND messages.created_at < (SELECT m2.created_at FROM messages m2 WHERE m2.id = $2)
 ORDER BY messages.created_at DESC
@@ -124,7 +120,6 @@ func (q *Queries) ListMessagesBefore(ctx context.Context, arg ListMessagesBefore
 			&i.AuthorType,
 			&i.Content,
 			&i.ExpandableContent,
-			&i.Mentions,
 			&i.Status,
 			&i.CreatedAt,
 		); err != nil {

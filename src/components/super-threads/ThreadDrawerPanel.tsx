@@ -1,9 +1,9 @@
-// ThreadDrawerPanel — store-connected wrapper that renders the AgentThreadDrawer
-// for whichever agent thread is currently open. AppShell mounts this in the
-// right panel in place of the SummaryPanel when openThread is set.
+// ThreadDrawerPanel — store-connected wrapper that renders the session's deuce
+// thread drawer when it is open. AppShell mounts this in the right panel in
+// place of the SummaryPanel when openThread is set.
 
 import { useSessionStore } from "@/stores/session-store";
-import { tasksForAgent, queuePositions } from "@/stores/agent-runs";
+import { sessionTaskList, queuePositions } from "@/stores/agent-runs";
 import type { User } from "@/types";
 import { AgentThreadDrawer } from "./AgentThreadDrawer";
 
@@ -18,11 +18,10 @@ export function ThreadDrawerPanel() {
   if (!openThread) return null;
 
   const session = sessions.find((s) => s.id === openThread.sessionId);
-  const agent = session?.agents.find((a) => a.id === openThread.agentId);
-  if (!session || !agent) return null;
+  if (!session) return null;
 
   const runs = agentRuns[openThread.sessionId];
-  const tasks = tasksForAgent(runs, agent.id);
+  const tasks = sessionTaskList(runs);
   const qpos = queuePositions(runs);
 
   // requestedBy ids resolve against session members plus the current user.
@@ -33,12 +32,12 @@ export function ThreadDrawerPanel() {
 
   return (
     <AgentThreadDrawer
-      agent={agent}
+      sessionId={openThread.sessionId}
       tasks={tasks}
       queuePositions={qpos}
       lookupUser={lookupUser}
       onClose={closeAgentThread}
-      onSend={(message) => steer(openThread.sessionId, agent.id, message)}
+      onSend={(message) => steer(openThread.sessionId, message)}
     />
   );
 }

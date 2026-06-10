@@ -4,35 +4,41 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { useSessionStore } from "@/stores/session-store";
+import { deuceStatus, type DeuceStatus } from "@/stores/agent-runs";
+import { DEUCE } from "@/lib/deuce";
 import { ActivityFeed } from "@/components/activity/ActivityFeed";
 import { ManageMembersDialog } from "@/components/session/ManageMembersDialog";
-import type { Agent, User } from "@/types";
+import type { User } from "@/types";
 
-function AgentRow({ agent }: { agent: Agent }) {
+// DeuceRow shows the one built-in agent. Status derives from task state (the
+// agentRuns reducer) — working while a task runs, waiting on a pending
+// question, idle otherwise.
+function DeuceRow({ status }: { status: DeuceStatus }) {
   const statusStyles = {
     idle: "bg-neutral-8",
     working: "bg-success animate-pulse-dot",
-    "warming-up": "bg-warning",
-    error: "bg-danger",
-  }[agent.status];
+    waiting: "bg-warning animate-pulse-dot",
+  }[status];
+  const label =
+    status === "working"
+      ? "working"
+      : status === "waiting"
+        ? "needs input"
+        : "idle";
 
   return (
     <div className="flex items-center gap-2 rounded-md px-2 py-1.5">
       <div
         className="flex h-6 w-6 items-center justify-center rounded text-xs font-semibold text-foreground-on-emphasis"
-        style={{ backgroundColor: agent.color }}
+        style={{ backgroundColor: DEUCE.color }}
       >
-        {agent.name[0]}
+        {DEUCE.name[0]}
       </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs font-medium text-foreground truncate">
-            {agent.name}
-          </span>
-          <span className={cn("h-2 w-2 rounded-full shrink-0", statusStyles)} />
-        </div>
-        <span className="text-[10px] text-foreground-subtle">{agent.description}</span>
-      </div>
+      <span className="text-xs font-medium text-foreground truncate">
+        {DEUCE.name}
+      </span>
+      <span className={cn("h-2 w-2 rounded-full shrink-0", statusStyles)} />
+      <span className="text-[10px] text-foreground-subtle">{label}</span>
     </div>
   );
 }
@@ -61,7 +67,7 @@ function UserRow({ user }: { user: User }) {
 }
 
 export function SummaryPanel() {
-  const { activeSessionId, sessions, activities } = useSessionStore();
+  const { activeSessionId, sessions, activities, agentRuns } = useSessionStore();
   const [membersOpen, setMembersOpen] = useState(false);
 
   if (!activeSessionId) {
@@ -78,6 +84,7 @@ export function SummaryPanel() {
   if (!session) return null;
 
   const sessionActivities = activities[activeSessionId] ?? [];
+  const status = deuceStatus(agentRuns[activeSessionId]);
 
   return (
     <div className="flex h-full flex-col">
@@ -89,24 +96,20 @@ export function SummaryPanel() {
             Participants
           </h3>
           <span className="text-[10px] text-foreground-subtle">
-            ({session.agents.length + session.members.length})
+            ({session.members.length + 1})
           </span>
         </div>
 
-        {/* Agents */}
-        {session.agents.length > 0 && (
-          <div className="mb-2">
-            <div className="flex items-center gap-1 mb-1 px-2">
-              <Bot className="h-3 w-3 text-foreground-subtle" />
-              <span className="text-[10px] text-foreground-subtle">Agents</span>
-            </div>
-            <div className="flex flex-col gap-0.5">
-              {session.agents.map((agent) => (
-                <AgentRow key={agent.id} agent={agent} />
-              ))}
-            </div>
+        {/* The built-in agent */}
+        <div className="mb-2">
+          <div className="flex items-center gap-1 mb-1 px-2">
+            <Bot className="h-3 w-3 text-foreground-subtle" />
+            <span className="text-[10px] text-foreground-subtle">Agent</span>
           </div>
-        )}
+          <div className="flex flex-col gap-0.5">
+            <DeuceRow status={status} />
+          </div>
+        </div>
 
         {/* Humans */}
         <div>

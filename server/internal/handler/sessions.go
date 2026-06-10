@@ -35,29 +35,10 @@ type sessionResponse struct {
 	CreatedAt       time.Time      `json:"createdAt"`
 	LastActivityAt  time.Time      `json:"lastActivityAt"`
 	UnreadCount     int            `json:"unreadCount"`
-	Agents          []agentResult  `json:"agents"`
 	Members         []memberResult `json:"members"`
 }
 
-type agentResult struct {
-	ID           uuid.UUID `json:"id"`
-	Name         string    `json:"name"`
-	Role         string    `json:"role"`
-	Color        string    `json:"color"`
-	ColorMuted   string    `json:"colorMuted"`
-	Status       string    `json:"status"`
-	Provider     string    `json:"provider"`
-	Model        string    `json:"model"`
-	Description  string    `json:"description"`
-	SystemPrompt string    `json:"systemPrompt"`
-}
-
 func (h *Handler) buildSessionResponse(r *http.Request, s db.Session, userID uuid.UUID) (sessionResponse, error) {
-	agents, err := h.queries.ListSessionAgents(r.Context(), s.ID)
-	if err != nil {
-		return sessionResponse{}, err
-	}
-
 	members, err := h.queries.ListSessionMembers(r.Context(), s.ID)
 	if err != nil {
 		return sessionResponse{}, err
@@ -69,22 +50,6 @@ func (h *Handler) buildSessionResponse(r *http.Request, s db.Session, userID uui
 	})
 	if err != nil {
 		unread = 0
-	}
-
-	agentResults := make([]agentResult, 0, len(agents))
-	for _, a := range agents {
-		agentResults = append(agentResults, agentResult{
-			ID:           a.ID,
-			Name:         a.Name,
-			Role:         a.Role,
-			Color:        a.Color,
-			ColorMuted:   a.ColorMuted,
-			Status:       a.AgentStatus,
-			Provider:     a.Provider,
-			Model:        a.Model,
-			Description:  a.Description,
-			SystemPrompt: a.SystemPrompt,
-		})
 	}
 
 	memberResults := make([]memberResult, 0, len(members))
@@ -109,7 +74,6 @@ func (h *Handler) buildSessionResponse(r *http.Request, s db.Session, userID uui
 		CreatedAt:       s.CreatedAt,
 		LastActivityAt:  s.LastActivityAt,
 		UnreadCount:     int(unread),
-		Agents:          agentResults,
 		Members:         memberResults,
 	}, nil
 }
@@ -179,8 +143,10 @@ type createSessionRequest struct {
 	Description string   `json:"description"`
 	ProjectID   string   `json:"projectId"`
 	RepoURL     string   `json:"repoUrl"`
-	AgentIDs    []string `json:"agentIds"`
 	MemberIDs   []string `json:"memberIds"`
+	// AgentIDs is tolerated-and-ignored: pre-013 clients sent a roster pick,
+	// but the single built-in deuce agent is implicitly part of every session.
+	AgentIDs []string `json:"agentIds"`
 }
 
 func (h *Handler) CreateSession(w http.ResponseWriter, r *http.Request) {
@@ -254,18 +220,6 @@ func (h *Handler) CreateSession(w http.ResponseWriter, r *http.Request) {
 		_ = h.queries.AddSessionMember(r.Context(), db.AddSessionMemberParams{
 			SessionID: session.ID,
 			UserID:    memberID,
-		})
-	}
-
-	// Add agents
-	for _, aid := range req.AgentIDs {
-		agentID, err := uuid.Parse(aid)
-		if err != nil {
-			continue
-		}
-		_ = h.queries.AddSessionAgent(r.Context(), db.AddSessionAgentParams{
-			SessionID: session.ID,
-			AgentID:   agentID,
 		})
 	}
 

@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	agentpkg "github.com/forgeutah/deuce/server/internal/agent"
 	db "github.com/forgeutah/deuce/server/internal/db"
@@ -25,7 +25,6 @@ type messageResponse struct {
 	AuthorType        string          `json:"authorType"`
 	Content           string          `json:"content"`
 	ExpandableContent json.RawMessage `json:"expandableContent"`
-	Mentions          []string        `json:"mentions"`
 	Status            string          `json:"status"`
 	CreatedAt         time.Time       `json:"createdAt"`
 }
@@ -35,10 +34,6 @@ func toMessageResponse(m db.Message) messageResponse {
 	if m.ExpandableContent != nil {
 		ec = m.ExpandableContent
 	}
-	mentions := m.Mentions
-	if mentions == nil {
-		mentions = []string{}
-	}
 	return messageResponse{
 		ID:                m.ID,
 		SessionID:         m.SessionID,
@@ -46,10 +41,38 @@ func toMessageResponse(m db.Message) messageResponse {
 		AuthorType:        m.AuthorType,
 		Content:           m.Content,
 		ExpandableContent: ec,
-		Mentions:          mentions,
 		Status:            m.Status,
 		CreatedAt:         m.CreatedAt,
 	}
+}
+
+// deuceMentionRE detects an @deuce mention in message content, server-side
+// (R5). The left guard (start-of-string or a non-word character) keeps email
+// addresses like clint@deuce.dev from triggering; the trailing \b keeps
+// near-misses like @deucebot from triggering. Case-insensitive.
+var deuceMentionRE = regexp.MustCompile(`(?i)(^|\W)@` + agentpkg.DeuceAgentName + `\b`)
+
+// gateWorkspaceForAgent reports whether the session's workspace can run the
+// agent, posting the appropriate system notice when it cannot. Shared by the
+// chat mention path and the drawer steer path (R8) so the gate and its
+// user-facing copy cannot drift.
+func (h *Handler) gateWorkspaceForAgent(sessionID uuid.UUID, workspaceStatus string) bool {
+	switch workspaceStatus {
+	case "ready":
+		return true
+	case "starting":
+		h.postSystemMessage(sessionID, "Workspace is still starting — your agent request will run when it's ready.")
+	case "failed", "suspended":
+		h.postSystemMessage(sessionID, "Workspace is not available. Please restart the workspace before using the agent.")
+	}
+	return false
+}
+
+// isStopCommand reports whether a message is the exact /stop command (R6).
+// Exact match only — "@deuce make the flicker stop" must enqueue work, not
+// cancel it (the old " stop"-suffix trigger was removed for this reason).
+func isStopCommand(content string) bool {
+	return strings.TrimSpace(content) == "/stop"
 }
 
 func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
@@ -123,9 +146,11 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// sendMessageRequest no longer carries a mentions array — mention detection is
+// server-side (R5). Pre-013 clients still send the field; unknown JSON fields
+// are ignored by the decoder, so stale tabs degrade gracefully.
 type sendMessageRequest struct {
-	Content  string   `json:"content"`
-	Mentions []string `json:"mentions"`
+	Content string `json:"content"`
 }
 
 func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
@@ -160,17 +185,12 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Mentions == nil {
-		req.Mentions = []string{}
-	}
-
 	msg, err := h.queries.CreateMessage(r.Context(), db.CreateMessageParams{
 		SessionID:         sessionID,
 		AuthorID:          userID,
 		AuthorType:        "human",
 		Content:           req.Content,
 		ExpandableContent: nil,
-		Mentions:          req.Mentions,
 		Status:            "sent",
 	})
 	if err != nil {
@@ -188,65 +208,27 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	// Find the sender's WS client to exclude — for now broadcast to all (sender checks client-side)
 	h.hub.BroadcastToSession(sessionID.String(), wsMsg, nil)
 
-	// Handle /stop command
-	if strings.TrimSpace(req.Content) == "/stop" || strings.HasSuffix(strings.TrimSpace(req.Content), " stop") {
+	if isStopCommand(req.Content) {
 		if h.runtime != nil {
 			h.runtime.CancelSession(r.Context(), sessionID.String())
-		} else if h.agentQueue != nil {
-			h.agentQueue.Cancel(sessionID.String())
 		}
 		writeJSON(w, http.StatusCreated, resp)
 		return
 	}
 
-	// Process agent mentions: route through the Pi runtime when enabled,
-	// otherwise the legacy executor queue (DEUCE_AGENT_HARNESS, KTD11).
-	agentsEnabled := h.runtime != nil || (h.agentQueue != nil && h.executor != nil)
-	if len(req.Mentions) > 0 && agentsEnabled {
+	// @deuce mention → enqueue a task through the Pi runtime (R5).
+	if deuceMentionRE.MatchString(req.Content) && h.runtime != nil {
 		session, err := h.queries.GetSession(r.Context(), sessionID)
-		if err == nil {
-			switch session.WorkspaceStatus {
-			case "starting":
-				h.postSystemMessage(sessionID, "Workspace is still starting — your agent request will run when it's ready.")
-			case "failed", "suspended":
-				h.postSystemMessage(sessionID, "Workspace is not available. Please restart the workspace before using agents.")
-			case "ready":
-				for _, mention := range req.Mentions {
-					agentID, err := uuid.Parse(mention)
-					if err != nil {
-						continue
-					}
-					ag, err := h.queries.GetAgent(r.Context(), agentID)
-					if err != nil {
-						continue
-					}
-
-					if h.runtime != nil {
-						if _, err := h.runtime.Enqueue(r.Context(), agentpkg.EnqueueParams{
-							SessionID:       sessionID.String(),
-							AgentID:         agentID.String(),
-							RequestedBy:     userID.String(),
-							AnchorMessageID: msg.ID.String(),
-							Prompt:          req.Content,
-							WorkspaceID:     session.Name,
-						}); err != nil {
-							slog.Error("failed to enqueue agent task", "error", err)
-							h.postSystemMessage(sessionID, "Could not start the agent. Please try again.")
-						}
-						continue
-					}
-
-					task := agentpkg.Task{
-						SessionID: sessionID.String(),
-						AgentID:   agentID.String(),
-						AgentName: ag.Name,
-						Prompt:    req.Content,
-						Callback:  func(t agentpkg.Task) { h.executeAgent(t, session.Name) },
-					}
-					if err := h.agentQueue.Enqueue(task); err != nil {
-						h.postSystemMessage(sessionID, "Agent queue is full. Please wait for current work to complete.")
-					}
-				}
+		if err == nil && h.gateWorkspaceForAgent(sessionID, session.WorkspaceStatus) {
+			if _, err := h.runtime.Enqueue(r.Context(), agentpkg.EnqueueParams{
+				SessionID:       sessionID.String(),
+				RequestedBy:     userID.String(),
+				AnchorMessageID: msg.ID.String(),
+				Prompt:          req.Content,
+				WorkspaceID:     session.Name,
+			}); err != nil {
+				slog.Error("failed to enqueue agent task", "error", err)
+				h.postSystemMessage(sessionID, "Could not start the agent. Please try again.")
 			}
 		}
 	}
@@ -254,7 +236,9 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
-// StopAgent handles POST /api/sessions/{id}/agents/stop
+// StopAgent handles POST /api/sessions/{id}/agent/stop — cancels the session's
+// running task and drains its queue (R6), same semantics as the /stop chat
+// command. Session-membership gated (write class).
 func (h *Handler) StopAgent(w http.ResponseWriter, r *http.Request) {
 	sessionID, err := uuid.Parse(chi.URLParam(r, "sessionID"))
 	if err != nil {
@@ -272,32 +256,29 @@ func (h *Handler) StopAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.agentQueue != nil {
-		h.agentQueue.Cancel(sessionID.String())
+	if h.runtime != nil {
+		h.runtime.CancelSession(r.Context(), sessionID.String())
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// postAgentReply posts an agent's reply as a chat message and broadcasts it.
+// postAgentReply posts deuce's reply as a chat message and broadcasts it.
 // Wired into the Pi runtime (SetReplyPoster) so agent output shows in the
 // existing chat — the Super Threads task/action cards are a separate surface.
-func (h *Handler) postAgentReply(sessionID, agentID, reply string) {
+// Authorship pins to the fixed deuce UUID; the chat visibility filter keys on
+// it (R9).
+func (h *Handler) postAgentReply(sessionID, reply string) {
 	sid, err := uuid.Parse(sessionID)
 	if err != nil {
 		return
 	}
-	aid, err := uuid.Parse(agentID)
-	if err != nil {
-		aid = uuid.Nil
-	}
 	ctx := context.Background()
 	msg, err := h.queries.CreateMessage(ctx, db.CreateMessageParams{
 		SessionID:         sid,
-		AuthorID:          aid,
+		AuthorID:          uuid.MustParse(agentpkg.DeuceAgentID),
 		AuthorType:        "agent",
 		Content:           reply,
 		ExpandableContent: nil,
-		Mentions:          []string{},
 		Status:            "sent",
 	})
 	if err != nil {
@@ -309,6 +290,9 @@ func (h *Handler) postAgentReply(sessionID, agentID, reply string) {
 	h.hub.BroadcastToSession(sessionID, wsMsg, nil)
 }
 
+// postSystemMessage posts a system notice. The nil-UUID author is the system
+// sentinel — distinct from deuce's fixed UUID, so the visibility filter keeps
+// notices visible in chat while deuce's task replies stay hidden (R9).
 func (h *Handler) postSystemMessage(sessionID uuid.UUID, content string) {
 	msg, err := h.queries.CreateMessage(context.Background(), db.CreateMessageParams{
 		SessionID:         sessionID,
@@ -316,7 +300,6 @@ func (h *Handler) postSystemMessage(sessionID uuid.UUID, content string) {
 		AuthorType:        "agent",
 		Content:           content,
 		ExpandableContent: nil,
-		Mentions:          []string{},
 		Status:            "sent",
 	})
 	if err != nil {
@@ -325,214 +308,4 @@ func (h *Handler) postSystemMessage(sessionID uuid.UUID, content string) {
 	}
 	wsMsg, _ := ws.NewServerMessage(ws.TypeNewMessage, sessionID.String(), toMessageResponse(msg))
 	h.hub.BroadcastToSession(sessionID.String(), wsMsg, nil)
-}
-
-func (h *Handler) executeAgent(task agentpkg.Task, workspaceName string) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sessionID, _ := uuid.Parse(task.SessionID)
-	agentID, _ := uuid.Parse(task.AgentID)
-
-	// Store cancel function for stop button
-	h.agentQueue.SetCancel(task.SessionID, cancel)
-	defer h.agentQueue.ClearCancel(task.SessionID)
-
-	// Set agent to working
-	_ = h.queries.UpdateSessionAgentStatus(ctx, db.UpdateSessionAgentStatusParams{
-		SessionID: sessionID,
-		AgentID:   agentID,
-		Status:    "working",
-	})
-	statusMsg, _ := ws.NewServerMessage(ws.TypeAgentStatus, sessionID.String(), map[string]any{
-		"agentId": task.AgentID,
-		"status":  "working",
-	})
-	h.hub.BroadcastToSession(sessionID.String(), statusMsg, nil)
-
-	// Send typing indicator
-	typingMsg, _ := ws.NewServerMessage(ws.TypeTypingIndicator, sessionID.String(), map[string]any{
-		"agentId": task.AgentID,
-		"active":  true,
-	})
-	h.hub.BroadcastToSession(sessionID.String(), typingMsg, nil)
-
-	// Get agent info for system prompt
-	ag, err := h.queries.GetAgent(ctx, agentID)
-	if err != nil {
-		slog.Error("failed to get agent", "error", err)
-		h.finishAgent(sessionID, agentID, task.AgentID, "Failed to load agent configuration.", true)
-		return
-	}
-
-	// Get Claude session ID for continuity
-	claudeSessionID := ""
-	if csid, err := h.queries.GetClaudeSessionID(ctx, db.GetClaudeSessionIDParams{
-		SessionID: sessionID,
-		AgentID:   agentID,
-	}); err == nil {
-		claudeSessionID = csid
-	}
-
-	// Build chat history context
-	chatHistory := h.buildChatHistory(ctx, sessionID, claudeSessionID != "")
-
-	// Streaming callback — broadcast agent output via WebSocket
-	streamFn := func(event agentpkg.StreamEvent) {
-		outMsg, _ := ws.NewServerMessage(ws.TypeAgentOutput, sessionID.String(), map[string]any{
-			"agentId":     task.AgentID,
-			"content":     event.Content,
-			"contentType": event.Type,
-		})
-		h.hub.BroadcastToSession(sessionID.String(), outMsg, nil)
-	}
-
-	// Execute
-	result, execErr := h.executor.Execute(ctx, agentpkg.ExecuteParams{
-		WorkspaceID:     workspaceName,
-		AgentName:       ag.Name,
-		SystemPrompt:    ag.SystemPrompt,
-		UserMessage:     task.Prompt,
-		ChatHistory:     chatHistory,
-		ClaudeSessionID: claudeSessionID,
-		Model:           ag.Model,
-	}, streamFn)
-
-	if execErr != nil {
-		errMsg := "Agent encountered an error: " + execErr.Error()
-		if result != nil && result.Error == "cancelled" {
-			errMsg = "Cancelled by user."
-		} else if result != nil && result.Error == "timeout" {
-			errMsg = "Agent execution timed out."
-		}
-		h.finishAgent(sessionID, agentID, task.AgentID, errMsg, true)
-		return
-	}
-
-	// Store Claude session ID for continuity
-	if result.ClaudeSessionID != "" {
-		_ = h.queries.UpdateClaudeSessionID(ctx, db.UpdateClaudeSessionIDParams{
-			SessionID:       sessionID,
-			AgentID:         agentID,
-			ClaudeSessionID: result.ClaudeSessionID,
-		})
-	}
-
-	// Create the agent message
-	var ec []byte
-	if len(result.ExpandableContent) > 0 {
-		ec, _ = json.Marshal(result.ExpandableContent)
-	}
-
-	content := result.Summary
-	if content == "" {
-		content = "Task completed."
-	}
-
-	h.finishAgent(sessionID, agentID, task.AgentID, content, false, ec)
-}
-
-func (h *Handler) finishAgent(sessionID, agentID uuid.UUID, agentIDStr, content string, isError bool, expandableContent ...[]byte) {
-	ctx := context.Background()
-
-	// Stop typing
-	stopTyping, _ := ws.NewServerMessage(ws.TypeTypingIndicator, sessionID.String(), map[string]any{
-		"agentId": agentIDStr,
-		"active":  false,
-	})
-	h.hub.BroadcastToSession(sessionID.String(), stopTyping, nil)
-
-	// Create message
-	var ec []byte
-	if len(expandableContent) > 0 {
-		ec = expandableContent[0]
-	}
-
-	agentMsg, err := h.queries.CreateMessage(ctx, db.CreateMessageParams{
-		SessionID:         sessionID,
-		AuthorID:          agentID,
-		AuthorType:        "agent",
-		Content:           content,
-		ExpandableContent: ec,
-		Mentions:          []string{},
-		Status:            "sent",
-	})
-	if err != nil {
-		slog.Error("failed to create agent message", "error", err)
-	} else {
-		_ = h.queries.UpdateSessionLastActivity(ctx, sessionID)
-		agentWsMsg, _ := ws.NewServerMessage(ws.TypeNewMessage, sessionID.String(), toMessageResponse(agentMsg))
-		h.hub.BroadcastToSession(sessionID.String(), agentWsMsg, nil)
-	}
-
-	// Set status
-	finalStatus := "idle"
-	if isError {
-		finalStatus = "error"
-		// Reset to idle after a delay
-		go func() {
-			time.Sleep(10 * time.Second)
-			_ = h.queries.UpdateSessionAgentStatus(context.Background(), db.UpdateSessionAgentStatusParams{
-				SessionID: sessionID,
-				AgentID:   agentID,
-				Status:    "idle",
-			})
-			idleMsg, _ := ws.NewServerMessage(ws.TypeAgentStatus, sessionID.String(), map[string]any{
-				"agentId": agentIDStr,
-				"status":  "idle",
-			})
-			h.hub.BroadcastToSession(sessionID.String(), idleMsg, nil)
-		}()
-	}
-
-	_ = h.queries.UpdateSessionAgentStatus(ctx, db.UpdateSessionAgentStatusParams{
-		SessionID: sessionID,
-		AgentID:   agentID,
-		Status:    finalStatus,
-	})
-
-	statusMsg, _ := ws.NewServerMessage(ws.TypeAgentStatus, sessionID.String(), map[string]any{
-		"agentId": agentIDStr,
-		"status":  finalStatus,
-	})
-	h.hub.BroadcastToSession(sessionID.String(), statusMsg, nil)
-
-	// Create activity
-	agentUUID := pgtype.UUID{Bytes: agentID, Valid: true}
-	desc := "completed a task"
-	if isError {
-		desc = "encountered an error"
-	}
-	_, _ = h.queries.CreateActivity(ctx, db.CreateActivityParams{
-		SessionID:   sessionID,
-		Type:        "agent-action",
-		Description: desc,
-		AgentID:     agentUUID,
-	})
-}
-
-func (h *Handler) buildChatHistory(ctx context.Context, sessionID uuid.UUID, hasResume bool) string {
-	msgs, err := h.queries.ListMessages(ctx, db.ListMessagesParams{
-		SessionID: sessionID,
-		Limit:     20,
-	})
-	if err != nil || len(msgs) == 0 {
-		return ""
-	}
-
-	// If resuming, only include messages since the last agent response
-	if hasResume {
-		msgs = msgs[:min(5, len(msgs))]
-	}
-
-	var parts []string
-	for i := len(msgs) - 1; i >= 0; i-- {
-		m := msgs[i]
-		prefix := "[Human]"
-		if m.AuthorType == "agent" {
-			prefix = "[Agent]"
-		}
-		parts = append(parts, prefix+" "+m.Content)
-	}
-	return strings.Join(parts, "\n")
 }

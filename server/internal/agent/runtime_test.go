@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -17,8 +18,8 @@ import (
 // --- fake Store -------------------------------------------------------------
 
 type fakeTask struct {
-	id, sessionID, agentID, state, prompt, reply string
-	order                                        int
+	id, sessionID, state, prompt, reply string
+	order                               int
 }
 
 type fakeStore struct {
@@ -45,10 +46,10 @@ func (s *fakeStore) CreateQueuedTask(_ context.Context, p EnqueueParams) (string
 	s.idn++
 	id := fmt.Sprintf("task-%d", s.idn)
 	s.order++
-	s.tasks[id] = &fakeTask{id: id, sessionID: p.SessionID, agentID: p.AgentID, state: StateQueued, prompt: p.Prompt, order: s.order}
+	s.tasks[id] = &fakeTask{id: id, sessionID: p.SessionID, state: StateQueued, prompt: p.Prompt, order: s.order}
 	pos := 0
 	for _, t := range s.tasks {
-		if t.sessionID == p.SessionID && t.agentID == p.AgentID && t.state == StateQueued {
+		if t.sessionID == p.SessionID && t.state == StateQueued {
 			pos++
 		}
 	}
@@ -70,7 +71,7 @@ func (s *fakeStore) MarkRunning(_ context.Context, sessionID, taskID string) (in
 func (s *fakeStore) SetAwaitingInput(_ context.Context, sessionID, taskID, _, _ string, _ []string) (int64, error) {
 	return s.setState(sessionID, taskID, StateAwaitingInput), nil
 }
-func (s *fakeStore) AgentSystemPrompt(_ context.Context, _ string) (string, error) {
+func (s *fakeStore) DeuceSystemPrompt(_ context.Context) (string, error) {
 	return s.systemPrompt, nil
 }
 func (s *fakeStore) ResolveAwaitingInput(_ context.Context, sessionID, taskID string) (int64, error) {
@@ -97,20 +98,36 @@ func (s *fakeStore) CompleteAction(_ context.Context, sessionID, _, _, _ string,
 	return s.nextSeq(sessionID), nil
 }
 
-func (s *fakeStore) RunningTask(_ context.Context, sessionID, agentID string) (string, bool, error) {
+func (s *fakeStore) RunningTask(_ context.Context, sessionID string) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	best := s.firstByOrder(sessionID, agentID, func(st string) bool { return st == StateRunning || st == StateAwaitingInput })
+	best := s.firstByOrder(sessionID, func(st string) bool { return st == StateRunning || st == StateAwaitingInput })
 	return best, best != "", nil
 }
-func (s *fakeStore) NextQueuedTask(_ context.Context, sessionID, agentID string) (string, string, bool, error) {
+func (s *fakeStore) NextQueuedTask(_ context.Context, sessionID string) (string, string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	id := s.firstByOrder(sessionID, agentID, func(st string) bool { return st == StateQueued })
+	id := s.firstByOrder(sessionID, func(st string) bool { return st == StateQueued })
 	if id == "" {
 		return "", "", false, nil
 	}
 	return id, s.tasks[id].prompt, true, nil
+}
+func (s *fakeStore) QueuedTaskIDs(_ context.Context, sessionID string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var queued []*fakeTask
+	for _, t := range s.tasks {
+		if t.sessionID == sessionID && t.state == StateQueued {
+			queued = append(queued, t)
+		}
+	}
+	sort.Slice(queued, func(i, j int) bool { return queued[i].order < queued[j].order })
+	ids := make([]string, 0, len(queued))
+	for _, t := range queued {
+		ids = append(ids, t.id)
+	}
+	return ids, nil
 }
 func (s *fakeStore) TaskState(_ context.Context, taskID string) (string, bool, error) {
 	s.mu.Lock()
@@ -121,13 +138,13 @@ func (s *fakeStore) TaskState(_ context.Context, taskID string) (string, bool, e
 	return "", false, nil
 }
 
-// firstByOrder returns the lowest-order task for the key matching pred. Caller
+// firstByOrder returns the session's lowest-order task matching pred. Caller
 // holds s.mu.
-func (s *fakeStore) firstByOrder(sessionID, agentID string, pred func(string) bool) string {
+func (s *fakeStore) firstByOrder(sessionID string, pred func(string) bool) string {
 	best := ""
 	bestOrder := 1 << 30
 	for _, t := range s.tasks {
-		if t.sessionID == sessionID && t.agentID == agentID && pred(t.state) && t.order < bestOrder {
+		if t.sessionID == sessionID && pred(t.state) && t.order < bestOrder {
 			best, bestOrder = t.id, t.order
 		}
 	}
@@ -315,7 +332,7 @@ func TestEnqueueRunsAndCompletes(t *testing.T) {
 	rt, store, bc, lr := newTestRuntime(t)
 	ctx := context.Background()
 
-	taskID, err := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "do it", WorkspaceID: "ws"})
+	taskID, err := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "do it", WorkspaceID: "ws"})
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
@@ -347,9 +364,9 @@ func TestSecondMentionQueuesThenPromotes(t *testing.T) {
 	rt, store, bc, lr := newTestRuntime(t)
 	ctx := context.Background()
 
-	t1, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "first", WorkspaceID: "ws"})
+	t1, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "first", WorkspaceID: "ws"})
 	bc.waitFor(t, ws.TypeTaskStarted, 1)
-	t2, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "second", WorkspaceID: "ws"})
+	t2, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "second", WorkspaceID: "ws"})
 
 	// t2 must stay queued while t1 runs (one running per key).
 	if store.state(t2) != StateQueued {
@@ -367,21 +384,24 @@ func TestSecondMentionQueuesThenPromotes(t *testing.T) {
 	}
 }
 
-func TestConcurrentAgentsRunInParallel(t *testing.T) {
-	rt, store, bc, _ := newTestRuntime(t)
+func TestConcurrentSessionsRunInParallel(t *testing.T) {
+	rt, store, bc, lr := newTestRuntime(t)
 	ctx := context.Background()
-	ca, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "coder", Prompt: "x", WorkspaceID: "ws"})
-	ra, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "reviewer", Prompt: "y", WorkspaceID: "ws"})
+	a, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "x", WorkspaceID: "ws1"})
+	b, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s2", Prompt: "y", WorkspaceID: "ws2"})
 	bc.waitFor(t, ws.TypeTaskStarted, 2)
-	if store.state(ca) != StateRunning || store.state(ra) != StateRunning {
-		t.Errorf("both agents should run concurrently: coder=%q reviewer=%q", store.state(ca), store.state(ra))
+	if store.state(a) != StateRunning || store.state(b) != StateRunning {
+		t.Errorf("both sessions should run concurrently: s1=%q s2=%q", store.state(a), store.state(b))
+	}
+	if lr.count() != 2 {
+		t.Errorf("expected one Pi process per session, launches = %d", lr.count())
 	}
 }
 
 func TestProcessExitFailsRunningTask(t *testing.T) {
 	rt, store, bc, lr := newTestRuntime(t)
 	ctx := context.Background()
-	task, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "x", WorkspaceID: "ws"})
+	task, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "x", WorkspaceID: "ws"})
 	bc.waitFor(t, ws.TypeTaskStarted, 1)
 
 	_ = lr.handle(t, 0).Stop(ctx) // process dies
@@ -394,7 +414,7 @@ func TestProcessExitFailsRunningTask(t *testing.T) {
 func TestTerminalIsIdempotent(t *testing.T) {
 	rt, store, bc, lr := newTestRuntime(t)
 	ctx := context.Background()
-	task, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "x", WorkspaceID: "ws"})
+	task, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "x", WorkspaceID: "ws"})
 	bc.waitFor(t, ws.TypeTaskStarted, 1)
 	h := lr.handle(t, 0)
 
@@ -416,10 +436,10 @@ func TestReplyPosterReceivesReply(t *testing.T) {
 	rt, _, bc, lr := newTestRuntime(t)
 	var mu sync.Mutex
 	var got string
-	rt.SetReplyPoster(func(_, _, reply string) { mu.Lock(); got = reply; mu.Unlock() })
+	rt.SetReplyPoster(func(_, reply string) { mu.Lock(); got = reply; mu.Unlock() })
 
 	ctx := context.Background()
-	rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "hi", WorkspaceID: "ws"})
+	rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "hi", WorkspaceID: "ws"})
 	bc.waitFor(t, ws.TypeTaskStarted, 1)
 	h := lr.handle(t, 0)
 	h.push(`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hello there"}}`)
@@ -442,39 +462,81 @@ func TestReplyPosterReceivesReply(t *testing.T) {
 	}
 }
 
-func TestCancelPromotesNextOntoFreshProcess(t *testing.T) {
-	rt, store, bc, lr := newTestRuntime(t)
+func TestCancelSessionCancelsRunningAndQueued(t *testing.T) {
+	rt, store, bc, _ := newTestRuntime(t)
 	ctx := context.Background()
-	t1, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "first", WorkspaceID: "ws"})
+	t1, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "first", WorkspaceID: "ws"})
 	bc.waitFor(t, ws.TypeTaskStarted, 1)
-	t2, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "second", WorkspaceID: "ws"})
+	t2, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "second", WorkspaceID: "ws"})
 	if store.state(t2) != StateQueued {
 		t.Fatalf("t2 state = %q, want queued", store.state(t2))
 	}
 
-	// /stop the agent: t1 is cancelled, its process torn down, and t2 promoted
-	// onto a FRESH process (not the one being killed — the bug this guards).
-	rt.Cancel(ctx, pirun.Key{SessionID: "s1", AgentID: "a1"})
-	bc.waitFor(t, ws.TypeTaskStarted, 2)
+	// /stop: the queued task is drained AND the running task cancelled (R6) —
+	// nothing is promoted seconds after the user asked for quiet.
+	rt.CancelSession(ctx, "s1")
+	bc.waitFor(t, ws.TypeTaskCompleted, 2)
 
 	if store.state(t1) != StateCancelled {
 		t.Errorf("t1 state = %q, want cancelled", store.state(t1))
 	}
-	if store.state(t2) != StateRunning {
-		t.Errorf("t2 state = %q, want running after cancel-promote", store.state(t2))
+	if store.state(t2) != StateCancelled {
+		t.Errorf("t2 state = %q, want cancelled (queue drained by /stop)", store.state(t2))
 	}
-	if lr.count() < 2 {
-		t.Errorf("expected a fresh process launched for t2, launches = %d", lr.count())
+	// Give any stray promotion a moment, then confirm nothing restarted.
+	time.Sleep(150 * time.Millisecond)
+	if n := bc.count(ws.TypeTaskStarted); n != 1 {
+		t.Errorf("task_started broadcast %d times, want exactly 1 (no post-cancel promotion)", n)
+	}
+}
+
+func TestRecycleIdleStopsOnlyIdleSessions(t *testing.T) {
+	rt, store, bc, lr := newTestRuntime(t)
+	ctx := context.Background()
+
+	// s1 finishes a task cleanly — its process stays alive (reuse) but idle.
+	rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "a", WorkspaceID: "ws1"})
+	bc.waitFor(t, ws.TypeTaskStarted, 1)
+	lr.handle(t, 0).push(`{"type":"agent_end"}`)
+	bc.waitFor(t, ws.TypeTaskCompleted, 1)
+
+	// s2 is mid-task (running).
+	t2, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s2", Prompt: "b", WorkspaceID: "ws2"})
+	bc.waitFor(t, ws.TypeTaskStarted, 2)
+
+	// s3 is blocked on a question (awaiting_input) — busy, must NOT recycle.
+	t3, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s3", Prompt: "c", WorkspaceID: "ws3"})
+	bc.waitFor(t, ws.TypeTaskStarted, 3)
+	lr.handle(t, 2).push(`{"type":"extension_ui_request","id":"ui-1","params":{"prompt":"?"}}`)
+	bc.waitFor(t, ws.TypeTaskAwaitingInput, 1)
+
+	rt.RecycleIdleProcesses()
+
+	// Busy sessions keep their tasks live.
+	time.Sleep(150 * time.Millisecond)
+	if store.state(t2) != StateRunning {
+		t.Errorf("s2 task state = %q, want running (busy session must not recycle)", store.state(t2))
+	}
+	if store.state(t3) != StateAwaitingInput {
+		t.Errorf("s3 task state = %q, want awaiting_input (awaiting session must not recycle)", store.state(t3))
+	}
+	// s1's idle process was deregistered synchronously: a new enqueue launches
+	// a FRESH process (the recycle race guard), picking up the new prompt.
+	launchesBefore := lr.count()
+	rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "again", WorkspaceID: "ws1"})
+	bc.waitFor(t, ws.TypeTaskStarted, 4)
+	if lr.count() != launchesBefore+1 {
+		t.Errorf("expected a fresh launch for s1 after recycle, launches = %d (was %d)", lr.count(), launchesBefore)
 	}
 }
 
 func TestRouteFeedsRunningRun(t *testing.T) {
 	rt, _, bc, lr := newTestRuntime(t)
 	ctx := context.Background()
-	rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "go", WorkspaceID: "ws"})
+	rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "go", WorkspaceID: "ws"})
 	bc.waitFor(t, ws.TypeTaskStarted, 1)
 
-	res, err := rt.RouteOrEnqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "use staging"})
+	res, err := rt.RouteOrEnqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "use staging"})
 	if err != nil || res != RouteFed {
 		t.Fatalf("RouteOrEnqueue = (%v,%v), want (RouteFed,nil)", res, err)
 	}
@@ -487,7 +549,7 @@ func TestRouteFeedsRunningRun(t *testing.T) {
 func TestRouteAnswersAwaitingInput(t *testing.T) {
 	rt, store, bc, lr := newTestRuntime(t)
 	ctx := context.Background()
-	task, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "go", WorkspaceID: "ws"})
+	task, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "go", WorkspaceID: "ws"})
 	bc.waitFor(t, ws.TypeTaskStarted, 1)
 	h := lr.handle(t, 0)
 
@@ -497,7 +559,7 @@ func TestRouteAnswersAwaitingInput(t *testing.T) {
 		t.Fatalf("state = %q, want awaiting_input", store.state(task))
 	}
 
-	res, err := rt.RouteOrEnqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "prod"})
+	res, err := rt.RouteOrEnqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "prod"})
 	if err != nil || res != RouteFed {
 		t.Fatalf("RouteOrEnqueue = (%v,%v), want RouteFed", res, err)
 	}
@@ -513,13 +575,13 @@ func TestRouteAnswersAwaitingInput(t *testing.T) {
 func TestRouteEnqueuesWhenIdle(t *testing.T) {
 	rt, store, bc, _ := newTestRuntime(t)
 	ctx := context.Background()
-	res, err := rt.RouteOrEnqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "brand new", WorkspaceID: "ws"})
+	res, err := rt.RouteOrEnqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "brand new", WorkspaceID: "ws"})
 	if err != nil || res != RouteEnqueued {
 		t.Fatalf("RouteOrEnqueue idle = (%v,%v), want RouteEnqueued", res, err)
 	}
 	bc.waitFor(t, ws.TypeTaskStarted, 1)
 	// Exactly one task exists and it is running (promoted because idle).
-	running, ok, _ := store.RunningTask(ctx, "s1", "a1")
+	running, ok, _ := store.RunningTask(ctx, "s1")
 	if !ok || store.state(running) != StateRunning {
 		t.Errorf("expected a running task after idle enqueue")
 	}
@@ -529,7 +591,7 @@ func TestAwaitingCeilingFailsTask(t *testing.T) {
 	rt, store, bc, lr := newTestRuntime(t)
 	rt.awaitTimeout = 60 * time.Millisecond // ceiling for the test (same package)
 	ctx := context.Background()
-	task, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", AgentID: "a1", Prompt: "go", WorkspaceID: "ws"})
+	task, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "go", WorkspaceID: "ws"})
 	bc.waitFor(t, ws.TypeTaskStarted, 1)
 
 	lr.handle(t, 0).push(`{"type":"extension_ui_request","id":"ui-1","params":{"prompt":"?"}}`)

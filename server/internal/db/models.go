@@ -12,28 +12,17 @@ import (
 )
 
 type ActivityItem struct {
-	ID          uuid.UUID   `json:"id"`
-	SessionID   uuid.UUID   `json:"session_id"`
-	Type        string      `json:"type"`
-	Description string      `json:"description"`
-	AgentID     pgtype.UUID `json:"agent_id"`
-	Metadata    []byte      `json:"metadata"`
-	CreatedAt   time.Time   `json:"created_at"`
+	ID          uuid.UUID `json:"id"`
+	SessionID   uuid.UUID `json:"session_id"`
+	Type        string    `json:"type"`
+	Description string    `json:"description"`
+	Metadata    []byte    `json:"metadata"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type Agent struct {
-	ID           uuid.UUID          `json:"id"`
-	Name         string             `json:"name"`
-	Role         string             `json:"role"`
-	Color        string             `json:"color"`
-	ColorMuted   string             `json:"color_muted"`
-	Provider     string             `json:"provider"`
-	Model        string             `json:"model"`
-	Description  string             `json:"description"`
-	SystemPrompt string             `json:"system_prompt"`
-	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
-	CreatedAt    time.Time          `json:"created_at"`
-	UpdatedAt    time.Time          `json:"updated_at"`
+	ID           uuid.UUID `json:"id"`
+	SystemPrompt string    `json:"system_prompt"`
 }
 
 type Message struct {
@@ -43,7 +32,6 @@ type Message struct {
 	AuthorType        string    `json:"author_type"`
 	Content           string    `json:"content"`
 	ExpandableContent []byte    `json:"expandable_content"`
-	Mentions          []string  `json:"mentions"`
 	Status            string    `json:"status"`
 	CreatedAt         time.Time `json:"created_at"`
 }
@@ -68,14 +56,6 @@ type Session struct {
 	Description     string    `json:"description"`
 }
 
-type SessionAgent struct {
-	SessionID       uuid.UUID `json:"session_id"`
-	AgentID         uuid.UUID `json:"agent_id"`
-	Status          string    `json:"status"`
-	ClaudeSessionID string    `json:"claude_session_id"`
-	PiSessionID     string    `json:"pi_session_id"`
-}
-
 type SessionEventSeq struct {
 	SessionID uuid.UUID `json:"session_id"`
 	NextSeq   int64     `json:"next_seq"`
@@ -90,7 +70,6 @@ type SessionMember struct {
 type Task struct {
 	ID                     uuid.UUID   `json:"id"`
 	SessionID              uuid.UUID   `json:"session_id"`
-	AgentID                uuid.UUID   `json:"agent_id"`
 	RequestedBy            pgtype.UUID `json:"requested_by"`
 	AnchorMessageID        pgtype.UUID `json:"anchor_message_id"`
 	Prompt                 string      `json:"prompt"`

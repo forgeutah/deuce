@@ -10,12 +10,9 @@ export type WorkspaceStatus =
   | "deleting"
   | "missing"
   | "failed";
-export type AgentStatus = "idle" | "working" | "warming-up" | "error";
 export type UserStatus = "online" | "offline";
 export type MessageStatus = "sent" | "thinking" | "error";
 export type AuthorType = "human" | "agent";
-
-export type AgentRole = string;
 
 export interface Team {
   id: string;
@@ -49,7 +46,6 @@ export interface Session {
   description: string;
   projectId: string;
   status: SessionStatus;
-  agents: Agent[];
   members: User[];
   unreadCount: number;
   createdAt: string;
@@ -65,7 +61,6 @@ export interface Message {
   authorType: AuthorType;
   content: string;
   expandableContent?: ExpandableContent[];
-  mentions: string[];
   createdAt: string;
   status: MessageStatus;
 }
@@ -77,16 +72,10 @@ export interface ExpandableContent {
   content: string;
 }
 
-export interface Agent {
-  id: string;
-  name: string;
-  role: AgentRole;
-  color: string;
-  colorMuted: string;
-  status: AgentStatus;
-  provider: string;
-  model: string;
-  description: string;
+// AgentSettings is the GET/PUT /api/agent shape: deuce's configurable,
+// GLOBAL system prompt. Identity (id/name/color) renders from the DEUCE
+// constant in src/lib/deuce.ts and is not part of the contract.
+export interface AgentSettings {
   systemPrompt: string;
 }
 
@@ -127,7 +116,6 @@ export interface ActivityItem {
   type: "file-change" | "test-run" | "commit" | "agent-action";
   description: string;
   timestamp: string;
-  agentId?: string;
   metadata?: Record<string, string>;
 }
 
@@ -177,7 +165,6 @@ export type QuestionKind = "input" | "select" | "confirm";
 export interface AgentTask {
   id: string;
   sessionId: string;
-  agentId: string;
   requestedBy?: string;
   anchorMessageId?: string;
   prompt: string;
@@ -202,7 +189,6 @@ export interface AgentTask {
 export interface TaskEventPayload {
   seq: number;
   taskId: string;
-  agentId: string;
   requestedBy?: string;
   anchorMessageId?: string;
   prompt?: string;
@@ -218,7 +204,6 @@ export interface TaskEventPayload {
 export interface ActionEventPayload {
   seq: number;
   taskId: string;
-  agentId: string;
   callId: string;
   tool?: string;
   arg?: string;

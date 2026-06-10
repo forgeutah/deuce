@@ -10,14 +10,12 @@ import (
 	"time"
 )
 
-// Key identifies one persistent Pi process. There is exactly one Pi RPC process
-// per (session, agent) — the granularity the steerable model requires (KTD5).
-type Key struct {
-	SessionID string
-	AgentID   string
-}
+// Key identifies one persistent Pi process: the session ID. There is exactly
+// one Pi RPC process per session — the single built-in deuce agent owns the
+// channel's ordering and continuity (KTD5, single-agent collapse).
+type Key string
 
-func (k Key) String() string { return k.SessionID + "/" + k.AgentID }
+func (k Key) String() string { return string(k) }
 
 // Handle is one launched Pi process's I/O plus lifecycle control. The real
 // implementation (devpodLauncher) wraps `devpod ssh --command "pi --mode rpc"`;
@@ -116,7 +114,7 @@ func (p *Process) resetIdle() {
 
 // Supervisor owns the lifecycle of all Pi processes. Modeled on sshproxy.Server:
 // a base context cancelled on Shutdown, a WaitGroup draining the per-process
-// pumps, and a registry keyed by (session, agent).
+// pumps, and a registry keyed by session.
 type Supervisor struct {
 	launcher Launcher
 	apiKey   string
@@ -164,10 +162,8 @@ func (s *Supervisor) Get(key Key) (*Process, bool) {
 
 // Ensure returns the live process for key, launching one if absent. On launch
 // it performs a readiness handshake (get_state round-trip) before returning, so
-// callers never race the devpod-ssh tunnel setup (the U1 transport caveat). When
-// sessionPath is non-empty it re-attaches to that prior Pi session via
-// switch_session (KTD13 continuity), tolerating failure.
-func (s *Supervisor) Ensure(ctx context.Context, key Key, workspaceID, sessionPath, systemPrompt string) (*Process, error) {
+// callers never race the devpod-ssh tunnel setup (the U1 transport caveat).
+func (s *Supervisor) Ensure(ctx context.Context, key Key, workspaceID, systemPrompt string) (*Process, error) {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -229,11 +225,6 @@ func (s *Supervisor) Ensure(ctx context.Context, key Key, workspaceID, sessionPa
 		}
 		s.Stop(key)
 		return nil, fmt.Errorf("pirun: readiness handshake %s: %w%s", key, err, detail)
-	}
-	if sessionPath != "" {
-		if err := p.Send(SwitchSession{SessionPath: sessionPath}); err != nil {
-			slog.Warn("pirun: switch_session failed, continuing with fresh session", "key", key.String(), "error", err)
-		}
 	}
 	return p, nil
 }
@@ -324,9 +315,47 @@ func (s *Supervisor) Stop(key Key) {
 	if !ok {
 		return
 	}
+	stopHandle(p)
+}
+
+// stopHandle signals one process (SIGTERM→SIGKILL) bounded by the stop grace.
+func stopHandle(p *Process) {
 	ctx, cancel := context.WithTimeout(context.Background(), stopGrace+2*time.Second)
 	defer cancel()
 	_ = p.h.Stop(ctx)
+}
+
+// LiveKeys returns the keys of all currently registered processes.
+func (s *Supervisor) LiveKeys() []Key {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	keys := make([]Key, 0, len(s.procs))
+	for k := range s.procs {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// StopAndForget removes the registry entry synchronously, then signals the
+// process WITHOUT waiting for it to die. Deregistration before the signal
+// means a racing Ensure launches a fresh process instead of adopting the
+// dying one (a Stop'd process stays in the registry for seconds until the
+// pump reaps it over devpod ssh); the async signal keeps the caller — the
+// prompt-edit recycle inside an HTTP handler — from blocking on the stop
+// grace per process. The pump's registry delete is guarded by identity
+// (cur == p), so the double-remove is safe; the Exit signal still fires so
+// the scheduler can promote.
+func (s *Supervisor) StopAndForget(key Key) {
+	s.mu.Lock()
+	p, ok := s.procs[key]
+	if ok {
+		delete(s.procs, key)
+	}
+	s.mu.Unlock()
+	if !ok {
+		return
+	}
+	go stopHandle(p)
 }
 
 // Shutdown stops every process and waits for the pumps to drain, bounded by ctx.

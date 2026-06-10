@@ -57,25 +57,6 @@ func (q *Queries) AppendAction(ctx context.Context, arg AppendActionParams) erro
 	return err
 }
 
-const clearStuckPiSessions = `-- name: ClearStuckPiSessions :exec
-UPDATE session_agents sa
-SET pi_session_id = ''
-WHERE EXISTS (
-    SELECT 1 FROM tasks t
-    WHERE t.session_id = sa.session_id AND t.agent_id = sa.agent_id
-      AND t.state IN ('running', 'awaiting_input')
-)
-`
-
-// Boot recovery companion: clear pi_session_id for (session, agent) pairs with
-// a stuck in-flight task, so relaunch won't resume a dead Pi session. MUST run
-// BEFORE FailStuckTasks — it keys on the pre-failure states, not on 'failed'
-// (which would also clear legitimately-failed historical tasks).
-func (q *Queries) ClearStuckPiSessions(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, clearStuckPiSessions)
-	return err
-}
-
 const completeAction = `-- name: CompleteAction :exec
 UPDATE task_actions
 SET status = $3, text = $4, out = $5, diff = $6, stat = $7, seq = $8
@@ -107,15 +88,25 @@ func (q *Queries) CompleteAction(ctx context.Context, arg CompleteActionParams) 
 	return err
 }
 
+const countQueuedTasks = `-- name: CountQueuedTasks :one
+SELECT count(*) FROM tasks WHERE session_id = $1 AND state = 'queued'
+`
+
+func (q *Queries) CountQueuedTasks(ctx context.Context, sessionID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countQueuedTasks, sessionID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createTask = `-- name: CreateTask :one
-INSERT INTO tasks (session_id, agent_id, requested_by, anchor_message_id, prompt, state, seq)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, session_id, agent_id, requested_by, anchor_message_id, prompt, state, seq, pending_question, reply, work, created_at, updated_at, pending_question_kind, pending_question_options
+INSERT INTO tasks (session_id, requested_by, anchor_message_id, prompt, state, seq)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, session_id, requested_by, anchor_message_id, prompt, state, seq, pending_question, reply, work, created_at, updated_at, pending_question_kind, pending_question_options
 `
 
 type CreateTaskParams struct {
 	SessionID       uuid.UUID   `json:"session_id"`
-	AgentID         uuid.UUID   `json:"agent_id"`
 	RequestedBy     pgtype.UUID `json:"requested_by"`
 	AnchorMessageID pgtype.UUID `json:"anchor_message_id"`
 	Prompt          string      `json:"prompt"`
@@ -126,7 +117,6 @@ type CreateTaskParams struct {
 func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, error) {
 	row := q.db.QueryRow(ctx, createTask,
 		arg.SessionID,
-		arg.AgentID,
 		arg.RequestedBy,
 		arg.AnchorMessageID,
 		arg.Prompt,
@@ -137,7 +127,6 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 	err := row.Scan(
 		&i.ID,
 		&i.SessionID,
-		&i.AgentID,
 		&i.RequestedBy,
 		&i.AnchorMessageID,
 		&i.Prompt,
@@ -159,7 +148,10 @@ UPDATE tasks SET state = 'failed', updated_at = now() WHERE state IN ('running',
 `
 
 // Boot recovery (KTD10): tasks left running/awaiting_input by a crash are
-// reconciled to failed before the scheduler starts.
+// reconciled to failed before the scheduler starts. (The pre-013 companion
+// ClearStuckPiSessions is gone with session_agents.pi_session_id — Pi
+// resume-across-restart was never wired up, so there is no session id to
+// clear; every relaunch starts a fresh Pi process.)
 func (q *Queries) FailStuckTasks(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, failStuckTasks)
 	return err
@@ -199,24 +191,71 @@ func (q *Queries) ForceResolveOpenActions(ctx context.Context, taskID uuid.UUID)
 	return err
 }
 
-const getPiSessionID = `-- name: GetPiSessionID :one
-SELECT pi_session_id FROM session_agents WHERE session_id = $1 AND agent_id = $2
+const getActiveTaskID = `-- name: GetActiveTaskID :many
+
+SELECT id FROM tasks
+WHERE session_id = $1 AND state IN ('running', 'awaiting_input')
+ORDER BY created_at ASC LIMIT 1
 `
 
-type GetPiSessionIDParams struct {
-	SessionID uuid.UUID `json:"session_id"`
-	AgentID   uuid.UUID `json:"agent_id"`
+// The scheduler's hot-path lookups below are filtered server-side against the
+// (session_id, state) index from migration 013 instead of walking the
+// session's whole task history.
+// The session's running-or-awaiting task (at most one, R11). LIMIT 1 + :many
+// instead of :one so "no active task" is an empty slice, not an error.
+func (q *Queries) GetActiveTaskID(ctx context.Context, sessionID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, getActiveTaskID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
-func (q *Queries) GetPiSessionID(ctx context.Context, arg GetPiSessionIDParams) (string, error) {
-	row := q.db.QueryRow(ctx, getPiSessionID, arg.SessionID, arg.AgentID)
-	var pi_session_id string
-	err := row.Scan(&pi_session_id)
-	return pi_session_id, err
+const getNextQueuedTask = `-- name: GetNextQueuedTask :many
+SELECT id, prompt FROM tasks
+WHERE session_id = $1 AND state = 'queued'
+ORDER BY created_at ASC LIMIT 1
+`
+
+type GetNextQueuedTaskRow struct {
+	ID     uuid.UUID `json:"id"`
+	Prompt string    `json:"prompt"`
+}
+
+func (q *Queries) GetNextQueuedTask(ctx context.Context, sessionID uuid.UUID) ([]GetNextQueuedTaskRow, error) {
+	rows, err := q.db.Query(ctx, getNextQueuedTask, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetNextQueuedTaskRow{}
+	for rows.Next() {
+		var i GetNextQueuedTaskRow
+		if err := rows.Scan(&i.ID, &i.Prompt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getTask = `-- name: GetTask :one
-SELECT id, session_id, agent_id, requested_by, anchor_message_id, prompt, state, seq, pending_question, reply, work, created_at, updated_at, pending_question_kind, pending_question_options FROM tasks WHERE id = $1
+SELECT id, session_id, requested_by, anchor_message_id, prompt, state, seq, pending_question, reply, work, created_at, updated_at, pending_question_kind, pending_question_options FROM tasks WHERE id = $1
 `
 
 func (q *Queries) GetTask(ctx context.Context, id uuid.UUID) (Task, error) {
@@ -225,7 +264,6 @@ func (q *Queries) GetTask(ctx context.Context, id uuid.UUID) (Task, error) {
 	err := row.Scan(
 		&i.ID,
 		&i.SessionID,
-		&i.AgentID,
 		&i.RequestedBy,
 		&i.AnchorMessageID,
 		&i.Prompt,
@@ -261,46 +299,25 @@ func (q *Queries) IsSessionMember(ctx context.Context, arg IsSessionMemberParams
 	return is_member, err
 }
 
-const listAgentTasks = `-- name: ListAgentTasks :many
-SELECT id, session_id, agent_id, requested_by, anchor_message_id, prompt, state, seq, pending_question, reply, work, created_at, updated_at, pending_question_kind, pending_question_options FROM tasks WHERE session_id = $1 AND agent_id = $2 ORDER BY created_at ASC
+const listQueuedTaskIDs = `-- name: ListQueuedTaskIDs :many
+SELECT id FROM tasks
+WHERE session_id = $1 AND state = 'queued'
+ORDER BY created_at ASC
 `
 
-type ListAgentTasksParams struct {
-	SessionID uuid.UUID `json:"session_id"`
-	AgentID   uuid.UUID `json:"agent_id"`
-}
-
-// An agent's tasks in creation order — drives queue-position derivation (R12)
-// and promotion (R13) in the scheduler.
-func (q *Queries) ListAgentTasks(ctx context.Context, arg ListAgentTasksParams) ([]Task, error) {
-	rows, err := q.db.Query(ctx, listAgentTasks, arg.SessionID, arg.AgentID)
+func (q *Queries) ListQueuedTaskIDs(ctx context.Context, sessionID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listQueuedTaskIDs, sessionID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Task{}
+	items := []uuid.UUID{}
 	for rows.Next() {
-		var i Task
-		if err := rows.Scan(
-			&i.ID,
-			&i.SessionID,
-			&i.AgentID,
-			&i.RequestedBy,
-			&i.AnchorMessageID,
-			&i.Prompt,
-			&i.State,
-			&i.Seq,
-			&i.PendingQuestion,
-			&i.Reply,
-			&i.Work,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.PendingQuestionKind,
-			&i.PendingQuestionOptions,
-		); err != nil {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		items = append(items, i)
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -352,9 +369,10 @@ func (q *Queries) ListSessionTaskActions(ctx context.Context, sessionID uuid.UUI
 }
 
 const listSessionTasks = `-- name: ListSessionTasks :many
-SELECT id, session_id, agent_id, requested_by, anchor_message_id, prompt, state, seq, pending_question, reply, work, created_at, updated_at, pending_question_kind, pending_question_options FROM tasks WHERE session_id = $1 ORDER BY created_at ASC
+SELECT id, session_id, requested_by, anchor_message_id, prompt, state, seq, pending_question, reply, work, created_at, updated_at, pending_question_kind, pending_question_options FROM tasks WHERE session_id = $1 ORDER BY created_at ASC
 `
 
+// A session's tasks in creation order — the snapshot read.
 func (q *Queries) ListSessionTasks(ctx context.Context, sessionID uuid.UUID) ([]Task, error) {
 	rows, err := q.db.Query(ctx, listSessionTasks, sessionID)
 	if err != nil {
@@ -367,7 +385,6 @@ func (q *Queries) ListSessionTasks(ctx context.Context, sessionID uuid.UUID) ([]
 		if err := rows.Scan(
 			&i.ID,
 			&i.SessionID,
-			&i.AgentID,
 			&i.RequestedBy,
 			&i.AnchorMessageID,
 			&i.Prompt,
@@ -476,21 +493,6 @@ func (q *Queries) SetTaskAwaitingInput(ctx context.Context, arg SetTaskAwaitingI
 		arg.PendingQuestionOptions,
 		arg.Seq,
 	)
-	return err
-}
-
-const updatePiSessionID = `-- name: UpdatePiSessionID :exec
-UPDATE session_agents SET pi_session_id = $3 WHERE session_id = $1 AND agent_id = $2
-`
-
-type UpdatePiSessionIDParams struct {
-	SessionID   uuid.UUID `json:"session_id"`
-	AgentID     uuid.UUID `json:"agent_id"`
-	PiSessionID string    `json:"pi_session_id"`
-}
-
-func (q *Queries) UpdatePiSessionID(ctx context.Context, arg UpdatePiSessionIDParams) error {
-	_, err := q.db.Exec(ctx, updatePiSessionID, arg.SessionID, arg.AgentID, arg.PiSessionID)
 	return err
 }
 

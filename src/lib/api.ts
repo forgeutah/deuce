@@ -1,7 +1,7 @@
 import type {
   ActivityItem,
-  Agent,
   AgentRunSnapshot,
+  AgentSettings,
   FileContentResponse,
   FileNode,
   Message,
@@ -34,21 +34,11 @@ interface MessagesPage {
   hasMore: boolean;
 }
 
-interface AgentMutation {
-  name: string;
-  role: string;
-  provider: string;
-  model: string;
-  description: string;
-  systemPrompt: string;
-}
-
 interface CreateSessionBody {
   name: string;
   description?: string;
   projectId: string;
   repoUrl?: string;
-  agentIds: string[];
   memberIds: string[];
 }
 
@@ -61,7 +51,6 @@ interface UpdateSessionBody {
 
 interface SendMessageBody {
   content: string;
-  mentions: string[];
 }
 
 const BASE = "/api";
@@ -140,25 +129,21 @@ export const api = {
   listProjects: (teamId?: string) =>
     request<Project[]>(teamId ? `/projects?teamId=${teamId}` : "/projects"),
 
-  listAgents: () => request<Agent[]>("/agents"),
+  // Single built-in agent settings: deuce's global system prompt. A save
+  // takes effect on each session's next Pi process launch (idle processes are
+  // recycled server-side; sessions mid-task pick it up later).
+  getAgentSettings: () => request<AgentSettings>("/agent"),
 
-  createAgent: (body: AgentMutation) =>
-    request<Agent>("/agents", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-
-  updateAgent: (id: string, body: AgentMutation) =>
-    request<Agent>(`/agents/${id}`, {
+  updateAgentSettings: (systemPrompt: string) =>
+    request<AgentSettings>("/agent", {
       method: "PUT",
-      body: JSON.stringify(body),
+      body: JSON.stringify({ systemPrompt }),
     }),
 
-  deleteAgent: (id: string) =>
-    request<void>(`/agents/${id}`, { method: "DELETE" }),
-
+  // Cancels the session's running task and drains its queue (same semantics
+  // as the /stop chat command).
   stopAgent: (sessionId: string) =>
-    request<void>(`/sessions/${sessionId}/agents/stop`, { method: "POST" }),
+    request<void>(`/sessions/${sessionId}/agent/stop`, { method: "POST" }),
 
   listSessions: () => request<Session[]>("/sessions"),
 
@@ -198,12 +183,6 @@ export const api = {
   // events with seq > latestSeq.
   getAgentRuns: (sessionId: string) =>
     request<AgentRunSnapshot>(`/sessions/${sessionId}/agent-runs`),
-
-  updateSessionAgents: (sessionId: string, agentIds: string[]) =>
-    request<Agent[]>(`/sessions/${sessionId}/agents`, {
-      method: "PUT",
-      body: JSON.stringify({ agentIds }),
-    }),
 
   addSessionMember: (
     sessionId: string,

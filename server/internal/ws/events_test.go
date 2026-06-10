@@ -6,28 +6,30 @@ import (
 )
 
 func TestClientMessageSteerDecodes(t *testing.T) {
+	// A pre-013 steer frame carrying the retired agentId field still decodes —
+	// unknown JSON fields are ignored, so stale tabs degrade gracefully.
 	var msg ClientMessage
 	raw := `{"type":"steer","sessionId":"s1","agentId":"a1","message":"use the staging db"}`
 	if err := json.Unmarshal([]byte(raw), &msg); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if msg.Type != TypeSteer || msg.SessionID != "s1" || msg.AgentID != "a1" || msg.Message != "use the staging db" {
+	if msg.Type != TypeSteer || msg.SessionID != "s1" || msg.Message != "use the staging db" {
 		t.Errorf("decoded steer = %+v", msg)
 	}
 
-	// A legacy join message (no agentId/message) still decodes.
+	// A join message (no message field) still decodes.
 	var join ClientMessage
 	if err := json.Unmarshal([]byte(`{"type":"join","sessionId":"s2"}`), &join); err != nil {
 		t.Fatalf("unmarshal join: %v", err)
 	}
-	if join.Type != TypeJoin || join.AgentID != "" || join.Message != "" {
+	if join.Type != TypeJoin || join.Message != "" {
 		t.Errorf("decoded join = %+v", join)
 	}
 }
 
 func TestAgentRunEventPayloadShape(t *testing.T) {
 	sm, err := NewServerMessage(TypeActionStarted, "s1", ActionEventPayload{
-		Seq: 7, TaskID: "t1", AgentID: "a1", CallID: "toolu_1", Tool: "Bash", Arg: "ls -la",
+		Seq: 7, TaskID: "t1", CallID: "toolu_1", Tool: "Bash", Arg: "ls -la",
 	})
 	if err != nil {
 		t.Fatalf("NewServerMessage: %v", err)

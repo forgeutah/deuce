@@ -47,7 +47,7 @@ func newTeamsFixture(t *testing.T) *teamsFixture {
 	}
 
 	q := db.New(pool)
-	h := New(q, pool, nil, "", nil, nil, nil, nil, nil, "", "")
+	h := New(q, pool, nil, "", nil, nil, nil, "", "")
 
 	r := chi.NewRouter()
 	r.Use(auth.Middleware(""))

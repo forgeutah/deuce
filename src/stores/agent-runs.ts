@@ -114,7 +114,6 @@ function reduceTask(
     {
       id: p.taskId,
       sessionId: "",
-      agentId: p.agentId,
       prompt: p.prompt ?? "",
       state: "queued",
       seq: p.seq,
@@ -122,7 +121,6 @@ function reduceTask(
     };
 
   const next: AgentTask = { ...base, seq: p.seq };
-  if (p.agentId) next.agentId = p.agentId;
   if (p.requestedBy !== undefined) next.requestedBy = p.requestedBy;
   if (p.anchorMessageId !== undefined) next.anchorMessageId = p.anchorMessageId;
   if (p.prompt) next.prompt = p.prompt;
@@ -223,29 +221,43 @@ export function tasksByAnchor(
   return out;
 }
 
-// tasksForAgent returns one agent's tasks in chronological order — the drawer
-// thread.
-export function tasksForAgent(
-  runs: SessionAgentRuns | undefined,
-  agentId: string,
-): AgentTask[] {
-  return sessionTaskList(runs).filter((t) => t.agentId === agentId);
-}
-
-// queuePositions assigns a 1-based position to each queued task per agent, in
-// creation order. The server sends `position` on enqueue, but it goes stale
-// after promotions and is absent from snapshots — deriving it here keeps the
-// "#N in queue" label correct regardless. Keyed by task id.
+// queuePositions assigns a 1-based position to each queued task in creation
+// order (one serial queue per session). The server sends `position` on
+// enqueue, but it goes stale after promotions and is absent from snapshots —
+// deriving it here keeps the "#N in queue" label correct regardless. Keyed by
+// task id.
 export function queuePositions(
   runs: SessionAgentRuns | undefined,
 ): Record<string, number> {
   const out: Record<string, number> = {};
-  const perAgent: Record<string, number> = {};
+  let n = 0;
   for (const task of sessionTaskList(runs)) {
     if (task.state !== "queued") continue;
-    perAgent[task.agentId] = (perAgent[task.agentId] ?? 0) + 1;
-    out[task.id] = perAgent[task.agentId];
+    n += 1;
+    out[task.id] = n;
   }
   return out;
+}
+
+// DeuceStatus is the derived per-session agent status for the summary panel
+// and the drawer header — task state is the source of truth (the pre-013
+// agent_status events are gone).
+export type DeuceStatus = "idle" | "working" | "waiting";
+
+// statusOfTasks derives the agent's status from a task list: any task
+// awaiting input → "waiting"; else any running → "working"; else "idle".
+// Order-independent, so no sorted copy is made.
+export function statusOfTasks(tasks: Iterable<AgentTask>): DeuceStatus {
+  let working = false;
+  for (const task of tasks) {
+    if (task.state === "awaiting_input") return "waiting";
+    if (task.state === "running") working = true;
+  }
+  return working ? "working" : "idle";
+}
+
+// deuceStatus is statusOfTasks over a session's reduced run state.
+export function deuceStatus(runs: SessionAgentRuns | undefined): DeuceStatus {
+  return statusOfTasks(runs ? Object.values(runs.tasks) : []);
 }
 

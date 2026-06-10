@@ -90,7 +90,7 @@ func newVSCodeURIFixture(t *testing.T, publicHostname, sshAddr string) *vscodeUR
 
 	// Construct handler with zero/empty deps — only the queries field and
 	// the two URI-builder fields are exercised by GetSessionVSCodeURI.
-	h := New(q, pool, nil, "", nil, nil, nil, nil, nil, publicHostname, sshAddr)
+	h := New(q, pool, nil, "", nil, nil, nil, publicHostname, sshAddr)
 
 	// Build a chi router so chi.URLParam works inside the handler, and
 	// inject the seeded userID via the existing auth middleware. The

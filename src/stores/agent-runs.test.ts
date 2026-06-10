@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { applyEvent, applySnapshot } from "./agent-runs";
+import {
+  applyEvent,
+  applySnapshot,
+  deuceStatus,
+  queuePositions,
+} from "./agent-runs";
 import type { AgentRunSnapshot, TaskEventPayload } from "@/types";
-
-// NOTE: The frontend has no test runner wired up yet (see CLAUDE.md / repo.test.ts).
-// These Vitest-style specs capture the intended behavior and run as soon as a
-// runner is added. Until then, `npx tsc --noEmit` keeps them type-checked.
 
 const empty = { tasks: {}, lastSeq: 0, nextOrder: 0 };
 
@@ -13,7 +14,6 @@ function awaitingEvent(extra: Partial<TaskEventPayload>): TaskEventPayload {
   return {
     seq: 1,
     taskId: "t1",
-    agentId: "a1",
     pendingQuestion: "Which framework?",
     ...extra,
   };
@@ -55,7 +55,6 @@ describe("agent-runs reducer — typed questions", () => {
     const { state } = applyEvent(afterAsk, "task_started", {
       seq: 2,
       taskId: "t1",
-      agentId: "a1",
     });
     const task = state.tasks["t1"];
     expect(task.state).toBe("running");
@@ -70,8 +69,7 @@ describe("agent-runs reducer — typed questions", () => {
         {
           id: "t1",
           sessionId: "s1",
-          agentId: "a1",
-          prompt: "@coder build it",
+          prompt: "@deuce build it",
           state: "awaiting_input",
           seq: 5,
           pendingQuestion: "Which framework?",
@@ -86,5 +84,44 @@ describe("agent-runs reducer — typed questions", () => {
     const task = state.tasks["t1"];
     expect(task.pendingQuestionKind).toBe("select");
     expect(task.pendingQuestionOptions).toEqual(["React", "Vue"]);
+  });
+});
+
+describe("deuceStatus / queuePositions — single-session derivations", () => {
+  const seed = (states: ("queued" | "running" | "awaiting_input" | "done")[]) => {
+    let state = { tasks: {}, lastSeq: 0, nextOrder: 0 } as ReturnType<
+      typeof applySnapshot
+    >;
+    states.forEach((s, i) => {
+      state = applyEvent(state, "task_enqueued", {
+        seq: i * 2 + 1,
+        taskId: `t${i}`,
+        prompt: `p${i}`,
+      }).state;
+      if (s === "running" || s === "awaiting_input" || s === "done") {
+        state = applyEvent(state, "task_started", {
+          seq: i * 2 + 2,
+          taskId: `t${i}`,
+        }).state;
+      }
+    });
+    return state;
+  };
+
+  it("derives idle / working / waiting from task state", () => {
+    expect(deuceStatus(undefined)).toBe("idle");
+    expect(deuceStatus(seed(["queued"]))).toBe("idle");
+    expect(deuceStatus(seed(["running"]))).toBe("working");
+    const waiting = applyEvent(seed(["running"]), "task_awaiting_input", {
+      seq: 99,
+      taskId: "t0",
+      pendingQuestion: "?",
+    }).state;
+    expect(deuceStatus(waiting)).toBe("waiting");
+  });
+
+  it("numbers the session's queued tasks in creation order", () => {
+    const state = seed(["running", "queued", "queued"]);
+    expect(queuePositions(state)).toEqual({ t1: 1, t2: 2 });
   });
 });

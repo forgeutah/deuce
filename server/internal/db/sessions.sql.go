@@ -7,27 +7,9 @@ package db
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
-
-const addSessionAgent = `-- name: AddSessionAgent :exec
-INSERT INTO session_agents (session_id, agent_id)
-VALUES ($1, $2)
-ON CONFLICT DO NOTHING
-`
-
-type AddSessionAgentParams struct {
-	SessionID uuid.UUID `json:"session_id"`
-	AgentID   uuid.UUID `json:"agent_id"`
-}
-
-func (q *Queries) AddSessionAgent(ctx context.Context, arg AddSessionAgentParams) error {
-	_, err := q.db.Exec(ctx, addSessionAgent, arg.SessionID, arg.AgentID)
-	return err
-}
 
 const addSessionMember = `-- name: AddSessionMember :exec
 INSERT INTO session_members (session_id, user_id)
@@ -184,63 +166,6 @@ func (q *Queries) ListNonArchivedSessions(ctx context.Context) ([]Session, error
 	return items, nil
 }
 
-const listSessionAgents = `-- name: ListSessionAgents :many
-SELECT a.id, a.name, a.role, a.color, a.color_muted, a.provider, a.model, a.description, a.system_prompt, a.deleted_at, a.created_at, a.updated_at, sa.status as agent_status FROM agents a
-JOIN session_agents sa ON a.id = sa.agent_id
-WHERE sa.session_id = $1
-ORDER BY a.name
-`
-
-type ListSessionAgentsRow struct {
-	ID           uuid.UUID          `json:"id"`
-	Name         string             `json:"name"`
-	Role         string             `json:"role"`
-	Color        string             `json:"color"`
-	ColorMuted   string             `json:"color_muted"`
-	Provider     string             `json:"provider"`
-	Model        string             `json:"model"`
-	Description  string             `json:"description"`
-	SystemPrompt string             `json:"system_prompt"`
-	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
-	CreatedAt    time.Time          `json:"created_at"`
-	UpdatedAt    time.Time          `json:"updated_at"`
-	AgentStatus  string             `json:"agent_status"`
-}
-
-func (q *Queries) ListSessionAgents(ctx context.Context, sessionID uuid.UUID) ([]ListSessionAgentsRow, error) {
-	rows, err := q.db.Query(ctx, listSessionAgents, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListSessionAgentsRow{}
-	for rows.Next() {
-		var i ListSessionAgentsRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Name,
-			&i.Role,
-			&i.Color,
-			&i.ColorMuted,
-			&i.Provider,
-			&i.Model,
-			&i.Description,
-			&i.SystemPrompt,
-			&i.DeletedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.AgentStatus,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listSessionMembers = `-- name: ListSessionMembers :many
 SELECT u.id, u.name, u.email, u.avatar, u.status, u.created_at FROM users u
 JOIN session_members sm ON u.id = sm.user_id
@@ -334,15 +259,6 @@ func (q *Queries) MarkSessionRead(ctx context.Context, arg MarkSessionReadParams
 	return err
 }
 
-const removeAllSessionAgents = `-- name: RemoveAllSessionAgents :exec
-DELETE FROM session_agents WHERE session_id = $1
-`
-
-func (q *Queries) RemoveAllSessionAgents(ctx context.Context, sessionID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, removeAllSessionAgents, sessionID)
-	return err
-}
-
 const removeSessionMember = `-- name: RemoveSessionMember :exec
 DELETE FROM session_members WHERE session_id = $1 AND user_id = $2
 `
@@ -365,22 +281,6 @@ WHERE workspace_status IN ('starting', 'stopping', 'rebuilding', 'deleting')
 
 func (q *Queries) ResetStaleWorkspaceTransitions(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, resetStaleWorkspaceTransitions)
-	return err
-}
-
-const updateSessionAgentStatus = `-- name: UpdateSessionAgentStatus :exec
-UPDATE session_agents SET status = $3
-WHERE session_id = $1 AND agent_id = $2
-`
-
-type UpdateSessionAgentStatusParams struct {
-	SessionID uuid.UUID `json:"session_id"`
-	AgentID   uuid.UUID `json:"agent_id"`
-	Status    string    `json:"status"`
-}
-
-func (q *Queries) UpdateSessionAgentStatus(ctx context.Context, arg UpdateSessionAgentStatusParams) error {
-	_, err := q.db.Exec(ctx, updateSessionAgentStatus, arg.SessionID, arg.AgentID, arg.Status)
 	return err
 }
 

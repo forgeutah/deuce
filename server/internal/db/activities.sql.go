@@ -9,21 +9,19 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createActivity = `-- name: CreateActivity :one
-INSERT INTO activity_items (session_id, type, description, agent_id, metadata)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, session_id, type, description, agent_id, metadata, created_at
+INSERT INTO activity_items (session_id, type, description, metadata)
+VALUES ($1, $2, $3, $4)
+RETURNING id, session_id, type, description, metadata, created_at
 `
 
 type CreateActivityParams struct {
-	SessionID   uuid.UUID   `json:"session_id"`
-	Type        string      `json:"type"`
-	Description string      `json:"description"`
-	AgentID     pgtype.UUID `json:"agent_id"`
-	Metadata    []byte      `json:"metadata"`
+	SessionID   uuid.UUID `json:"session_id"`
+	Type        string    `json:"type"`
+	Description string    `json:"description"`
+	Metadata    []byte    `json:"metadata"`
 }
 
 func (q *Queries) CreateActivity(ctx context.Context, arg CreateActivityParams) (ActivityItem, error) {
@@ -31,7 +29,6 @@ func (q *Queries) CreateActivity(ctx context.Context, arg CreateActivityParams) 
 		arg.SessionID,
 		arg.Type,
 		arg.Description,
-		arg.AgentID,
 		arg.Metadata,
 	)
 	var i ActivityItem
@@ -40,7 +37,6 @@ func (q *Queries) CreateActivity(ctx context.Context, arg CreateActivityParams) 
 		&i.SessionID,
 		&i.Type,
 		&i.Description,
-		&i.AgentID,
 		&i.Metadata,
 		&i.CreatedAt,
 	)
@@ -48,7 +44,7 @@ func (q *Queries) CreateActivity(ctx context.Context, arg CreateActivityParams) 
 }
 
 const listActivities = `-- name: ListActivities :many
-SELECT id, session_id, type, description, agent_id, metadata, created_at FROM activity_items
+SELECT id, session_id, type, description, metadata, created_at FROM activity_items
 WHERE session_id = $1
 ORDER BY created_at DESC
 LIMIT $2
@@ -73,7 +69,6 @@ func (q *Queries) ListActivities(ctx context.Context, arg ListActivitiesParams) 
 			&i.SessionID,
 			&i.Type,
 			&i.Description,
-			&i.AgentID,
 			&i.Metadata,
 			&i.CreatedAt,
 		); err != nil {

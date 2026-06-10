@@ -22,9 +22,9 @@ Heavily inspired by Maggie Appleton's [Zero Alignment](https://maggieappleton.co
 
 Each **session** is like a Slack channel for one piece of work:
 
-- Humans and agents post messages in the same thread.
+- Humans and **deuce** — the built-in agent — post messages in the same thread; `@deuce` brings it into the work.
 - Every session is backed by an **isolated [DevPod](https://devpod.sh) workspace** — a real dev container with the repo checked out, the shell available, and the build/test tooling installed.
-- Agents (currently Claude Code) execute *inside* that container, so what they propose is what would actually run.
+- The agent runs *inside* that container (a persistent [Pi](https://pi.dev) process), so what it proposes is what would actually run.
 - The session carries the whole arc: a plan tab, a chat, a file browser, a live terminal, and workspace logs — visible to everyone in the room.
 
 ---
@@ -95,7 +95,7 @@ See [CLAUDE.md](CLAUDE.md) for the full developer guide (commands, conventions, 
 | Backend | Go, chi v5, pgx/v5, sqlc, coder/websocket |
 | Database | Postgres 17 (migrations via goose) |
 | Workspaces | DevPod (Docker provider by default) |
-| Agents | Claude Code, invoked headless inside the dev container via `devpod ssh` |
+| Agent | Pi (`pi --mode rpc`), one persistent process per session inside the dev container via `devpod ssh` |
 
 Real-time updates use a single WebSocket hub with per-session subscriptions. The frontend keeps state in a single Zustand store and lazy-loads messages/activities per session.
 
@@ -122,17 +122,13 @@ Organized by the three tracks in [STRATEGY.md](STRATEGY.md). Anything unchecked 
 
 The "how agents think and act as teammates" layer.
 
-- [x] Multi-agent presence in a session (DB model, UI, @mentions)
-- [x] Simulated agent responses (canned, with delays) — placeholder
-- [x] Agent settings dialog skeleton
-- [x] Agent system-prompt column + migration
-- [ ] **Real Claude Code execution inside the DevPod container** (in progress — see [plan](docs/plans/2026-05-08-001-feat-real-agents-devcontainer-plan.md))
-- [ ] Stream agent output to chat with expandable tool-call details
-- [ ] Sequential agent queue per session, with cancel
-- [ ] Full agent CRUD (create, edit, delete, soft-delete with history preserved)
-- [ ] Agent session continuity (`--resume` + chat-history context injection)
-- [ ] Per-agent provider/model selection (Anthropic, OpenAI, local)
-- [ ] Concurrent agents on isolated git branches
+- [x] One built-in agent (**deuce**) in every session — @mention to invoke, serial task queue with cancel, live task/action cards
+- [x] Real agent execution inside the DevPod container (persistent Pi process per session)
+- [x] Interactive agent questions (`ask_user` → typed prompts in the thread drawer)
+- [x] Global system-prompt editing for deuce
+- [ ] Skills: modulate deuce's behavior per task (`/skill:` expansion) instead of role agents
+- [ ] Subagents as the parallelism tier (bounded workers reporting back as deuce)
+- [ ] Agent session continuity across server restarts
 - [ ] Autonomous agent behaviors (proactive review on commits, etc.)
 
 ### Track 2 — Chat & Presence
