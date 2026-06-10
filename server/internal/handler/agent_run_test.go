@@ -12,11 +12,10 @@ func TestBuildSnapshotGroupsActionsAndDerivesLatestSeq(t *testing.T) {
 	t1 := uuid.New()
 	t2 := uuid.New()
 	sid := uuid.New()
-	aid := uuid.New()
 
 	tasks := []db.Task{
-		{ID: t1, SessionID: sid, AgentID: aid, State: "done", Seq: 3, Reply: "ok"},
-		{ID: t2, SessionID: sid, AgentID: aid, State: "awaiting_input", Seq: 7, PendingQuestion: "which?"},
+		{ID: t1, SessionID: sid, State: "done", Seq: 3, Reply: "ok"},
+		{ID: t2, SessionID: sid, State: "awaiting_input", Seq: 7, PendingQuestion: "which?"},
 	}
 	actions := []db.TaskAction{
 		{TaskID: t1, CallID: "c1", Seq: 2, Tool: "Bash", Status: "completed"},

@@ -18,22 +18,22 @@ type Broadcaster interface {
 }
 
 // Runtime ties the Pi supervisor, the persistence Store, and the WebSocket
-// broadcaster into the Super Threads execution engine. It owns the per-agent
+// broadcaster into the Super Threads execution engine. It owns the per-session
 // serial queue and — per KTD12 — is the single owner of every terminal task
 // transition and of promotion, including failures sourced from a process exit.
 type Runtime struct {
 	store Store
 	sup   *pirun.Supervisor
 	bc    Broadcaster
-	// baseSystemPrompt is prepended to each agent's own system_prompt at Pi
+	// baseSystemPrompt is prepended to deuce's configurable system_prompt at Pi
 	// launch — the global "prefer ask_user when blocked" guidance.
 	baseSystemPrompt string
-	// replyPoster, when set, posts an agent's terminal reply as a normal chat
+	// replyPoster, when set, posts deuce's terminal reply as a normal chat
 	// message so it shows in the existing chat UI (the Super Threads task/action
 	// cards are a separate, later surface). Wired by the handler layer.
-	replyPoster func(sessionID, agentID, reply string)
+	replyPoster func(sessionID, reply string)
 
-	keys keyedMutex // per-(session,agent) critical sections (KTD9 TOCTOU)
+	keys keyedMutex // per-session critical sections (KTD9 TOCTOU)
 
 	mu         sync.Mutex
 	running    map[pirun.Key]string         // current running/awaiting task id per key
@@ -72,12 +72,13 @@ const (
 	defaultAwaitTimeout  = 30 * time.Minute
 )
 
-// DefaultBaseSystemPrompt is the global system prompt applied to every agent on
-// the Pi path, ahead of the agent's own system_prompt. Its load-bearing job is
-// to steer agents to the ask_user tool when blocked on a human decision (which
-// is what surfaces the interactive typed prompt) instead of guessing or asking
-// in a normal chat reply. Overridable via DEUCE_AGENT_SYSTEM_PROMPT.
-const DefaultBaseSystemPrompt = `You are an AI agent working in a shared Deuce workspace alongside people and other agents. Your messages appear in a chat channel.
+// DefaultBaseSystemPrompt is the global system prompt applied to the deuce
+// agent at Pi launch, ahead of its configurable system_prompt. Its load-bearing
+// job is to steer the agent to the ask_user tool when blocked on a human
+// decision (which is what surfaces the interactive typed prompt) instead of
+// guessing or asking in a normal chat reply. Overridable via
+// DEUCE_AGENT_SYSTEM_PROMPT.
+const DefaultBaseSystemPrompt = `You are deuce, an AI agent working in a shared Deuce workspace alongside your human teammates. Your messages appear in a chat channel.
 
 CRITICAL — how to ask the user something. The ONLY reliable way to get an answer from a human is the ask_user tool. It pauses your run, shows the user a real prompt, and returns their answer to you so you can continue. If you instead write a question as ordinary chat text and end your turn, your run is marked complete — you are NOT waiting, the user is not shown a prompt, and you will not receive a clean answer to act on. A plain-text question is a dead end.
 
@@ -86,8 +87,9 @@ Therefore, whenever you need a decision, clarification, a missing detail (a file
 Use the kind parameter: "select" with options when the answer is one of a few choices, "confirm" for a yes/no decision, or omit it for a free-text answer. Only ask when you are genuinely blocked — otherwise keep working without asking.`
 
 // NewRuntime builds the runtime. Call Start to begin consuming process exits.
-// baseSystemPrompt is prepended to every agent's own system_prompt at Pi launch
-// (pass DefaultBaseSystemPrompt for the standard guidance, or "" to disable).
+// baseSystemPrompt is prepended to deuce's configurable system_prompt at Pi
+// launch (pass DefaultBaseSystemPrompt for the standard guidance, or "" to
+// disable).
 func NewRuntime(store Store, sup *pirun.Supervisor, bc Broadcaster, baseSystemPrompt string) *Runtime {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Runtime{
@@ -108,7 +110,7 @@ func NewRuntime(store Store, sup *pirun.Supervisor, bc Broadcaster, baseSystemPr
 	}
 }
 
-// joinSystemPrompts combines the global base prompt with an agent's own
+// joinSystemPrompts combines the global base prompt with deuce's configurable
 // system_prompt, trimming each and separating with a blank line. Either may be
 // empty, in which case the other is returned (both empty → "").
 func joinSystemPrompts(base, agent string) string {
@@ -124,10 +126,10 @@ func joinSystemPrompts(base, agent string) string {
 	}
 }
 
-// SetReplyPoster installs a callback that posts an agent's terminal reply as a
+// SetReplyPoster installs a callback that posts deuce's terminal reply as a
 // chat message. Without it, agent output is only visible via the AgentRunEvent
 // stream (the Super Threads cards), not in the existing chat.
-func (r *Runtime) SetReplyPoster(fn func(sessionID, agentID, reply string)) {
+func (r *Runtime) SetReplyPoster(fn func(sessionID, reply string)) {
 	r.replyPoster = fn
 }
 
@@ -165,8 +167,8 @@ func (r *Runtime) Enqueue(ctx context.Context, p EnqueueParams) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	slog.Info("runtime: task enqueued", "session", p.SessionID, "agent", p.AgentID, "task", taskID, "workspace", p.WorkspaceID)
-	r.promote(ctx, pirun.Key{SessionID: p.SessionID, AgentID: p.AgentID})
+	slog.Info("runtime: task enqueued", "session", p.SessionID, "task", taskID, "workspace", p.WorkspaceID)
+	r.promote(ctx, pirun.Key(p.SessionID))
 	return taskID, nil
 }
 
@@ -177,12 +179,12 @@ func (r *Runtime) createQueued(ctx context.Context, p EnqueueParams) (string, er
 	if err != nil {
 		return "", err
 	}
-	key := pirun.Key{SessionID: p.SessionID, AgentID: p.AgentID}
+	key := pirun.Key(p.SessionID)
 	r.mu.Lock()
 	r.workspace[key] = p.WorkspaceID
 	r.mu.Unlock()
 	r.broadcastTask(ws.TypeTaskEnqueued, ws.TaskEventPayload{
-		Seq: seq, TaskID: taskID, AgentID: p.AgentID, RequestedBy: p.RequestedBy,
+		Seq: seq, TaskID: taskID, RequestedBy: p.RequestedBy,
 		AnchorMessageID: p.AnchorMessageID, Prompt: p.Prompt, State: StateQueued, Position: position,
 	}, p.SessionID)
 	return taskID, nil
@@ -193,7 +195,7 @@ func (r *Runtime) createQueued(ctx context.Context, p EnqueueParams) (string, er
 // awaiting_input it answers via extension_ui_response; if merely running it
 // steers; if idle/terminal it enqueues a new task (R15/R16/R17/R19).
 func (r *Runtime) RouteOrEnqueue(ctx context.Context, p EnqueueParams) (RouteResult, error) {
-	key := pirun.Key{SessionID: p.SessionID, AgentID: p.AgentID}
+	key := pirun.Key(p.SessionID)
 	unlock := r.keys.lock(key)
 	defer unlock()
 
@@ -212,13 +214,13 @@ func (r *Runtime) RouteOrEnqueue(ctx context.Context, p EnqueueParams) (RouteRes
 				// even if the DB resolve below fails (the next event reconciles).
 				r.clearPending(taskID)
 				r.exitAwaiting(key, taskID)
-				seq, rerr := r.store.ResolveAwaitingInput(ctx, key.SessionID, taskID)
+				seq, rerr := r.store.ResolveAwaitingInput(ctx, key.SessionID(), taskID)
 				if rerr != nil {
 					slog.Error("runtime: resolve awaiting input", "task", taskID, "error", rerr)
 				} else {
 					r.broadcastTask(ws.TypeTaskStarted, ws.TaskEventPayload{
-						Seq: seq, TaskID: taskID, AgentID: key.AgentID, State: StateRunning,
-					}, key.SessionID)
+						Seq: seq, TaskID: taskID, State: StateRunning,
+					}, key.SessionID())
 				}
 				return RouteFed, nil
 			}
@@ -250,13 +252,13 @@ func (r *Runtime) promote(ctx context.Context, key pirun.Key) {
 
 // promoteLocked assumes the per-key lock is held.
 func (r *Runtime) promoteLocked(ctx context.Context, key pirun.Key) {
-	if _, busy, err := r.store.RunningTask(ctx, key.SessionID, key.AgentID); err != nil {
+	if _, busy, err := r.store.RunningTask(ctx, key.SessionID()); err != nil {
 		slog.Error("runtime: running-task lookup", "key", key.String(), "error", err)
 		return
 	} else if busy {
-		return // one running task per key (R11)
+		return // one running task per session (R11)
 	}
-	taskID, prompt, ok, err := r.store.NextQueuedTask(ctx, key.SessionID, key.AgentID)
+	taskID, prompt, ok, err := r.store.NextQueuedTask(ctx, key.SessionID())
 	if err != nil {
 		slog.Error("runtime: next-queued lookup", "key", key.String(), "error", err)
 		return
@@ -265,33 +267,34 @@ func (r *Runtime) promoteLocked(ctx context.Context, key pirun.Key) {
 		return
 	}
 
-	seq, err := r.store.MarkRunning(ctx, key.SessionID, taskID)
+	seq, err := r.store.MarkRunning(ctx, key.SessionID(), taskID)
 	if err != nil {
 		slog.Error("runtime: mark running", "task", taskID, "error", err)
 		return
 	}
 	r.setRunning(key, taskID)
 	r.broadcastTask(ws.TypeTaskStarted, ws.TaskEventPayload{
-		Seq: seq, TaskID: taskID, AgentID: key.AgentID, State: StateRunning,
-	}, key.SessionID)
+		Seq: seq, TaskID: taskID, State: StateRunning,
+	}, key.SessionID())
 
 	// Ensure the Pi process + its consumer, then send the prompt. Continuity
-	// across a process restart (pi_session_id re-attach) is a tolerated v1
-	// degradation — within a process, sequential tasks share the Pi session.
+	// across a process restart is a tolerated v1 degradation — within a
+	// process, sequential tasks share the Pi session.
 	r.mu.Lock()
 	wsID := r.workspace[key]
 	r.mu.Unlock()
-	// The global guidance plus the agent's own persona/instructions are applied
+	// The global guidance plus deuce's configurable instructions are applied
 	// to the Pi process at launch (Ensure only launches when no process exists
-	// for the key, so this is a no-op on reuse). A per-agent lookup failure is
+	// for the key, so this is a no-op on reuse — a prompt edit takes effect on
+	// the next launch; see RecycleIdleProcesses). A lookup failure is
 	// non-fatal — fall back to the global base alone rather than failing the task.
-	agentPrompt, err := r.store.AgentSystemPrompt(ctx, key.AgentID)
+	deucePrompt, err := r.store.DeuceSystemPrompt(ctx)
 	if err != nil {
-		slog.Warn("runtime: agent system prompt lookup failed", "key", key.String(), "error", err)
-		agentPrompt = ""
+		slog.Warn("runtime: deuce system prompt lookup failed", "key", key.String(), "error", err)
+		deucePrompt = ""
 	}
-	systemPrompt := joinSystemPrompts(r.baseSystemPrompt, agentPrompt)
-	p, err := r.sup.Ensure(ctx, key, wsID, "", systemPrompt)
+	systemPrompt := joinSystemPrompts(r.baseSystemPrompt, deucePrompt)
+	p, err := r.sup.Ensure(ctx, key, wsID, systemPrompt)
 	if err != nil {
 		slog.Error("runtime: ensure pi process", "key", key.String(), "error", err)
 		// promote=false: we are inside promoteLocked, don't recurse. teardown=true
@@ -353,27 +356,27 @@ func (r *Runtime) translate(key pirun.Key, ev pirun.Event) {
 	ctx := r.ctx
 	switch ev.Kind {
 	case pirun.KindToolStarted:
-		seq, err := r.store.AppendActionStarted(ctx, key.SessionID, taskID, ev.ToolCallID, ev.Tool, ev.Arg)
+		seq, err := r.store.AppendActionStarted(ctx, key.SessionID(), taskID, ev.ToolCallID, ev.Tool, ev.Arg)
 		if err != nil {
 			slog.Error("runtime: append action", "task", taskID, "error", err)
 			return
 		}
 		r.broadcastAction(ws.TypeActionStarted, ws.ActionEventPayload{
-			Seq: seq, TaskID: taskID, AgentID: key.AgentID, CallID: ev.ToolCallID, Tool: ev.Tool, Arg: ev.Arg,
-		}, key.SessionID)
+			Seq: seq, TaskID: taskID, CallID: ev.ToolCallID, Tool: ev.Tool, Arg: ev.Arg,
+		}, key.SessionID())
 	case pirun.KindToolCompleted:
-		seq, err := r.store.CompleteAction(ctx, key.SessionID, taskID, ev.ToolCallID, ev.Output, ev.IsError)
+		seq, err := r.store.CompleteAction(ctx, key.SessionID(), taskID, ev.ToolCallID, ev.Output, ev.IsError)
 		if err != nil {
 			slog.Error("runtime: complete action", "task", taskID, "error", err)
 			return
 		}
 		r.broadcastAction(ws.TypeActionCompleted, ws.ActionEventPayload{
-			Seq: seq, TaskID: taskID, AgentID: key.AgentID, CallID: ev.ToolCallID, Tool: ev.Tool, Text: ev.Output, IsError: ev.IsError,
-		}, key.SessionID)
+			Seq: seq, TaskID: taskID, CallID: ev.ToolCallID, Tool: ev.Tool, Text: ev.Output, IsError: ev.IsError,
+		}, key.SessionID())
 	case pirun.KindAssistantText:
 		r.appendReply(taskID, ev.Text)
 	case pirun.KindAwaitingInput:
-		seq, err := r.store.SetAwaitingInput(ctx, key.SessionID, taskID, ev.Prompt, ev.RequestKind, ev.Options)
+		seq, err := r.store.SetAwaitingInput(ctx, key.SessionID(), taskID, ev.Prompt, ev.RequestKind, ev.Options)
 		if err != nil {
 			slog.Error("runtime: set awaiting input", "task", taskID, "error", err)
 			return
@@ -381,9 +384,9 @@ func (r *Runtime) translate(key pirun.Key, ev pirun.Event) {
 		r.setPending(taskID, ev.RequestID)
 		r.enterAwaiting(key, taskID) // suspend active timeout, start ceiling (KTD8)
 		r.broadcastTask(ws.TypeTaskAwaitingInput, ws.TaskEventPayload{
-			Seq: seq, TaskID: taskID, AgentID: key.AgentID, State: StateAwaitingInput,
+			Seq: seq, TaskID: taskID, State: StateAwaitingInput,
 			PendingQuestion: ev.Prompt, PendingQuestionKind: ev.RequestKind, PendingQuestionOptions: ev.Options,
-		}, key.SessionID)
+		}, key.SessionID())
 	case pirun.KindRunCompleted:
 		unlock := r.keys.lock(key)
 		// Pi finished cleanly: reuse the live process for the next task (promote
@@ -439,7 +442,7 @@ func (r *Runtime) finalizeLocked(ctx context.Context, key pirun.Key, taskID, sta
 	// (the ask-user extension didn't fire), rewrite it to the plain question
 	// before it is persisted, broadcast, and posted to chat (R9/R11/R12).
 	reply = sanitizeNarratedQuestion(reply)
-	seq, err := r.store.FinishTask(ctx, key.SessionID, taskID, state, reply)
+	seq, err := r.store.FinishTask(ctx, key.SessionID(), taskID, state, reply)
 	if err != nil {
 		slog.Error("runtime: finish task", "task", taskID, "state", state, "error", err)
 		return
@@ -454,8 +457,8 @@ func (r *Runtime) finalizeLocked(ctx context.Context, key pirun.Key, taskID, sta
 		r.promoteLocked(ctx, key)
 	}
 	r.broadcastTask(ws.TypeTaskCompleted, ws.TaskEventPayload{
-		Seq: seq, TaskID: taskID, AgentID: key.AgentID, State: state, Status: state, Reply: reply,
-	}, key.SessionID)
+		Seq: seq, TaskID: taskID, State: state, Status: state, Reply: reply,
+	}, key.SessionID())
 	slog.Info("runtime: task finalized", "key", key.String(), "task", taskID, "state", state, "replyLen", len(reply))
 	// Surface the result in the existing chat. For a done task with no streamed
 	// text (e.g. the model produced only tool calls, or the run errored without
@@ -466,36 +469,62 @@ func (r *Runtime) finalizeLocked(ctx context.Context, key pirun.Key, taskID, sta
 			msg = "(The agent finished without a text response.)"
 		}
 		if msg != "" {
-			r.replyPoster(key.SessionID, key.AgentID, msg)
+			r.replyPoster(key.SessionID(), msg)
 		}
 	}
 }
 
-// CancelSession cancels every running task in a session (agent-less /stop, R21).
+// CancelSession cancels the session's running task AND its queued tasks (R6:
+// /stop or the Stop button halts everything; a queued task must not be
+// promoted seconds after the user asked for quiet).
 func (r *Runtime) CancelSession(ctx context.Context, sessionID string) {
-	r.mu.Lock()
-	var keys []pirun.Key
-	for k := range r.running {
-		if k.SessionID == sessionID {
-			keys = append(keys, k)
-		}
-	}
-	r.mu.Unlock()
-	for _, k := range keys {
-		r.Cancel(ctx, k)
-	}
-}
-
-// Cancel cancels the running task for a key (/stop targeting an agent, R21). It
-// tears down the task's Pi process (teardown=true); the resulting process-exit
-// promotes the next queued task onto a fresh process — avoiding the bug where
-// promoting inline would launch the next task onto the process we then kill.
-func (r *Runtime) Cancel(ctx context.Context, key pirun.Key) {
+	key := pirun.Key(sessionID)
 	unlock := r.keys.lock(key)
 	defer unlock()
+	r.cancelQueuedLocked(ctx, key)
 	taskID, ok := r.currentTask(key)
 	if ok {
+		// Teardown=true: the resulting process-exit would promote the next
+		// queued task onto a fresh process — but the queue was just drained.
 		r.finalizeLocked(ctx, key, taskID, StateCancelled, "Cancelled by user.", false, true)
+	}
+}
+
+// cancelQueuedLocked finalizes every queued task in the session as cancelled,
+// broadcasting each task_completed. No replyPoster — one "Cancelled by user."
+// chat notice for the running task is enough; queued-card state changes carry
+// the rest. Assumes the per-key lock is held.
+func (r *Runtime) cancelQueuedLocked(ctx context.Context, key pirun.Key) {
+	ids, err := r.store.QueuedTaskIDs(ctx, key.SessionID())
+	if err != nil {
+		slog.Error("runtime: queued-task lookup", "key", key.String(), "error", err)
+		return
+	}
+	for _, taskID := range ids {
+		seq, err := r.store.FinishTask(ctx, key.SessionID(), taskID, StateCancelled, "")
+		if err != nil {
+			slog.Error("runtime: cancel queued task", "task", taskID, "error", err)
+			continue
+		}
+		r.broadcastTask(ws.TypeTaskCompleted, ws.TaskEventPayload{
+			Seq: seq, TaskID: taskID, State: StateCancelled, Status: StateCancelled,
+		}, key.SessionID())
+	}
+}
+
+// RecycleIdleProcesses stops the Pi process of every session with no running or
+// awaiting_input task, so the next task launches with the freshly-saved system
+// prompt (R7). Sessions mid-task keep their process and pick the new prompt up
+// on their next process launch. StopAndForget deregisters synchronously under
+// the per-session lock, so an enqueue racing the recycle launches a fresh
+// process instead of adopting the dying one.
+func (r *Runtime) RecycleIdleProcesses() {
+	for _, key := range r.sup.LiveKeys() {
+		unlock := r.keys.lock(key)
+		if _, busy := r.currentTask(key); !busy {
+			r.sup.StopAndForget(key)
+		}
+		unlock()
 	}
 }
 

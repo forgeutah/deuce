@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -24,7 +25,6 @@ type messageResponse struct {
 	AuthorType        string          `json:"authorType"`
 	Content           string          `json:"content"`
 	ExpandableContent json.RawMessage `json:"expandableContent"`
-	Mentions          []string        `json:"mentions"`
 	Status            string          `json:"status"`
 	CreatedAt         time.Time       `json:"createdAt"`
 }
@@ -34,10 +34,6 @@ func toMessageResponse(m db.Message) messageResponse {
 	if m.ExpandableContent != nil {
 		ec = m.ExpandableContent
 	}
-	mentions := m.Mentions
-	if mentions == nil {
-		mentions = []string{}
-	}
 	return messageResponse{
 		ID:                m.ID,
 		SessionID:         m.SessionID,
@@ -45,10 +41,22 @@ func toMessageResponse(m db.Message) messageResponse {
 		AuthorType:        m.AuthorType,
 		Content:           m.Content,
 		ExpandableContent: ec,
-		Mentions:          mentions,
 		Status:            m.Status,
 		CreatedAt:         m.CreatedAt,
 	}
+}
+
+// deuceMentionRE detects an @deuce mention in message content, server-side
+// (R5). The left guard (start-of-string or a non-word character) keeps email
+// addresses like clint@deuce.dev from triggering; the trailing \b keeps
+// near-misses like @deucebot from triggering. Case-insensitive.
+var deuceMentionRE = regexp.MustCompile(`(?i)(^|\W)@deuce\b`)
+
+// isStopCommand reports whether a message is the exact /stop command (R6).
+// Exact match only — "@deuce make the flicker stop" must enqueue work, not
+// cancel it (the old " stop"-suffix trigger was removed for this reason).
+func isStopCommand(content string) bool {
+	return strings.TrimSpace(content) == "/stop"
 }
 
 func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
@@ -122,9 +130,11 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// sendMessageRequest no longer carries a mentions array — mention detection is
+// server-side (R5). Pre-013 clients still send the field; unknown JSON fields
+// are ignored by the decoder, so stale tabs degrade gracefully.
 type sendMessageRequest struct {
-	Content  string   `json:"content"`
-	Mentions []string `json:"mentions"`
+	Content string `json:"content"`
 }
 
 func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
@@ -159,17 +169,12 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Mentions == nil {
-		req.Mentions = []string{}
-	}
-
 	msg, err := h.queries.CreateMessage(r.Context(), db.CreateMessageParams{
 		SessionID:         sessionID,
 		AuthorID:          userID,
 		AuthorType:        "human",
 		Content:           req.Content,
 		ExpandableContent: nil,
-		Mentions:          req.Mentions,
 		Status:            "sent",
 	})
 	if err != nil {
@@ -187,8 +192,7 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	// Find the sender's WS client to exclude — for now broadcast to all (sender checks client-side)
 	h.hub.BroadcastToSession(sessionID.String(), wsMsg, nil)
 
-	// Handle /stop command
-	if strings.TrimSpace(req.Content) == "/stop" || strings.HasSuffix(strings.TrimSpace(req.Content), " stop") {
+	if isStopCommand(req.Content) {
 		if h.runtime != nil {
 			h.runtime.CancelSession(r.Context(), sessionID.String())
 		}
@@ -196,36 +200,25 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Process agent mentions through the Pi runtime.
-	if len(req.Mentions) > 0 && h.runtime != nil {
+	// @deuce mention → enqueue a task through the Pi runtime (R5).
+	if deuceMentionRE.MatchString(req.Content) && h.runtime != nil {
 		session, err := h.queries.GetSession(r.Context(), sessionID)
 		if err == nil {
 			switch session.WorkspaceStatus {
 			case "starting":
 				h.postSystemMessage(sessionID, "Workspace is still starting — your agent request will run when it's ready.")
 			case "failed", "suspended":
-				h.postSystemMessage(sessionID, "Workspace is not available. Please restart the workspace before using agents.")
+				h.postSystemMessage(sessionID, "Workspace is not available. Please restart the workspace before using the agent.")
 			case "ready":
-				for _, mention := range req.Mentions {
-					agentID, err := uuid.Parse(mention)
-					if err != nil {
-						continue
-					}
-					if _, err := h.queries.GetAgent(r.Context(), agentID); err != nil {
-						continue
-					}
-
-					if _, err := h.runtime.Enqueue(r.Context(), agentpkg.EnqueueParams{
-						SessionID:       sessionID.String(),
-						AgentID:         agentID.String(),
-						RequestedBy:     userID.String(),
-						AnchorMessageID: msg.ID.String(),
-						Prompt:          req.Content,
-						WorkspaceID:     session.Name,
-					}); err != nil {
-						slog.Error("failed to enqueue agent task", "error", err)
-						h.postSystemMessage(sessionID, "Could not start the agent. Please try again.")
-					}
+				if _, err := h.runtime.Enqueue(r.Context(), agentpkg.EnqueueParams{
+					SessionID:       sessionID.String(),
+					RequestedBy:     userID.String(),
+					AnchorMessageID: msg.ID.String(),
+					Prompt:          req.Content,
+					WorkspaceID:     session.Name,
+				}); err != nil {
+					slog.Error("failed to enqueue agent task", "error", err)
+					h.postSystemMessage(sessionID, "Could not start the agent. Please try again.")
 				}
 			}
 		}
@@ -234,7 +227,9 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
-// StopAgent handles POST /api/sessions/{id}/agents/stop
+// StopAgent handles POST /api/sessions/{id}/agent/stop — cancels the session's
+// running task and drains its queue (R6), same semantics as the /stop chat
+// command. Session-membership gated (write class).
 func (h *Handler) StopAgent(w http.ResponseWriter, r *http.Request) {
 	sessionID, err := uuid.Parse(chi.URLParam(r, "sessionID"))
 	if err != nil {
@@ -258,26 +253,23 @@ func (h *Handler) StopAgent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// postAgentReply posts an agent's reply as a chat message and broadcasts it.
+// postAgentReply posts deuce's reply as a chat message and broadcasts it.
 // Wired into the Pi runtime (SetReplyPoster) so agent output shows in the
 // existing chat — the Super Threads task/action cards are a separate surface.
-func (h *Handler) postAgentReply(sessionID, agentID, reply string) {
+// Authorship pins to the fixed deuce UUID; the chat visibility filter keys on
+// it (R9).
+func (h *Handler) postAgentReply(sessionID, reply string) {
 	sid, err := uuid.Parse(sessionID)
 	if err != nil {
 		return
 	}
-	aid, err := uuid.Parse(agentID)
-	if err != nil {
-		aid = uuid.Nil
-	}
 	ctx := context.Background()
 	msg, err := h.queries.CreateMessage(ctx, db.CreateMessageParams{
 		SessionID:         sid,
-		AuthorID:          aid,
+		AuthorID:          uuid.MustParse(agentpkg.DeuceAgentID),
 		AuthorType:        "agent",
 		Content:           reply,
 		ExpandableContent: nil,
-		Mentions:          []string{},
 		Status:            "sent",
 	})
 	if err != nil {
@@ -289,6 +281,9 @@ func (h *Handler) postAgentReply(sessionID, agentID, reply string) {
 	h.hub.BroadcastToSession(sessionID, wsMsg, nil)
 }
 
+// postSystemMessage posts a system notice. The nil-UUID author is the system
+// sentinel — distinct from deuce's fixed UUID, so the visibility filter keeps
+// notices visible in chat while deuce's task replies stay hidden (R9).
 func (h *Handler) postSystemMessage(sessionID uuid.UUID, content string) {
 	msg, err := h.queries.CreateMessage(context.Background(), db.CreateMessageParams{
 		SessionID:         sessionID,
@@ -296,7 +291,6 @@ func (h *Handler) postSystemMessage(sessionID uuid.UUID, content string) {
 		AuthorType:        "agent",
 		Content:           content,
 		ExpandableContent: nil,
-		Mentions:          []string{},
 		Status:            "sent",
 	})
 	if err != nil {

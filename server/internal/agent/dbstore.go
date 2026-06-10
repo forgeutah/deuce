@@ -56,16 +56,11 @@ func (s *DBStore) CreateQueuedTask(ctx context.Context, p EnqueueParams) (string
 	if err != nil {
 		return "", 0, 0, fmt.Errorf("parse session id: %w", err)
 	}
-	aid, err := uuid.Parse(p.AgentID)
-	if err != nil {
-		return "", 0, 0, fmt.Errorf("parse agent id: %w", err)
-	}
 
 	var taskID string
 	seq, err := s.withSeq(ctx, p.SessionID, func(q *db.Queries, seq int64) error {
 		task, err := q.CreateTask(ctx, db.CreateTaskParams{
 			SessionID:       sid,
-			AgentID:         aid,
 			RequestedBy:     parseNullableUUID(p.RequestedBy),
 			AnchorMessageID: parseNullableUUID(p.AnchorMessageID),
 			Prompt:          p.Prompt,
@@ -82,9 +77,9 @@ func (s *DBStore) CreateQueuedTask(ctx context.Context, p EnqueueParams) (string
 		return "", 0, 0, err
 	}
 
-	// Queue position: 1-based index among the agent's queued tasks.
+	// Queue position: 1-based index among the session's queued tasks.
 	position := 1
-	if tasks, err := s.q.ListAgentTasks(ctx, db.ListAgentTasksParams{SessionID: sid, AgentID: aid}); err == nil {
+	if tasks, err := s.q.ListSessionTasks(ctx, sid); err == nil {
 		n := 0
 		for _, t := range tasks {
 			if t.State == StateQueued {
@@ -135,12 +130,8 @@ func (s *DBStore) CompleteAction(ctx context.Context, sessionID, taskID, callID,
 	})
 }
 
-func (s *DBStore) AgentSystemPrompt(ctx context.Context, agentID string) (string, error) {
-	aid, err := uuid.Parse(agentID)
-	if err != nil {
-		return "", err
-	}
-	ag, err := s.q.GetAgent(ctx, aid)
+func (s *DBStore) DeuceSystemPrompt(ctx context.Context) (string, error) {
+	ag, err := s.q.GetDeuceAgent(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -191,8 +182,8 @@ func (s *DBStore) FinishTask(ctx context.Context, sessionID, taskID, state, repl
 	})
 }
 
-func (s *DBStore) RunningTask(ctx context.Context, sessionID, agentID string) (string, bool, error) {
-	tasks, err := s.agentTasks(ctx, sessionID, agentID)
+func (s *DBStore) RunningTask(ctx context.Context, sessionID string) (string, bool, error) {
+	tasks, err := s.sessionTasks(ctx, sessionID)
 	if err != nil {
 		return "", false, err
 	}
@@ -204,8 +195,8 @@ func (s *DBStore) RunningTask(ctx context.Context, sessionID, agentID string) (s
 	return "", false, nil
 }
 
-func (s *DBStore) NextQueuedTask(ctx context.Context, sessionID, agentID string) (string, string, bool, error) {
-	tasks, err := s.agentTasks(ctx, sessionID, agentID)
+func (s *DBStore) NextQueuedTask(ctx context.Context, sessionID string) (string, string, bool, error) {
+	tasks, err := s.sessionTasks(ctx, sessionID)
 	if err != nil {
 		return "", "", false, err
 	}
@@ -215,6 +206,20 @@ func (s *DBStore) NextQueuedTask(ctx context.Context, sessionID, agentID string)
 		}
 	}
 	return "", "", false, nil
+}
+
+func (s *DBStore) QueuedTaskIDs(ctx context.Context, sessionID string) ([]string, error) {
+	tasks, err := s.sessionTasks(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, t := range tasks {
+		if t.State == StateQueued {
+			ids = append(ids, t.ID.String())
+		}
+	}
+	return ids, nil
 }
 
 func (s *DBStore) TaskState(ctx context.Context, taskID string) (string, bool, error) {
@@ -232,16 +237,12 @@ func (s *DBStore) TaskState(ctx context.Context, taskID string) (string, bool, e
 	return task.State, true, nil
 }
 
-func (s *DBStore) agentTasks(ctx context.Context, sessionID, agentID string) ([]db.Task, error) {
+func (s *DBStore) sessionTasks(ctx context.Context, sessionID string) ([]db.Task, error) {
 	sid, err := uuid.Parse(sessionID)
 	if err != nil {
 		return nil, err
 	}
-	aid, err := uuid.Parse(agentID)
-	if err != nil {
-		return nil, err
-	}
-	return s.q.ListAgentTasks(ctx, db.ListAgentTasksParams{SessionID: sid, AgentID: aid})
+	return s.q.ListSessionTasks(ctx, sid)
 }
 
 // parseNullableUUID maps an empty string to a NULL pgtype.UUID and a valid

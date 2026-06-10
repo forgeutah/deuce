@@ -193,10 +193,11 @@ func (s *Server) Router() http.Handler {
 		})
 		r.Get("/users", h.ListUsers)
 		r.Get("/projects", h.ListProjects)
-		r.Get("/agents", h.ListAgents)
-		r.Post("/agents", h.CreateAgent)
-		r.Put("/agents/{agentID}", h.UpdateAgent)
-		r.Delete("/agents/{agentID}", h.DeleteAgent)
+		// Single built-in agent settings (deuce). GET: any authenticated user.
+		// PUT: any authenticated user — global blast radius is accepted for
+		// now (no finer role model exists; audit trail deferred, see plan).
+		r.Get("/agent", h.GetAgentSettings)
+		r.Put("/agent", h.UpdateAgentSettings)
 		r.Get("/github/orgs", h.ListGitHubOrgs)
 		r.Get("/github/repos", h.ListGitHubRepos)
 
@@ -216,8 +217,7 @@ func (s *Server) Router() http.Handler {
 				r.Get("/files", h.ListFiles)
 				r.Get("/files/content", h.GetFileContent)
 				r.Get("/vscode-uri", h.GetSessionVSCodeURI)
-				r.Put("/agents", h.UpdateSessionAgents)
-				r.Post("/agents/stop", h.StopAgent)
+				r.Post("/agent/stop", h.StopAgent)
 				r.Route("/workspace", func(r chi.Router) {
 					r.Post("/start", h.StartWorkspace)
 					r.Post("/stop", h.StopWorkspace)

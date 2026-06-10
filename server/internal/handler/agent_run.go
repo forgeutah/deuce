@@ -28,7 +28,6 @@ type agentActionResp struct {
 type agentTaskResp struct {
 	ID                     string            `json:"id"`
 	SessionID              string            `json:"sessionId"`
-	AgentID                string            `json:"agentId"`
 	RequestedBy            string            `json:"requestedBy,omitempty"`
 	AnchorMessageID        string            `json:"anchorMessageId,omitempty"`
 	Prompt                 string            `json:"prompt"`
@@ -121,7 +120,7 @@ func buildSnapshot(tasks []db.Task, actions []db.TaskAction) agentRunSnapshotRes
 			}
 		}
 		resp.Tasks = append(resp.Tasks, agentTaskResp{
-			ID: t.ID.String(), SessionID: t.SessionID.String(), AgentID: t.AgentID.String(),
+			ID: t.ID.String(), SessionID: t.SessionID.String(),
 			RequestedBy:     uuidStr(t.RequestedBy.Bytes, t.RequestedBy.Valid),
 			AnchorMessageID: uuidStr(t.AnchorMessageID.Bytes, t.AnchorMessageID.Valid),
 			Prompt:          t.Prompt, State: t.State, Seq: t.Seq,
@@ -143,18 +142,17 @@ func uuidStr(b [16]byte, valid bool) string {
 }
 
 // RecoverStuckTasks reconciles tasks left running/awaiting_input by a crash to
-// failed and clears their Pi sessions, BEFORE the scheduler starts (KTD10). It
-// retries transient DB errors a few times, then returns the error so the caller
-// can abort boot rather than serve with tasks the snapshot would report live
-// forever. Order matters: clear pi sessions (keyed on the pre-failure states)
-// before failing the tasks.
+// failed, BEFORE the scheduler starts (KTD10). It retries transient DB errors a
+// few times, then returns the error so the caller can abort boot rather than
+// serve with tasks the snapshot would report live forever. (The pre-013
+// ClearStuckPiSessions companion is gone with session_agents.pi_session_id —
+// resume-across-restart was never wired up, so every relaunch already starts a
+// fresh Pi process and there is no stale session id to clear.)
 func RecoverStuckTasks(ctx context.Context, q *db.Queries) error {
 	var err error
 	for attempt := 0; attempt < 3; attempt++ {
-		if err = q.ClearStuckPiSessions(ctx); err == nil {
-			if err = q.FailStuckTasks(ctx); err == nil {
-				return nil
-			}
+		if err = q.FailStuckTasks(ctx); err == nil {
+			return nil
 		}
 		time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
 	}

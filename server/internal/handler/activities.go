@@ -7,7 +7,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"encoding/json"
 
@@ -19,17 +18,11 @@ type activityResponse struct {
 	SessionID   uuid.UUID       `json:"sessionId"`
 	Type        string          `json:"type"`
 	Description string          `json:"description"`
-	AgentID     *uuid.UUID      `json:"agentId"`
 	Metadata    json.RawMessage `json:"metadata"`
 	Timestamp   time.Time       `json:"timestamp"`
 }
 
 func toActivityResponse(a db.ActivityItem) activityResponse {
-	var agentID *uuid.UUID
-	if a.AgentID.Valid {
-		id := uuid.UUID(a.AgentID.Bytes)
-		agentID = &id
-	}
 	metadata := json.RawMessage("null")
 	if a.Metadata != nil {
 		metadata = a.Metadata
@@ -39,7 +32,6 @@ func toActivityResponse(a db.ActivityItem) activityResponse {
 		SessionID:   a.SessionID,
 		Type:        a.Type,
 		Description: a.Description,
-		AgentID:     agentID,
 		Metadata:    metadata,
 		Timestamp:   a.CreatedAt,
 	}
@@ -84,18 +76,4 @@ func (h *Handler) ListActivities(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, result)
-}
-
-// Unused for now, but the function signature matches what the agent simulator needs
-func (h *Handler) createActivity(sessionID uuid.UUID, actType, description string, agentID *uuid.UUID) {
-	var aid pgtype.UUID
-	if agentID != nil {
-		aid = pgtype.UUID{Bytes: *agentID, Valid: true}
-	}
-	_, _ = h.queries.CreateActivity(nil, db.CreateActivityParams{
-		SessionID:   sessionID,
-		Type:        actType,
-		Description: description,
-		AgentID:     aid,
-	})
 }

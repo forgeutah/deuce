@@ -60,12 +60,6 @@ WHERE workspace_status IN ('starting', 'stopping', 'rebuilding', 'deleting');
 -- name: UpdateSessionLastActivity :exec
 UPDATE sessions SET last_activity_at = now() WHERE id = $1;
 
--- name: ListSessionAgents :many
-SELECT a.*, sa.status as agent_status FROM agents a
-JOIN session_agents sa ON a.id = sa.agent_id
-WHERE sa.session_id = $1
-ORDER BY a.name;
-
 -- name: ListSessionMembers :many
 SELECT u.* FROM users u
 JOIN session_members sm ON u.id = sm.user_id
@@ -79,18 +73,6 @@ ON CONFLICT DO NOTHING;
 
 -- name: RemoveSessionMember :exec
 DELETE FROM session_members WHERE session_id = $1 AND user_id = $2;
-
--- name: AddSessionAgent :exec
-INSERT INTO session_agents (session_id, agent_id)
-VALUES ($1, $2)
-ON CONFLICT DO NOTHING;
-
--- name: RemoveAllSessionAgents :exec
-DELETE FROM session_agents WHERE session_id = $1;
-
--- name: UpdateSessionAgentStatus :exec
-UPDATE session_agents SET status = $3
-WHERE session_id = $1 AND agent_id = $2;
 
 -- name: GetUnreadCount :one
 SELECT COUNT(*)::int FROM messages m

@@ -14,8 +14,8 @@ RETURNING (next_seq - 1)::bigint AS seq;
 SELECT COALESCE((SELECT next_seq - 1 FROM session_event_seq WHERE session_id = $1), 0)::bigint AS seq;
 
 -- name: CreateTask :one
-INSERT INTO tasks (session_id, agent_id, requested_by, anchor_message_id, prompt, state, seq)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO tasks (session_id, requested_by, anchor_message_id, prompt, state, seq)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: GetTask :one
@@ -51,12 +51,9 @@ WHERE task_id = $1 AND call_id = $2;
 UPDATE task_actions SET status = 'interrupted' WHERE task_id = $1 AND status = 'started';
 
 -- name: ListSessionTasks :many
+-- A session's tasks in creation order — drives queue-position derivation (R12)
+-- and promotion (R13) in the scheduler, plus the snapshot read.
 SELECT * FROM tasks WHERE session_id = $1 ORDER BY created_at ASC;
-
--- name: ListAgentTasks :many
--- An agent's tasks in creation order — drives queue-position derivation (R12)
--- and promotion (R13) in the scheduler.
-SELECT * FROM tasks WHERE session_id = $1 AND agent_id = $2 ORDER BY created_at ASC;
 
 -- name: ListTaskActions :many
 SELECT * FROM task_actions WHERE task_id = $1 ORDER BY seq ASC, created_at ASC;
@@ -69,12 +66,6 @@ JOIN tasks t ON t.id = ta.task_id
 WHERE t.session_id = $1
 ORDER BY ta.task_id, ta.seq ASC;
 
--- name: GetPiSessionID :one
-SELECT pi_session_id FROM session_agents WHERE session_id = $1 AND agent_id = $2;
-
--- name: UpdatePiSessionID :exec
-UPDATE session_agents SET pi_session_id = $3 WHERE session_id = $1 AND agent_id = $2;
-
 -- name: IsSessionMember :one
 -- Membership gate for steering + snapshot authorization (KTD14).
 SELECT EXISTS (
@@ -83,18 +74,8 @@ SELECT EXISTS (
 
 -- name: FailStuckTasks :exec
 -- Boot recovery (KTD10): tasks left running/awaiting_input by a crash are
--- reconciled to failed before the scheduler starts.
+-- reconciled to failed before the scheduler starts. (The pre-013 companion
+-- ClearStuckPiSessions is gone with session_agents.pi_session_id — Pi
+-- resume-across-restart was never wired up, so there is no session id to
+-- clear; every relaunch starts a fresh Pi process.)
 UPDATE tasks SET state = 'failed', updated_at = now() WHERE state IN ('running', 'awaiting_input');
-
--- name: ClearStuckPiSessions :exec
--- Boot recovery companion: clear pi_session_id for (session, agent) pairs with
--- a stuck in-flight task, so relaunch won't resume a dead Pi session. MUST run
--- BEFORE FailStuckTasks — it keys on the pre-failure states, not on 'failed'
--- (which would also clear legitimately-failed historical tasks).
-UPDATE session_agents sa
-SET pi_session_id = ''
-WHERE EXISTS (
-    SELECT 1 FROM tasks t
-    WHERE t.session_id = sa.session_id AND t.agent_id = sa.agent_id
-      AND t.state IN ('running', 'awaiting_input')
-);

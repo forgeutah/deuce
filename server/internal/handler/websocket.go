@@ -52,8 +52,11 @@ func (h *Handler) isSessionMember(userID, sessionID string) bool {
 }
 
 // handleSteer posts the reply to the channel for shared visibility (R15) and
-// routes it into the live run (feed/answer) or enqueues a new task (R19).
-func (h *Handler) handleSteer(c *ws.Client, sessionID, agentID, message string) {
+// routes it into the live run (feed/answer) or enqueues a new task (R19). It
+// gates on workspace status the same way SendMessage's mention path does (R8)
+// — steering into a still-starting workspace gets the friendly system notice
+// instead of an instantly-failed task card.
+func (h *Handler) handleSteer(c *ws.Client, sessionID, message string) {
 	if message == "" {
 		return
 	}
@@ -69,7 +72,7 @@ func (h *Handler) handleSteer(c *ws.Client, sessionID, agentID, message string) 
 
 	// Post the reply as a channel message so every session member sees it.
 	if msg, err := h.queries.CreateMessage(ctx, db.CreateMessageParams{
-		SessionID: sid, AuthorID: uid, AuthorType: "human", Content: message, Mentions: []string{}, Status: "sent",
+		SessionID: sid, AuthorID: uid, AuthorType: "human", Content: message, Status: "sent",
 	}); err == nil {
 		_ = h.queries.UpdateSessionLastActivity(ctx, sid)
 		if wsMsg, e := ws.NewServerMessage(ws.TypeNewMessage, sessionID, toMessageResponse(msg)); e == nil {
@@ -78,15 +81,20 @@ func (h *Handler) handleSteer(c *ws.Client, sessionID, agentID, message string) 
 	}
 
 	session, err := h.queries.GetSession(ctx, sid)
-	workspaceID := ""
-	if err == nil {
-		workspaceID = session.Name
+	if err != nil {
+		return
 	}
-	_, _ = h.runtime.RouteOrEnqueue(ctx, agentpkg.EnqueueParams{
-		SessionID:   sessionID,
-		AgentID:     agentID,
-		RequestedBy: c.UserID,
-		Prompt:      message,
-		WorkspaceID: workspaceID,
-	})
+	switch session.WorkspaceStatus {
+	case "starting":
+		h.postSystemMessage(sid, "Workspace is still starting — your agent request will run when it's ready.")
+	case "failed", "suspended":
+		h.postSystemMessage(sid, "Workspace is not available. Please restart the workspace before using the agent.")
+	case "ready":
+		_, _ = h.runtime.RouteOrEnqueue(ctx, agentpkg.EnqueueParams{
+			SessionID:   sessionID,
+			RequestedBy: c.UserID,
+			Prompt:      message,
+			WorkspaceID: session.Name,
+		})
+	}
 }

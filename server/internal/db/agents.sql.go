@@ -7,173 +7,29 @@ package db
 
 import (
 	"context"
-
-	"github.com/google/uuid"
 )
 
-const createAgent = `-- name: CreateAgent :one
-INSERT INTO agents (name, role, color, color_muted, provider, model, description, system_prompt)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, name, role, color, color_muted, provider, model, description, system_prompt, deleted_at, created_at, updated_at
+const getDeuceAgent = `-- name: GetDeuceAgent :one
+SELECT id, name, system_prompt FROM agents LIMIT 1
 `
 
-type CreateAgentParams struct {
-	Name         string `json:"name"`
-	Role         string `json:"role"`
-	Color        string `json:"color"`
-	ColorMuted   string `json:"color_muted"`
-	Provider     string `json:"provider"`
-	Model        string `json:"model"`
-	Description  string `json:"description"`
-	SystemPrompt string `json:"system_prompt"`
-}
-
-func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent, error) {
-	row := q.db.QueryRow(ctx, createAgent,
-		arg.Name,
-		arg.Role,
-		arg.Color,
-		arg.ColorMuted,
-		arg.Provider,
-		arg.Model,
-		arg.Description,
-		arg.SystemPrompt,
-	)
+// The agents table holds exactly one row — the built-in "deuce" agent
+// (migration 013). Single-row read backs GET /api/agent and the runtime's
+// launch-time system-prompt fetch.
+func (q *Queries) GetDeuceAgent(ctx context.Context) (Agent, error) {
+	row := q.db.QueryRow(ctx, getDeuceAgent)
 	var i Agent
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Role,
-		&i.Color,
-		&i.ColorMuted,
-		&i.Provider,
-		&i.Model,
-		&i.Description,
-		&i.SystemPrompt,
-		&i.DeletedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
+	err := row.Scan(&i.ID, &i.Name, &i.SystemPrompt)
 	return i, err
 }
 
-const getAgent = `-- name: GetAgent :one
-SELECT id, name, role, color, color_muted, provider, model, description, system_prompt, deleted_at, created_at, updated_at FROM agents WHERE id = $1
+const updateDeuceSystemPrompt = `-- name: UpdateDeuceSystemPrompt :one
+UPDATE agents SET system_prompt = $1 RETURNING id, name, system_prompt
 `
 
-func (q *Queries) GetAgent(ctx context.Context, id uuid.UUID) (Agent, error) {
-	row := q.db.QueryRow(ctx, getAgent, id)
+func (q *Queries) UpdateDeuceSystemPrompt(ctx context.Context, systemPrompt string) (Agent, error) {
+	row := q.db.QueryRow(ctx, updateDeuceSystemPrompt, systemPrompt)
 	var i Agent
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Role,
-		&i.Color,
-		&i.ColorMuted,
-		&i.Provider,
-		&i.Model,
-		&i.Description,
-		&i.SystemPrompt,
-		&i.DeletedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const listAgents = `-- name: ListAgents :many
-SELECT id, name, role, color, color_muted, provider, model, description, system_prompt, deleted_at, created_at, updated_at FROM agents WHERE deleted_at IS NULL ORDER BY name
-`
-
-func (q *Queries) ListAgents(ctx context.Context) ([]Agent, error) {
-	rows, err := q.db.Query(ctx, listAgents)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Agent{}
-	for rows.Next() {
-		var i Agent
-		if err := rows.Scan(
-			&i.ID,
-			&i.Name,
-			&i.Role,
-			&i.Color,
-			&i.ColorMuted,
-			&i.Provider,
-			&i.Model,
-			&i.Description,
-			&i.SystemPrompt,
-			&i.DeletedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const softDeleteAgent = `-- name: SoftDeleteAgent :exec
-UPDATE agents SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL
-`
-
-func (q *Queries) SoftDeleteAgent(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, softDeleteAgent, id)
-	return err
-}
-
-const updateAgent = `-- name: UpdateAgent :one
-UPDATE agents
-SET name = $2,
-    role = $3,
-    provider = $4,
-    model = $5,
-    description = $6,
-    system_prompt = $7,
-    updated_at = now()
-WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, name, role, color, color_muted, provider, model, description, system_prompt, deleted_at, created_at, updated_at
-`
-
-type UpdateAgentParams struct {
-	ID           uuid.UUID `json:"id"`
-	Name         string    `json:"name"`
-	Role         string    `json:"role"`
-	Provider     string    `json:"provider"`
-	Model        string    `json:"model"`
-	Description  string    `json:"description"`
-	SystemPrompt string    `json:"system_prompt"`
-}
-
-func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent, error) {
-	row := q.db.QueryRow(ctx, updateAgent,
-		arg.ID,
-		arg.Name,
-		arg.Role,
-		arg.Provider,
-		arg.Model,
-		arg.Description,
-		arg.SystemPrompt,
-	)
-	var i Agent
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Role,
-		&i.Color,
-		&i.ColorMuted,
-		&i.Provider,
-		&i.Model,
-		&i.Description,
-		&i.SystemPrompt,
-		&i.DeletedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
+	err := row.Scan(&i.ID, &i.Name, &i.SystemPrompt)
 	return i, err
 }

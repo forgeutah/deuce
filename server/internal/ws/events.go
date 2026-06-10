@@ -37,21 +37,21 @@ const (
 const MaxSteerLen = 8000
 
 // ClientMessage is a message from a client. The base shape is type+sessionId;
-// steer messages additionally carry agentId + message.
+// steer messages additionally carry message. (Pre-013 clients also sent an
+// agentId field on steer frames — unknown JSON fields are ignored by the
+// decoder, so stale tabs degrade gracefully.)
 type ClientMessage struct {
 	Type      string `json:"type"`
 	SessionID string `json:"sessionId"`
-	AgentID   string `json:"agentId,omitempty"`
 	Message   string `json:"message,omitempty"`
 }
 
 // TaskEventPayload is the JSON payload for the task-lifecycle AgentRunEvents
 // (enqueued / started / awaiting_input / completed). Fields are populated per
-// event type; seq + taskId + agentId are always set.
+// event type; seq + taskId are always set.
 type TaskEventPayload struct {
 	Seq             int64  `json:"seq"`
 	TaskID          string `json:"taskId"`
-	AgentID         string `json:"agentId"`
 	RequestedBy     string `json:"requestedBy,omitempty"`
 	AnchorMessageID string `json:"anchorMessageId,omitempty"`
 	Prompt          string `json:"prompt,omitempty"`
@@ -68,10 +68,9 @@ type TaskEventPayload struct {
 
 // ActionEventPayload is the JSON payload for action_started / action_completed.
 type ActionEventPayload struct {
-	Seq     int64  `json:"seq"`
-	TaskID  string `json:"taskId"`
-	AgentID string `json:"agentId"`
-	CallID  string `json:"callId"`
+	Seq    int64  `json:"seq"`
+	TaskID string `json:"taskId"`
+	CallID string `json:"callId"`
 	Tool    string `json:"tool,omitempty"`
 	Arg     string `json:"arg,omitempty"`
 	Text    string `json:"text,omitempty"`

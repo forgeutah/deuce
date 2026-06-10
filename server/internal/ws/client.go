@@ -36,8 +36,8 @@ type Client struct {
 	// session-membership check (KTD14). When nil, access is allowed — production
 	// wiring MUST set it; an unset gate is a misconfiguration, not a default.
 	Authorize func(userID, sessionID string) bool
-	// OnSteer routes a steer reply for (sessionID, agentID); set by the handler.
-	OnSteer func(client *Client, sessionID, agentID, message string)
+	// OnSteer routes a steer reply for a session; set by the handler.
+	OnSteer func(client *Client, sessionID, message string)
 }
 
 func (c *Client) authorized(sessionID string) bool {
@@ -109,7 +109,7 @@ func (c *Client) ReadPump(ctx context.Context) {
 				text = text[:MaxSteerLen]
 			}
 			if c.OnSteer != nil {
-				c.OnSteer(c, msg.SessionID, msg.AgentID, text)
+				c.OnSteer(c, msg.SessionID, text)
 			}
 		default:
 			slog.Warn("unknown message type", "type", msg.Type, "userID", c.UserID)

@@ -39,25 +39,34 @@ type Store interface {
 	// reply, force-resolves any still-open actions, and returns the event seq.
 	FinishTask(ctx context.Context, sessionID, taskID, state, reply string) (seq int64, err error)
 
-	// RunningTask returns the running (or awaiting_input) task for a key, if any.
-	RunningTask(ctx context.Context, sessionID, agentID string) (taskID string, ok bool, err error)
+	// RunningTask returns the session's running (or awaiting_input) task, if any.
+	RunningTask(ctx context.Context, sessionID string) (taskID string, ok bool, err error)
 
-	// NextQueuedTask returns the oldest queued task for a key, if any.
-	NextQueuedTask(ctx context.Context, sessionID, agentID string) (taskID, prompt string, ok bool, err error)
+	// NextQueuedTask returns the session's oldest queued task, if any.
+	NextQueuedTask(ctx context.Context, sessionID string) (taskID, prompt string, ok bool, err error)
+
+	// QueuedTaskIDs returns every queued task in the session, oldest first.
+	// Backs CancelSession's queue drain (R6).
+	QueuedTaskIDs(ctx context.Context, sessionID string) ([]string, error)
 
 	// TaskState returns the current state of a task.
 	TaskState(ctx context.Context, taskID string) (state string, ok bool, err error)
 
-	// AgentSystemPrompt returns the agent's configured system prompt (empty
-	// when unset). Applied to the Pi process at launch so the agent carries its
-	// persona/instructions (the legacy executor did this via --append-system-prompt).
-	AgentSystemPrompt(ctx context.Context, agentID string) (string, error)
+	// DeuceSystemPrompt returns deuce's configured system prompt (empty when
+	// unset). Applied to the Pi process at launch via --append-system-prompt.
+	DeuceSystemPrompt(ctx context.Context) (string, error)
 }
+
+// DeuceAgentID is the fixed UUID of the single built-in deuce agent. It MUST
+// match the row seeded by migration 013_single_deuce_agent.sql and the DEUCE
+// constant in src/lib/deuce.ts — message authorship, the chat visibility
+// filter, and the migration's historical repoint all pin to it. The nil UUID
+// stays reserved as the system-notice author sentinel.
+const DeuceAgentID = "00000000-0000-0000-0000-00000000000d"
 
 // EnqueueParams describes a new task to enqueue.
 type EnqueueParams struct {
 	SessionID       string
-	AgentID         string
 	RequestedBy     string
 	AnchorMessageID string
 	Prompt          string

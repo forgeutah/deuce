@@ -63,14 +63,6 @@ type SetSteeringMode struct {
 
 func (SetSteeringMode) commandType() string { return "set_steering_mode" }
 
-// SwitchSession re-attaches a restarted process to a prior session by file
-// path (KTD13 continuity). Pi identifies sessions by file path or partial UUID.
-type SwitchSession struct {
-	SessionPath string `json:"sessionPath"`
-}
-
-func (SwitchSession) commandType() string { return "switch_session" }
-
 // ExtensionUIResponse answers a blocking extension_ui_request (the ask-user
 // mechanism, KTD15). The ID must match the originating request's ID.
 type ExtensionUIResponse struct {
