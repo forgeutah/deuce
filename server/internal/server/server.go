@@ -131,15 +131,6 @@ func (s *Server) Router() http.Handler {
 
 	tm := terminal.NewManager()
 
-	// Create agent executor and queue
-	exec := agent.NewExecutor(wm, s.cfg.AnthropicAPIKey)
-	aq := agent.NewQueue()
-
-	// Startup recovery: reset stale agent statuses from prior server crash
-	if err := s.queries.ResetStaleAgentStatuses(context.Background()); err != nil {
-		slog.Warn("failed to reset stale agent statuses", "error", err)
-	}
-
 	// Startup recovery: flip any workspace_status sitting in a transitional
 	// state (starting/stopping/rebuilding/deleting) to `failed`. Their owning
 	// goroutines died with the prior process; without this, the rows would
@@ -152,35 +143,30 @@ func (s *Server) Router() http.Handler {
 	// PublicHostname / SSHListenAddr come from config (U11). The vscode-uri
 	// endpoint falls back to r.Host when PublicHostname is empty (dev mode);
 	// proxy mode requires it via config.Validate.
-	h := handler.New(s.queries, s.pool, s.hub, s.cfg.GitHubToken, wm, tm, exec, aq, s.cfg.WSAllowedOriginList(), s.cfg.PublicHostname, s.cfg.SSHListenAddr)
+	h := handler.New(s.queries, s.pool, s.hub, s.cfg.GitHubToken, wm, tm, s.cfg.WSAllowedOriginList(), s.cfg.PublicHostname, s.cfg.SSHListenAddr)
 	if s.sshAvailable != nil {
 		h.SetSSHAvailable(s.sshAvailable)
 	}
 
-	// Agent harness selection (KTD11). Default "pi": run boot recovery to
-	// completion BEFORE the runtime starts accepting work (KTD10 happens-before),
-	// then wire the runtime into the handler. Legacy "claude" keeps the executor.
-	if s.cfg.AgentHarness == "pi" {
-		if err := handler.RecoverStuckTasks(context.Background(), s.queries); err != nil {
-			// Abort boot: serving with crash-stuck tasks would report them live
-			// in snapshots forever (KTD10 retry-then-abort).
-			panic(fmt.Sprintf("pi harness boot recovery failed: %v", err))
-		}
-		launcher := pirun.NewDevpodLauncher(wm, s.cfg.PiProvider, s.cfg.PiModel)
-		sup := pirun.NewSupervisor(launcher, s.cfg.AnthropicAPIKey)
-		basePrompt := s.cfg.AgentSystemPrompt
-		if basePrompt == "" {
-			basePrompt = agent.DefaultBaseSystemPrompt
-		}
-		rt := agent.NewRuntime(agent.NewDBStore(s.pool, s.queries), sup, s.hub, basePrompt)
-		rt.Start()
-		h.SetRuntime(rt)
-		s.piSupervisor = sup
-		s.piRuntime = rt
-		slog.Info("agent harness: pi")
-	} else {
-		slog.Info("agent harness: claude (legacy)")
+	// Pi agent harness: run boot recovery to completion BEFORE the runtime
+	// starts accepting work (KTD10 happens-before), then wire the runtime
+	// into the handler.
+	if err := handler.RecoverStuckTasks(context.Background(), s.queries); err != nil {
+		// Abort boot: serving with crash-stuck tasks would report them live
+		// in snapshots forever (KTD10 retry-then-abort).
+		panic(fmt.Sprintf("pi harness boot recovery failed: %v", err))
 	}
+	launcher := pirun.NewDevpodLauncher(wm, s.cfg.PiProvider, s.cfg.PiModel)
+	sup := pirun.NewSupervisor(launcher, s.cfg.AnthropicAPIKey)
+	basePrompt := s.cfg.AgentSystemPrompt
+	if basePrompt == "" {
+		basePrompt = agent.DefaultBaseSystemPrompt
+	}
+	rt := agent.NewRuntime(agent.NewDBStore(s.pool, s.queries), sup, s.hub, basePrompt)
+	rt.Start()
+	h.SetRuntime(rt)
+	s.piSupervisor = sup
+	s.piRuntime = rt
 	s.handler = h
 
 	go s.hub.Run()

@@ -15,14 +15,11 @@ const (
 
 // Server-to-client message types
 const (
-	TypeNewMessage      = "new_message"
-	TypeAgentStatus     = "agent_status"
-	TypeTypingIndicator = "typing_indicator"
-	TypeActivityUpdate  = "activity_update"
-	TypeSessionUpdate   = "session_update"
-	TypeUnreadUpdate    = "unread_update"
-	TypeWorkspaceLog    = "workspace_log"
-	TypeAgentOutput     = "agent_output"
+	TypeNewMessage     = "new_message"
+	TypeActivityUpdate = "activity_update"
+	TypeSessionUpdate  = "session_update"
+	TypeUnreadUpdate   = "unread_update"
+	TypeWorkspaceLog   = "workspace_log"
 
 	// AgentRunEvent family (Super Threads). Append-only, per-session
 	// monotonic-seq deltas applied client-side by seq. Deliberately NOT routed

@@ -60,7 +60,7 @@ func newVisFixture(t *testing.T) *visFixture {
 	hub := ws.NewHub()
 	go hub.Run()
 
-	h := New(q, pool, hub, "", nil, nil, nil, nil, nil, "", "")
+	h := New(q, pool, hub, "", nil, nil, nil, "", "")
 
 	r := chi.NewRouter()
 	r.Use(auth.Middleware(""))

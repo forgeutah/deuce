@@ -81,22 +81,6 @@ func (q *Queries) GetAgent(ctx context.Context, id uuid.UUID) (Agent, error) {
 	return i, err
 }
 
-const getClaudeSessionID = `-- name: GetClaudeSessionID :one
-SELECT claude_session_id FROM session_agents WHERE session_id = $1 AND agent_id = $2
-`
-
-type GetClaudeSessionIDParams struct {
-	SessionID uuid.UUID `json:"session_id"`
-	AgentID   uuid.UUID `json:"agent_id"`
-}
-
-func (q *Queries) GetClaudeSessionID(ctx context.Context, arg GetClaudeSessionIDParams) (string, error) {
-	row := q.db.QueryRow(ctx, getClaudeSessionID, arg.SessionID, arg.AgentID)
-	var claude_session_id string
-	err := row.Scan(&claude_session_id)
-	return claude_session_id, err
-}
-
 const listAgents = `-- name: ListAgents :many
 SELECT id, name, role, color, color_muted, provider, model, description, system_prompt, deleted_at, created_at, updated_at FROM agents WHERE deleted_at IS NULL ORDER BY name
 `
@@ -132,15 +116,6 @@ func (q *Queries) ListAgents(ctx context.Context) ([]Agent, error) {
 		return nil, err
 	}
 	return items, nil
-}
-
-const resetStaleAgentStatuses = `-- name: ResetStaleAgentStatuses :exec
-UPDATE session_agents SET status = 'idle' WHERE status = 'working'
-`
-
-func (q *Queries) ResetStaleAgentStatuses(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, resetStaleAgentStatuses)
-	return err
 }
 
 const softDeleteAgent = `-- name: SoftDeleteAgent :exec
@@ -201,19 +176,4 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		&i.UpdatedAt,
 	)
 	return i, err
-}
-
-const updateClaudeSessionID = `-- name: UpdateClaudeSessionID :exec
-UPDATE session_agents SET claude_session_id = $3 WHERE session_id = $1 AND agent_id = $2
-`
-
-type UpdateClaudeSessionIDParams struct {
-	SessionID       uuid.UUID `json:"session_id"`
-	AgentID         uuid.UUID `json:"agent_id"`
-	ClaudeSessionID string    `json:"claude_session_id"`
-}
-
-func (q *Queries) UpdateClaudeSessionID(ctx context.Context, arg UpdateClaudeSessionIDParams) error {
-	_, err := q.db.Exec(ctx, updateClaudeSessionID, arg.SessionID, arg.AgentID, arg.ClaudeSessionID)
-	return err
 }
