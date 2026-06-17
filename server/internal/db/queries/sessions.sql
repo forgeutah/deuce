@@ -4,10 +4,21 @@
 -- session_members. session_members is the write/participation gate, not the
 -- read gate. The session -> project -> team -> team_members chain has one row
 -- per (session, user) so no DISTINCT is needed.
+-- Archived sessions are excluded here; they surface only through
+-- ListArchivedSessionsForUser (the Archived view).
 SELECT s.* FROM sessions s
 JOIN projects p ON p.id = s.project_id
 JOIN team_members tm ON tm.team_id = p.team_id
-WHERE tm.user_id = $1
+WHERE tm.user_id = $1 AND s.status != 'archived'
+ORDER BY s.last_activity_at DESC;
+
+-- name: ListArchivedSessionsForUser :many
+-- Same team-scoped visibility as ListSessionsForUser, restricted to archived
+-- sessions. Backs the on-demand Archived view (GET /sessions?archived=true).
+SELECT s.* FROM sessions s
+JOIN projects p ON p.id = s.project_id
+JOIN team_members tm ON tm.team_id = p.team_id
+WHERE tm.user_id = $1 AND s.status = 'archived'
 ORDER BY s.last_activity_at DESC;
 
 -- name: GetSession :one
