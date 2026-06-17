@@ -27,6 +27,10 @@ interface SessionState {
   teams: Team[];
   projects: Project[];
   sessions: Session[];
+  // Archived sessions, loaded on demand for the Archived view. Kept separate
+  // from `sessions` so the session_update list refetch (which replaces
+  // `sessions` with the non-archived list) never clobbers the archived view.
+  archivedSessions: Session[];
   messages: Record<string, Message[]>;
   activities: Record<string, ActivityItem[]>;
   fileTrees: Record<string, FileNode[]>;
@@ -82,6 +86,13 @@ interface SessionState {
     sessionId: string,
     status: Session["workspaceStatus"],
   ) => void;
+  // Archive: hide a session from the sidebar (and tear down its container,
+  // server-side) while preserving its history. loadArchivedSessions fetches
+  // the Archived view; archiveSession/restoreSession move a session between
+  // the live and archived lists optimistically.
+  loadArchivedSessions: () => Promise<void>;
+  archiveSession: (sessionId: string) => Promise<void>;
+  restoreSession: (sessionId: string) => Promise<void>;
 
   // Data setters
   setCurrentUser: (user: User | null) => void;
@@ -103,6 +114,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   teams: [],
   projects: [],
   sessions: [],
+  archivedSessions: [],
   messages: {},
   activities: {},
   fileTrees: {},
@@ -351,6 +363,36 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         s.id === sessionId ? { ...s, workspaceStatus: status } : s,
       ),
     })),
+
+  loadArchivedSessions: async () => {
+    const archived = await api.listArchivedSessions();
+    set({ archivedSessions: archived });
+  },
+
+  archiveSession: async (sessionId) => {
+    await api.archiveSession(sessionId);
+    // Optimistically drop it from the sidebar. The server also broadcasts a
+    // session_update that refetches the (now archived-filtered) list; doing
+    // it here too keeps the UI snappy and consistent if that refetch lags.
+    set((state) => ({
+      sessions: state.sessions.filter((s) => s.id !== sessionId),
+      // If the archived session was active, clear the pointer so the UI
+      // doesn't strand on a now-hidden view (mirrors setSessions).
+      activeSessionId:
+        state.activeSessionId === sessionId ? null : state.activeSessionId,
+    }));
+  },
+
+  restoreSession: async (sessionId) => {
+    await api.unarchiveSession(sessionId);
+    // Drop it from the archived view; the session_update refetch (or the next
+    // listSessions) repopulates the live sidebar list.
+    set((state) => ({
+      archivedSessions: state.archivedSessions.filter(
+        (s) => s.id !== sessionId,
+      ),
+    }));
+  },
 
   setCurrentUser: (currentUser) => set({ currentUser }),
   setTeams: (teams) => set({ teams }),
