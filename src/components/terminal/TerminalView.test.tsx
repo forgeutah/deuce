@@ -324,8 +324,16 @@ describe("TerminalView replay gate", () => {
   });
 
   it("does not flash the indicator when output arrives promptly", () => {
+    // Re-attaching to a running PTY paints from the replay buffer within a
+    // few milliseconds. The indicator must never appear at all in that
+    // window — showing and immediately hiding it reads as a glitch.
     vi.useFakeTimers();
     const { ws } = setup();
+
+    act(() => {
+      vi.advanceTimersByTime(20);
+    });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
     deliver(ws, 0x02, "previous scrollback");
     act(() => {
