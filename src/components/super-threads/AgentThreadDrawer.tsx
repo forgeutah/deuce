@@ -21,6 +21,7 @@ import { DEUCE } from "@/lib/deuce";
 import { statusOfTasks } from "@/stores/agent-runs";
 import { AgentAvatar, StopButton, TypingDots, Mentioned, ActionLog } from "./atoms";
 import { Markdown } from "@/components/ui/markdown";
+import { taskFallbackMessage } from "./utils";
 
 type UserLookup = (id?: string) => Pick<User, "name" | "avatar"> | undefined;
 
@@ -185,12 +186,8 @@ function Turn({
           <div className="bd">
             {task.reply ? (
               <Markdown>{task.reply}</Markdown>
-            ) : task.state === "failed" ? (
-              "Run failed."
-            ) : task.state === "cancelled" ? (
-              "Run cancelled."
             ) : (
-              "Done."
+              taskFallbackMessage(task.state)
             )}
           </div>
         </div>
