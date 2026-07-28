@@ -2,6 +2,7 @@ package sshproxy
 
 import (
 	"context"
+	"log/slog"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -76,6 +77,27 @@ type envEntry struct {
 	Value string
 }
 
+// resolveExecUser returns the user docker exec should run as for this
+// container, or "" to leave the image's USER in place.
+//
+// Deliberately fail-open: a devcontainer that declares no remoteUser, a
+// docker inspect that errors, or a proxy built without a workspace manager
+// (tests) all degrade to the previous behaviour rather than killing the
+// channel. The cost of guessing wrong is a git ownership warning; the cost
+// of erroring out is an unusable editor session.
+func (s *Server) resolveExecUser(ctx context.Context, container string) string {
+	if s.workspaces == nil {
+		return ""
+	}
+	user, err := s.workspaces.ContainerUser(ctx, container)
+	if err != nil {
+		slog.Warn("ssh: could not resolve container exec user; using image default",
+			"container", container, "error", err)
+		return ""
+	}
+	return user
+}
+
 // execMode discriminates the docker-exec invocation shapes we use.
 type execMode int
 
@@ -97,11 +119,13 @@ const (
 // matters because docker exec spawns child processes inside the container
 // namespace but the host-side `docker` binary itself may leave grandchild
 // monitors around.
-func buildExecCmd(ctx context.Context, bin, container, command string, mode execMode, env []string) *exec.Cmd {
+// `user` is the devcontainer's remoteUser (see workspace.ContainerUser);
+// empty leaves the image's USER in place.
+func buildExecCmd(ctx context.Context, bin, container, command string, mode execMode, env []string, user string) *exec.Cmd {
 	if bin == "" {
 		bin = defaultDockerBin
 	}
-	args := dockerArgs(container, command, mode)
+	args := dockerArgs(container, command, mode, user)
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -131,14 +155,19 @@ func buildExecCmd(ctx context.Context, bin, container, command string, mode exec
 // the inputs go through ssh.Unmarshal of a typed payload struct (host
 // is a length-prefixed string, port is a uint32), so the only attack
 // surface is the validation rules — not shell-parsing.
-func buildTCPForwardCmd(ctx context.Context, bin, container, host string, port uint32) *exec.Cmd {
+func buildTCPForwardCmd(ctx context.Context, bin, container, host string, port uint32, user string) *exec.Cmd {
 	if bin == "" {
 		bin = defaultDockerBin
 	}
 	script := "exec 3<>/dev/tcp/" + host + "/" + strconv.FormatUint(uint64(port), 10) + " || exit 1\n" +
 		"( cat <&3; kill -TERM $$ 2>/dev/null ) &\n" +
 		"cat >&3\n"
-	cmd := exec.CommandContext(ctx, bin, "exec", "-i", container, "bash", "-c", script)
+	args := []string{"exec"}
+	if user != "" {
+		args = append(args, "--user", user)
+	}
+	args = append(args, "-i", container, "bash", "-c", script)
+	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	return cmd
 }
@@ -146,17 +175,29 @@ func buildTCPForwardCmd(ctx context.Context, bin, container, host string, port u
 // dockerArgs builds the argv slice for a docker exec invocation in the
 // given mode. Exposed for unit tests so they can assert the exact argv
 // without running docker.
-func dockerArgs(container, command string, mode execMode) []string {
+// `user`, when non-empty, is passed as `--user` so the exec runs as the
+// devcontainer's remoteUser rather than the image's USER. Those differ on
+// most devcontainer images (USER root + remoteUser vscode), and the mismatch
+// makes git reject the workspace as dubiously-owned. Empty means "leave the
+// image's USER alone" — an empty `--user` would make docker reject the exec.
+func dockerArgs(container, command string, mode execMode, user string) []string {
+	// The flag belongs to `docker exec`, so it must precede the container
+	// name; anything after that is the in-container command.
+	pre := []string{"exec"}
+	if user != "" {
+		pre = append(pre, "--user", user)
+	}
+
 	switch mode {
 	case execModePTYShell:
-		return []string{"exec", "-it", container, "/bin/bash", "-l"}
+		return append(pre, "-it", container, "/bin/bash", "-l")
 	case execModeNonPTYShell:
-		return []string{"exec", "-i", container, "/bin/bash", "-l"}
+		return append(pre, "-i", container, "/bin/bash", "-l")
 	case execModePTYExec:
-		return []string{"exec", "-it", container, "/bin/sh", "-c", command}
+		return append(pre, "-it", container, "/bin/sh", "-c", command)
 	case execModeSFTP:
-		return []string{"exec", "-i", container, "/usr/lib/openssh/sftp-server", "-e"}
+		return append(pre, "-i", container, "/usr/lib/openssh/sftp-server", "-e")
 	default: // execModeNonPTY
-		return []string{"exec", "-i", container, "/bin/sh", "-c", command}
+		return append(pre, "-i", container, "/bin/sh", "-c", command)
 	}
 }

@@ -25,7 +25,7 @@ import (
 // ----------------------------------------------------------------------
 
 func TestDockerArgs_NonPTY(t *testing.T) {
-	got := dockerArgs("alice", "echo hi", execModeNonPTY)
+	got := dockerArgs("alice", "echo hi", execModeNonPTY, "")
 	want := []string{"exec", "-i", "alice", "/bin/sh", "-c", "echo hi"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("dockerArgs(non-pty):\n got: %#v\nwant: %#v", got, want)
@@ -33,7 +33,7 @@ func TestDockerArgs_NonPTY(t *testing.T) {
 }
 
 func TestDockerArgs_PTYShell(t *testing.T) {
-	got := dockerArgs("alice", "", execModePTYShell)
+	got := dockerArgs("alice", "", execModePTYShell, "")
 	want := []string{"exec", "-it", "alice", "/bin/bash", "-l"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("dockerArgs(pty-shell):\n got: %#v\nwant: %#v", got, want)
@@ -45,7 +45,7 @@ func TestDockerArgs_PTYShell(t *testing.T) {
 // pty driver can't echo VS Code's piped install-script bytes back and
 // corrupt the byte stream it parses.
 func TestDockerArgs_NonPTYShell(t *testing.T) {
-	got := dockerArgs("alice", "", execModeNonPTYShell)
+	got := dockerArgs("alice", "", execModeNonPTYShell, "")
 	want := []string{"exec", "-i", "alice", "/bin/bash", "-l"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("dockerArgs(non-pty-shell):\n got: %#v\nwant: %#v", got, want)
@@ -53,7 +53,7 @@ func TestDockerArgs_NonPTYShell(t *testing.T) {
 }
 
 func TestDockerArgs_PTYExec(t *testing.T) {
-	got := dockerArgs("alice", "ls /", execModePTYExec)
+	got := dockerArgs("alice", "ls /", execModePTYExec, "")
 	want := []string{"exec", "-it", "alice", "/bin/sh", "-c", "ls /"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("dockerArgs(pty-exec):\n got: %#v\nwant: %#v", got, want)
@@ -61,7 +61,7 @@ func TestDockerArgs_PTYExec(t *testing.T) {
 }
 
 func TestDockerArgs_SFTP(t *testing.T) {
-	got := dockerArgs("alice", "", execModeSFTP)
+	got := dockerArgs("alice", "", execModeSFTP, "")
 	want := []string{"exec", "-i", "alice", "/usr/lib/openssh/sftp-server", "-e"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("dockerArgs(sftp):\n got: %#v\nwant: %#v", got, want)
@@ -71,7 +71,7 @@ func TestDockerArgs_SFTP(t *testing.T) {
 func TestBuildExecCmd_SetsPgidAndEnv(t *testing.T) {
 	ctx := context.Background()
 	env := []string{"LANG=C", "VSCODE_X=1"}
-	cmd := buildExecCmd(ctx, "/usr/bin/docker", "alice", "echo hi", execModeNonPTY, env)
+	cmd := buildExecCmd(ctx, "/usr/bin/docker", "alice", "echo hi", execModeNonPTY, env, "")
 	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {
 		t.Errorf("expected Setpgid: true, got %#v", cmd.SysProcAttr)
 	}
@@ -84,7 +84,7 @@ func TestBuildExecCmd_SetsPgidAndEnv(t *testing.T) {
 }
 
 func TestBuildExecCmd_EmptyBinUsesDefault(t *testing.T) {
-	cmd := buildExecCmd(context.Background(), "", "alice", "echo hi", execModeNonPTY, nil)
+	cmd := buildExecCmd(context.Background(), "", "alice", "echo hi", execModeNonPTY, nil, "")
 	if got := cmd.Args[0]; got != defaultDockerBin && !strings.HasSuffix(got, defaultDockerBin) {
 		t.Errorf("empty bin should fall back to %q, got %q", defaultDockerBin, got)
 	}

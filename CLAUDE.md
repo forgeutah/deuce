@@ -227,7 +227,7 @@ DEUCE_WS_ALLOWED_ORIGINS=vmname.exe.xyz
 The browser **Terminal panel** uses `devpod ssh` (VM sshd → DevPod's in-container shim → user shell). The **Open-in-VS-Code** path uses `docker exec`. They diverge on:
 
 - **Environment:** `docker exec` does not set `SSH_*` vars; the SSH proxy explicitly forwards only `VSCODE_*`, `LANG`, `LC_*`, `TERM`, `HOME`, `USER`, `SHELL` (allowlist defeats `LD_PRELOAD` injection). The browser terminal inherits whatever DevPod forwards.
-- **UID:** `devpod ssh` runs as the devcontainer's `remoteUser` (typically `vscode`/`node`). `docker exec` defaults to the image's `USER` directive (which is often the same user, but not guaranteed — verify per image).
+- **UID:** both paths run as the devcontainer's `remoteUser` (typically `vscode`/`node`). `devpod ssh` honors it natively; the SSH proxy resolves it from the container's `devcontainer.metadata` label and passes `--user` (`workspace.ContainerUser`). Without that, `docker exec` would fall back to the image's `USER` — commonly `root` — and git would reject the `remoteUser`-owned workspace with `fatal: detected dubious ownership`. A container declaring neither `remoteUser` nor `containerUser` still falls back to the image's `USER`. Note the `devpod.user` label is *not* this value; it reports `root` on images that declare a `remoteUser`.
 - **Shell startup:** `docker exec -it /bin/bash -l` is a login shell; the terminal panel's interactive bash is non-login.
 
 Users may see "my git config works in the terminal but not VS Code" surprises — document the divergence in user-facing docs. Convergence (route the terminal panel through the SSH proxy too) is reserved as a v2 cleanup.

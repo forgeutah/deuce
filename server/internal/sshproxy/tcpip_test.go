@@ -75,7 +75,7 @@ func TestValidateLoopbackDest_RejectsBadPorts(t *testing.T) {
 // directions — are all locked.
 func TestBuildTCPForwardCmd_Argv(t *testing.T) {
 	ctx := context.Background()
-	cmd := buildTCPForwardCmd(ctx, "/usr/bin/docker", "alice", "127.0.0.1", 40301)
+	cmd := buildTCPForwardCmd(ctx, "/usr/bin/docker", "alice", "127.0.0.1", 40301, "")
 
 	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {
 		t.Errorf("expected Setpgid: true, got %#v", cmd.SysProcAttr)
@@ -109,7 +109,7 @@ func TestBuildTCPForwardCmd_Argv(t *testing.T) {
 // TestBuildExecCmd_EmptyBinUsesDefault — empty `bin` should resolve to
 // the package default ("docker" from $PATH).
 func TestBuildTCPForwardCmd_EmptyBinUsesDefault(t *testing.T) {
-	cmd := buildTCPForwardCmd(context.Background(), "", "alice", "127.0.0.1", 22)
+	cmd := buildTCPForwardCmd(context.Background(), "", "alice", "127.0.0.1", 22, "")
 	if len(cmd.Args) < 1 {
 		t.Fatalf("empty argv: %v", cmd.Args)
 	}
