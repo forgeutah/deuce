@@ -26,6 +26,12 @@ describe("toPlainText", () => {
     expect(out).not.toContain("`");
   });
 
+  it("preserves snake_case identifiers while stripping emphasis", () => {
+    expect(toPlainText("call _my_ function_name here")).toBe(
+      "call my function_name here",
+    );
+  });
+
   it("strips ordered-list markers", () => {
     expect(toPlainText("1. first\n2. second")).toBe("first second");
   });

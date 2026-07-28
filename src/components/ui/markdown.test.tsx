@@ -57,6 +57,15 @@ describe("Markdown", () => {
     expect(link.getAttribute("rel")).toContain("noreferrer");
   });
 
+  it("preserves single newlines as line breaks (chat soft-break behavior)", () => {
+    const { container } = render(<Markdown>{"line one\nline two"}</Markdown>);
+    // remark-breaks turns a single newline into a hard break rather than
+    // collapsing the two lines onto one.
+    expect(container.querySelector("br")).toBeInTheDocument();
+    expect(container).toHaveTextContent("line one");
+    expect(container).toHaveTextContent("line two");
+  });
+
   it("renders blank for empty or whitespace-only input without throwing", () => {
     const { container } = render(<Markdown>{"   "}</Markdown>);
     expect(container.querySelector(".md")).toBeInTheDocument();

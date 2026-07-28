@@ -11,6 +11,7 @@
 
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
 import { cn } from "@/lib/utils";
 import { codeComponents } from "./markdown-code";
 
@@ -58,7 +59,10 @@ export function Markdown({
 }) {
   return (
     <div className={cn("md", className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkBreaks]}
+        components={components}
+      >
         {children}
       </ReactMarkdown>
     </div>

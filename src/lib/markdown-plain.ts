@@ -16,8 +16,12 @@ export function toPlainText(markdown: string): string {
   s = s.replace(/^[ \t]*#{1,6}[ \t]+/gm, "");
   s = s.replace(/^[ \t]*>[ \t]?/gm, "");
   s = s.replace(/^[ \t]*(?:[-*+]|\d+\.)[ \t]+/gm, "");
-  // Emphasis / strikethrough markers.
-  s = s.replace(/\*\*|__|~~|\*|_/g, "");
+  // Emphasis / strikethrough markers. Paired bold/strike and single asterisks
+  // drop unconditionally; underscores only drop when they wrap a run as
+  // emphasis, so snake_case identifiers (function_name) survive intact.
+  s = s.replace(/\*\*|__|~~/g, "");
+  s = s.replace(/\*/g, "");
+  s = s.replace(/\b_([^_]+?)_\b/g, "$1");
   // Collapse all whitespace (incl. newlines) to single spaces.
   s = s.replace(/\s+/g, " ").trim();
   return s;
