@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, act } from "@testing-library/react";
+import { render, act, screen } from "@testing-library/react";
 
 // Declared through vi.hoisted so the vi.mock factories below — which are
 // hoisted to the top of the module — can reach them.
@@ -15,6 +15,7 @@ const { FakeTerminal, FakeWebSocket } = vi.hoisted(() => {
     rows = 24;
     written: string[] = [];
     disposed = false;
+    focusCount = 0;
 
     private queue: Array<{ data: string; cb?: () => void }> = [];
     private dataHandler: ((d: string) => void) | undefined;
@@ -25,6 +26,9 @@ const { FakeTerminal, FakeWebSocket } = vi.hoisted(() => {
 
     loadAddon() {}
     open() {}
+    focus() {
+      this.focusCount++;
+    }
     dispose() {
       this.disposed = true;
     }
@@ -296,6 +300,68 @@ describe("TerminalView replay gate", () => {
       cols: 80,
       rows: 24,
     });
+  });
+
+  it("focuses the terminal on mount so selecting the tab lands the cursor", () => {
+    const { term } = setup();
+
+    expect(term.focusCount).toBe(1);
+  });
+
+  it("shows a loading indicator while the terminal is still blank", () => {
+    vi.useFakeTimers();
+    setup();
+
+    // Nothing yet — the indicator is delayed to avoid flickering on a fast
+    // attach, so it must not be up immediately.
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+
+    expect(screen.getByRole("status")).toHaveTextContent("Starting terminal");
+  });
+
+  it("does not flash the indicator when output arrives promptly", () => {
+    vi.useFakeTimers();
+    const { ws } = setup();
+
+    deliver(ws, 0x02, "previous scrollback");
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("hides the loading indicator once the first output arrives", () => {
+    vi.useFakeTimers();
+    const { ws } = setup();
+
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+    expect(screen.getByRole("status")).toBeInTheDocument();
+
+    deliver(ws, 0x00, "user@container:~$ ");
+
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("keeps the indicator up when only the replay boundary has arrived", () => {
+    // `devpod ssh` spawns fast but connects slowly, so 0x03 lands on a blank
+    // screen. Treating it as ready would drop the spinner too early.
+    vi.useFakeTimers();
+    const { term, ws } = setup();
+
+    deliver(ws, 0x03);
+    act(() => term.flush());
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+
+    expect(screen.getByRole("status")).toBeInTheDocument();
   });
 
   it("clears the fallback timer on unmount", () => {
