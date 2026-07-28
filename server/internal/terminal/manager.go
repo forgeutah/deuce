@@ -15,13 +15,32 @@ import (
 // keeping memory per terminal session bounded.
 const replayBufferSize = 100 * 1024
 
+// Client receives PTY output. Replayed (historical) output is delivered
+// separately from live output so the client can tell the two apart.
+//
+// This distinction is load-bearing, not cosmetic. The replay buffer stores
+// raw PTY bytes, which may include terminal *queries* the remote shell
+// emitted earlier (OSC 11 background-colour, DA, DSR, ...). A terminal
+// emulator receiving those queries answers them, and the answer would be
+// written back to PTY stdin — landing in the shell's line buffer as garbage.
+// Framing replay distinctly lets the client suppress responses until the
+// replay boundary has passed.
+type Client interface {
+	// Write delivers live PTY output.
+	io.Writer
+	// WriteReplay delivers buffered historical output.
+	WriteReplay(p []byte) error
+	// ReplayComplete signals that no further replayed output will arrive.
+	ReplayComplete() error
+}
+
 // Session represents a single PTY session attached to a devpod ssh process.
 type Session struct {
 	ptmx *os.File
 	cmd  *exec.Cmd
 
 	mu      sync.Mutex
-	clients map[io.Writer]bool
+	clients map[Client]bool
 	replay  []byte        // recent PTY output, replayed to new clients
 	done    chan struct{} // closed when the reader goroutine exits
 }
@@ -59,7 +78,7 @@ func (m *Manager) GetOrCreate(sessionID string, cmdFactory func() *exec.Cmd) (*S
 	s := &Session{
 		ptmx:    ptmx,
 		cmd:     cmd,
-		clients: make(map[io.Writer]bool),
+		clients: make(map[Client]bool),
 		done:    make(chan struct{}),
 	}
 	m.sessions[sessionID] = s
@@ -127,26 +146,37 @@ func (s *Session) appendReplay(data []byte) {
 	}
 }
 
-// AddClient registers a writer to receive PTY output and replays the
-// recent buffer so the client doesn't land on a blank terminal.
-// The replay write happens under the session lock to keep ordering
-// consistent with concurrent readLoop fan-out.
-func (s *Session) AddClient(w io.Writer) {
+// AddClient registers a client to receive PTY output and replays the
+// recent buffer so it doesn't land on a blank terminal.
+//
+// The replay write, the replay-complete marker, and the registration all
+// happen under a single hold of the session lock. That ordering matters:
+// if the marker were sent after the lock was released, live output could
+// interleave ahead of it, and the client would suppress the response to a
+// genuinely live query.
+//
+// ReplayComplete is sent unconditionally, including when the buffer is
+// empty — a client that never receives it has no way to know replay is
+// over, and would stay muted until its own fallback timer expires.
+func (s *Session) AddClient(c Client) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.replay) > 0 {
-		if _, err := w.Write(s.replay); err != nil {
+		if err := c.WriteReplay(s.replay); err != nil {
 			return
 		}
 	}
-	s.clients[w] = true
+	if err := c.ReplayComplete(); err != nil {
+		return
+	}
+	s.clients[c] = true
 }
 
-// RemoveClient unregisters a writer from PTY output.
-func (s *Session) RemoveClient(w io.Writer) {
+// RemoveClient unregisters a client from PTY output.
+func (s *Session) RemoveClient(c Client) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.clients, w)
+	delete(s.clients, c)
 }
 
 // Done returns a channel that is closed when the PTY process exits.

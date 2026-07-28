@@ -16,8 +16,13 @@ import (
 // between the client (xterm.js) and a PTY session attached to devpod ssh.
 //
 // Wire protocol:
-//   - 0x00 + data: terminal I/O (stdin from client, stdout to client)
+//   - 0x00 + data: live terminal I/O (stdin from client, stdout to client)
 //   - 0x01 + JSON: control messages (e.g., {"cols":80,"rows":24} for resize)
+//   - 0x02 + data: replayed historical output (server → client only)
+//   - 0x03:        replay complete (server → client only, empty payload)
+//
+// 0x02/0x03 exist so the client can render scrollback without answering
+// terminal queries captured in it. See terminal.Client for why.
 func (h *Handler) HandleTerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 	sessionIDStr := chi.URLParam(r, "sessionID")
 	sessionID, err := uuid.Parse(sessionIDStr)
@@ -115,20 +120,35 @@ func (h *Handler) HandleTerminalWebSocket(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// wsWriter wraps a WebSocket connection as an io.Writer, prepending
-// the 0x00 data prefix to each write.
+// wsWriter adapts a WebSocket connection to terminal.Client, prefixing
+// each payload with the frame byte that identifies its kind.
 type wsWriter struct {
 	conn *websocket.Conn
 	ctx  context.Context
 }
 
-func (w *wsWriter) Write(p []byte) (int, error) {
+// frame sends a single prefixed binary message.
+func (w *wsWriter) frame(prefix byte, p []byte) error {
 	msg := make([]byte, 1+len(p))
-	msg[0] = 0x00
+	msg[0] = prefix
 	copy(msg[1:], p)
-	err := w.conn.Write(w.ctx, websocket.MessageBinary, msg)
-	if err != nil {
+	return w.conn.Write(w.ctx, websocket.MessageBinary, msg)
+}
+
+// Write sends live PTY output.
+func (w *wsWriter) Write(p []byte) (int, error) {
+	if err := w.frame(0x00, p); err != nil {
 		return 0, err
 	}
 	return len(p), nil
+}
+
+// WriteReplay sends buffered historical output.
+func (w *wsWriter) WriteReplay(p []byte) error {
+	return w.frame(0x02, p)
+}
+
+// ReplayComplete tells the client it may resume responding to the terminal.
+func (w *wsWriter) ReplayComplete() error {
+	return w.frame(0x03, nil)
 }
