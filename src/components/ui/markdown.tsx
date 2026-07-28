@@ -12,6 +12,7 @@
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
+import { codeComponents } from "./markdown-code";
 
 // Only these protocols produce a real anchor. Relative links (no protocol)
 // resolve against a dummy base to https and are allowed; javascript:, data:,
@@ -29,6 +30,7 @@ function isSafeHref(href: string | undefined): href is string {
 }
 
 const components: Components = {
+  ...codeComponents,
   a({ node: _node, href, children, ...props }) {
     if (!isSafeHref(href)) {
       // Unsafe or unparseable protocol — render the link text, no anchor.
