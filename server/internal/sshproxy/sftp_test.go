@@ -21,7 +21,7 @@ import (
 // ----------------------------------------------------------------------
 
 func TestBuildSFTPCmd_ArgvIsDockerExecIWithSFTPServerE(t *testing.T) {
-	cmd := buildSFTPCmd(context.Background(), "/usr/bin/docker", "session-container")
+	cmd := buildSFTPCmd(context.Background(), "/usr/bin/docker", "session-container", "")
 
 	// argv[0] is the binary path; argv[1:] is what we passed.
 	wantArgs := []string{"/usr/bin/docker", "exec", "-i", "session-container", "/usr/lib/openssh/sftp-server", "-e"}
@@ -34,7 +34,7 @@ func TestBuildSFTPCmd_NeverUsesPTYFlag(t *testing.T) {
 	// SFTP is binary framing; -it would CRLF-translate and corrupt
 	// packets. The regression risk is that someone "fixes" interactive
 	// SFTP by adding -t, so we lock the constraint down explicitly.
-	cmd := buildSFTPCmd(context.Background(), "docker", "alice")
+	cmd := buildSFTPCmd(context.Background(), "docker", "alice", "")
 	for _, a := range cmd.Args {
 		if a == "-it" || a == "-t" {
 			t.Errorf("SFTP argv must not include %q (PTY would corrupt binary framing): %#v", a, cmd.Args)
@@ -45,7 +45,7 @@ func TestBuildSFTPCmd_NeverUsesPTYFlag(t *testing.T) {
 func TestBuildSFTPCmd_NoShellWrapper(t *testing.T) {
 	// Argv must hit sftp-server directly, not via /bin/sh -c. A shell
 	// wrapper would buffer stdout and add a syscall layer for no gain.
-	cmd := buildSFTPCmd(context.Background(), "docker", "alice")
+	cmd := buildSFTPCmd(context.Background(), "docker", "alice", "")
 	for _, a := range cmd.Args {
 		if a == "/bin/sh" || a == "/bin/bash" || a == "-c" {
 			t.Errorf("SFTP argv must not invoke a shell, got: %#v", cmd.Args)
@@ -54,7 +54,7 @@ func TestBuildSFTPCmd_NoShellWrapper(t *testing.T) {
 }
 
 func TestBuildSFTPCmd_EmptyBinUsesDefault(t *testing.T) {
-	cmd := buildSFTPCmd(context.Background(), "", "alice")
+	cmd := buildSFTPCmd(context.Background(), "", "alice", "")
 	if got := cmd.Args[0]; got != defaultDockerBin && !strings.HasSuffix(got, defaultDockerBin) {
 		t.Errorf("empty bin should fall back to %q, got %q", defaultDockerBin, got)
 	}
@@ -63,7 +63,7 @@ func TestBuildSFTPCmd_EmptyBinUsesDefault(t *testing.T) {
 func TestBuildSFTPCmd_SetsPgid(t *testing.T) {
 	// Setpgid: true is required for the channel-close cleanup path —
 	// kill(-pid) reaches the docker CLI and its grandchildren.
-	cmd := buildSFTPCmd(context.Background(), "docker", "alice")
+	cmd := buildSFTPCmd(context.Background(), "docker", "alice", "")
 	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {
 		t.Errorf("expected Setpgid: true, got %#v", cmd.SysProcAttr)
 	}

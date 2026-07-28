@@ -330,14 +330,16 @@ func (s *Server) runSessionChannel(
 				return
 			}
 
+			user := s.resolveExecUser(chanCtx, container)
+
 			if mode == execModeSFTP {
 				// SFTP doesn't honor client-supplied env vars and forwarding
 				// LANG/TERM to the docker CLI would strip its PATH. Use a
 				// dedicated builder that leaves cmd.Env nil (inherit parent).
-				cmd = buildSFTPCmd(chanCtx, s.dockerBin, container)
+				cmd = buildSFTPCmd(chanCtx, s.dockerBin, container, user)
 			} else {
 				env := filterEnv(envBuf)
-				cmd = buildExecCmd(chanCtx, s.dockerBin, container, command, mode, env)
+				cmd = buildExecCmd(chanCtx, s.dockerBin, container, command, mode, env, user)
 			}
 
 			if mode == execModePTYShell || mode == execModePTYExec {

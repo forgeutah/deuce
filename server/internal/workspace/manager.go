@@ -65,6 +65,13 @@ type Manager struct {
 	githubToken string
 	gitOnce     sync.Once
 	gitEnv      []string
+
+	// userMu guards userCache, which memoizes ContainerUser lookups.
+	// VS Code Remote-SSH opens many channels per connection and each one
+	// resolves the exec user, so an uncached `docker inspect` per channel
+	// would add real latency to every terminal and port forward.
+	userMu    sync.Mutex
+	userCache map[string]containerUserEntry
 }
 
 func NewManager(bin, provider, githubToken string) *Manager {

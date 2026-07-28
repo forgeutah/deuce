@@ -51,11 +51,11 @@ import (
 //   - No env is forwarded. SFTP doesn't honor client-supplied env vars,
 //     and the U8 allowlist would just be noise here.
 //   - argv MUST be `-i`, never `-it`. See file-level comment above.
-func buildSFTPCmd(ctx context.Context, dockerBin, container string) *exec.Cmd {
+func buildSFTPCmd(ctx context.Context, dockerBin, container, user string) *exec.Cmd {
 	if dockerBin == "" {
 		dockerBin = defaultDockerBin
 	}
-	cmd := exec.CommandContext(ctx, dockerBin, dockerArgs(container, "", execModeSFTP)...)
+	cmd := exec.CommandContext(ctx, dockerBin, dockerArgs(container, "", execModeSFTP, user)...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	return cmd
 }

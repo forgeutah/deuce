@@ -84,7 +84,8 @@ func (s *Server) runDirectTCPIPChannel(
 		return
 	}
 
-	cmd := buildTCPForwardCmd(chanCtx, s.dockerBin, container, payload.DestHost, payload.DestPort)
+	user := s.resolveExecUser(chanCtx, container)
+	cmd := buildTCPForwardCmd(chanCtx, s.dockerBin, container, payload.DestHost, payload.DestPort, user)
 
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
