@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, AlertCircle } from "lucide-react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -6,9 +6,21 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { useSessionStore } from "@/stores/session-store";
 
+// How long the terminal may stay blank before we show a spinner. Attaching to
+// an existing PTY paints from the replay buffer almost immediately, and a
+// spinner that appears for 20ms reads as a flicker rather than as feedback.
+const SPINNER_DELAY_MS = 250;
+
 export function TerminalView() {
   const { activeSessionId, sessions } = useSessionStore();
   const terminalRef = useRef<HTMLDivElement>(null);
+
+  // `devpod ssh` spawns immediately but takes seconds to establish the
+  // connection into the container, so a first attach sits on a black
+  // rectangle with no explanation. First output is the honest ready signal:
+  // the replay boundary arrives long before the shell has drawn anything.
+  const [hasOutput, setHasOutput] = useState(false);
+  const [spinnerVisible, setSpinnerVisible] = useState(false);
 
   const session = sessions.find((s) => s.id === activeSessionId);
 
@@ -17,6 +29,14 @@ export function TerminalView() {
 
     let disposed = false;
     let ws: WebSocket | null = null;
+
+    // Switching sessions re-runs this effect without remounting, so the
+    // previous session's ready state must not carry over.
+    setHasOutput(false);
+    setSpinnerVisible(false);
+    const spinnerTimer = setTimeout(() => {
+      if (!disposed) setSpinnerVisible(true);
+    }, SPINNER_DELAY_MS);
 
     // The server replays recent PTY output to every newly-attached client so
     // the terminal isn't blank on reconnect. That buffer can contain terminal
@@ -69,6 +89,11 @@ export function TerminalView() {
     term.loadAddon(webLinksAddon);
     term.open(terminalRef.current);
     fitAddon.fit();
+    // The tab was just selected, so the terminal is what the user came for —
+    // put the cursor in it rather than making them click first. This effect
+    // re-runs on every mount, and CenterPanel remounts TerminalView on tab
+    // switch, so selecting the tab focuses the terminal.
+    term.focus();
 
     // Send keystrokes to WebSocket with 0x00 prefix
     term.onData((data) => {
@@ -125,6 +150,12 @@ export function TerminalView() {
       const data = new Uint8Array(event.data as ArrayBuffer);
       if (data.length < 1) return;
 
+      // Any payload-bearing frame means the terminal has something to show.
+      if ((data[0] === 0x00 || data[0] === 0x02) && data.length > 1) {
+        clearTimeout(spinnerTimer);
+        setHasOutput(true);
+      }
+
       switch (data[0]) {
         case 0x02:
           // Replayed output renders exactly like live output — the frame type
@@ -153,6 +184,7 @@ export function TerminalView() {
     return () => {
       disposed = true;
       clearTimeout(unmuteTimer);
+      clearTimeout(spinnerTimer);
       resizeObserver.disconnect();
       if (ws) {
         ws.onmessage = null;
@@ -198,10 +230,22 @@ export function TerminalView() {
     );
   }
 
+  // The terminal container must stay mounted while connecting — xterm has
+  // already attached to it — so the indicator overlays rather than replaces it.
   return (
-    <div
-      ref={terminalRef}
-      className="h-full w-full bg-[#0d1117] p-3"
-    />
+    <div className="relative h-full w-full bg-[#0d1117]">
+      <div ref={terminalRef} className="h-full w-full p-3" />
+      {!hasOutput && spinnerVisible && (
+        <div
+          role="status"
+          className="absolute inset-0 flex items-center justify-center bg-[#0d1117]"
+        >
+          <div className="text-center">
+            <Loader2 className="mx-auto h-8 w-8 text-accent animate-spin mb-3" />
+            <p className="text-sm text-foreground-muted">Starting terminal...</p>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
