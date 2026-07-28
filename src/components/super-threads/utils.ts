@@ -1,9 +1,22 @@
 // Super Threads helpers shared across the card/drawer components. Kept separate
 // from the .tsx component modules so fast-refresh's "components only" rule holds.
 
+import type { TaskState } from "@/types";
+
 // stripMention drops the leading @agent token from a prompt for compact display.
 export function stripMention(text: string): string {
   return text.replace(/@\w+/, "").replace(/^[\s,]+/, "").trim();
+}
+
+// taskFallbackMessage is the display text for a terminal task that produced no
+// reply. Shared by the inline card and the thread drawer so the phrasing stays
+// in one place.
+export function taskFallbackMessage(state: TaskState): string {
+  return state === "failed"
+    ? "Run failed."
+    : state === "cancelled"
+      ? "Run cancelled."
+      : "Done.";
 }
 
 // askUserQuestion returns the display question for an ask_user tool action, or

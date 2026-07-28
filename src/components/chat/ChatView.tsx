@@ -18,6 +18,7 @@ import { tasksByAnchor, queuePositions } from "@/stores/agent-runs";
 import { AgentTaskCard } from "@/components/super-threads/AgentTaskCard";
 import { visibleChatMessages } from "@/components/chat/message-visibility";
 import { DEUCE } from "@/lib/deuce";
+import { Markdown } from "@/components/ui/markdown";
 import type { Message, User, Session, WorkspaceStatus } from "@/types";
 
 function isWorkspaceLive(status: WorkspaceStatus | undefined): boolean {
@@ -183,7 +184,7 @@ function JoinSessionGate({ session }: { session: Session }) {
   );
 }
 
-function MessageBubble({
+export function MessageBubble({
   message,
   author,
   showHeader,
@@ -246,7 +247,7 @@ function MessageBubble({
         </div>
       )}
       <div className={cn("text-sm text-foreground", showHeader && "pl-9")}>
-        <p className="whitespace-pre-wrap">{message.content}</p>
+        <Markdown>{message.content}</Markdown>
 
         {/* Expandable content */}
         {message.expandableContent?.map((item, i) => (
