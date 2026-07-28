@@ -597,6 +597,7 @@ func (h *Handler) startWorkspace(sessionID uuid.UUID, workspaceID, repoURL strin
 		// runs on every start/rebuild so older containers migrate. Skipped
 		// when the workspace image already carries them.
 		h.provisionAgentToolsIfNeeded(ctx, workspaceID, prebuilt, logFn)
+		h.restoreVSCodeServer(ctx, workspaceID, logFn)
 		newStatus = "ready"
 	}
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -54,6 +55,14 @@ type Config struct {
 	// image is consumed via `devpod up --devcontainer-image` rather than
 	// `--prebuild-repository` (which only ever does a registry lookup).
 	PrebuildRepository string `env:"DEUCE_PREBUILD_REPOSITORY" envDefault:""`
+
+	// VSCodeCacheDir enables carrying a workspace's ~/.vscode-server tree
+	// across container recreates, so VS Code Remote-SSH does not
+	// re-download its ~120MB server payload every time. Empty (the
+	// default) disables it. Budget roughly 120MB of disk per workspace
+	// that has been opened in VS Code; entries are removed when their
+	// workspace is deleted.
+	VSCodeCacheDir string `env:"DEUCE_VSCODE_SERVER_CACHE_DIR" envDefault:""`
 
 	// PiProvider/PiModel configure the Pi agent backend (the sole harness);
 	// v1 runs Claude models through Pi.
@@ -175,6 +184,12 @@ func (c *Config) Validate() error {
 	// failure would surface as a confusing mid-provisioning docker error.
 	if c.PrebuildRepository != "" && !prebuildRepoRE.MatchString(c.PrebuildRepository) {
 		return fmt.Errorf("DEUCE_PREBUILD_REPOSITORY=%q is not a valid Docker repository name (lowercase, no tag — Deuce appends the devcontainer hash as the tag)", c.PrebuildRepository)
+	}
+
+	// A relative cache root would resolve against the server's working
+	// directory, which differs between `make dev` and a deployed unit.
+	if c.VSCodeCacheDir != "" && !filepath.IsAbs(c.VSCodeCacheDir) {
+		return fmt.Errorf("DEUCE_VSCODE_SERVER_CACHE_DIR=%q must be an absolute path", c.VSCodeCacheDir)
 	}
 
 	if c.AuthMode == AuthModeProxy {

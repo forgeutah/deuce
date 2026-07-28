@@ -366,3 +366,35 @@ func TestValidate_PrebuildRepositoryRejected(t *testing.T) {
 		}
 	}
 }
+
+func TestValidate_VSCodeCacheDirMustBeAbsolute(t *testing.T) {
+	// A relative root would resolve against the server's working directory,
+	// which differs between `make dev` and a deployed unit — the cache would
+	// silently land somewhere different depending on how deuce was started.
+	for _, dir := range []string{"relative/path", "./cache", "cache"} {
+		cfg := &Config{
+			AuthMode:         AuthModeDev,
+			WSAllowedOrigins: "localhost:4000",
+			VSCodeCacheDir:   dir,
+		}
+		err := cfg.Validate()
+		if err == nil {
+			t.Errorf("VSCodeCacheDir=%q should be rejected", dir)
+			continue
+		}
+		if !strings.Contains(err.Error(), "DEUCE_VSCODE_SERVER_CACHE_DIR") {
+			t.Errorf("error for %q should name the env var: %v", dir, err)
+		}
+	}
+
+	for _, dir := range []string{"", "/var/lib/deuce/vscode"} {
+		cfg := &Config{
+			AuthMode:         AuthModeDev,
+			WSAllowedOrigins: "localhost:4000",
+			VSCodeCacheDir:   dir,
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("VSCodeCacheDir=%q should validate: %v", dir, err)
+		}
+	}
+}

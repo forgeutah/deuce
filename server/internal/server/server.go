@@ -124,6 +124,7 @@ func (s *Server) Router() http.Handler {
 	// Only this manager creates workspaces; the sshproxy and reconciler
 	// managers in main.go never call Create, so they need no prebuild repo.
 	wm.SetPrebuildRepository(s.cfg.PrebuildRepository)
+	wm.SetVSCodeCacheDir(s.cfg.VSCodeCacheDir)
 	if s.cfg.PrebuildEnabled() {
 		slog.Info("devcontainer prebuild cache enabled", "repository", s.cfg.PrebuildRepository)
 	}

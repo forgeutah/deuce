@@ -50,6 +50,28 @@ func (h *Handler) provisionAgentToolsIfNeeded(ctx context.Context, workspaceID s
 	h.provisionAgentTools(ctx, workspaceID, logFn)
 }
 
+// saveVSCodeServer and restoreVSCodeServer carry the VS Code Remote server
+// payload across container recreates. Both are best-effort: the cache is an
+// optimisation, and losing it costs a re-download, not a session. Both are
+// no-ops when DEUCE_VSCODE_SERVER_CACHE_DIR is unset.
+func (h *Handler) saveVSCodeServer(ctx context.Context, workspaceID string, logFn workspace.LogFunc) {
+	if !h.workspaces.VSCodeCacheEnabled() {
+		return
+	}
+	if err := h.workspaces.SaveVSCodeServer(ctx, workspaceID, logFn); err != nil {
+		slog.Warn("failed to cache vscode-server payload", "workspace", workspaceID, "error", err)
+	}
+}
+
+func (h *Handler) restoreVSCodeServer(ctx context.Context, workspaceID string, logFn workspace.LogFunc) {
+	if !h.workspaces.VSCodeCacheEnabled() {
+		return
+	}
+	if err := h.workspaces.RestoreVSCodeServer(ctx, workspaceID, logFn); err != nil {
+		slog.Warn("failed to restore vscode-server payload", "workspace", workspaceID, "error", err)
+	}
+}
+
 // workspaceAction names the four lifecycle operations the user can trigger.
 // Each one maps to a transitional workspace_status that the handler writes
 // synchronously, then a devpod CLI call in a tracked background goroutine,
@@ -246,12 +268,15 @@ func (h *Handler) runWorkspaceAction(sessionID uuid.UUID, workspaceID, repoURL s
 			// before agent support — or where a prior install failed — pick up
 			// Pi + the ask-user extension. The installers are idempotent.
 			h.provisionAgentToolsIfNeeded(ctx, workspaceID, prebuilt, logFn)
+			h.restoreVSCodeServer(ctx, workspaceID, logFn)
 			newStatus = "ready"
 		} else {
 			newStatus = "failed"
 		}
 
 	case actionStop:
+		// Save before the container goes away, not after.
+		h.saveVSCodeServer(ctx, workspaceID, logFn)
 		actErr = h.workspaces.Stop(ctx, workspaceID)
 		if actErr == nil {
 			newStatus = "stopped"
@@ -264,6 +289,7 @@ func (h *Handler) runWorkspaceAction(sessionID uuid.UUID, workspaceID, repoURL s
 		// output is not streamed via logFn — the user will see logs once
 		// Create begins. Documented in the plan's Rebuild risk note.
 		var rebuilt workspace.PrebuildResult
+		h.saveVSCodeServer(ctx, workspaceID, logFn)
 		if delErr := h.workspaces.Delete(ctx, workspaceID); delErr != nil {
 			actErr = fmt.Errorf("rebuild delete: %w", delErr)
 		} else {
@@ -271,6 +297,7 @@ func (h *Handler) runWorkspaceAction(sessionID uuid.UUID, workspaceID, repoURL s
 		}
 		if actErr == nil {
 			h.provisionAgentToolsIfNeeded(ctx, workspaceID, rebuilt, logFn)
+			h.restoreVSCodeServer(ctx, workspaceID, logFn)
 			newStatus = "ready"
 		} else {
 			newStatus = "failed"
@@ -279,6 +306,10 @@ func (h *Handler) runWorkspaceAction(sessionID uuid.UUID, workspaceID, repoURL s
 	case actionDelete:
 		actErr = h.workspaces.Delete(ctx, workspaceID)
 		if actErr == nil {
+			// The cache belongs to the workspace; it must not outlive it.
+			if err := h.workspaces.PurgeVSCodeServer(workspaceID); err != nil {
+				slog.Warn("failed to purge vscode-server cache", "workspace", workspaceID, "error", err)
+			}
 			newStatus = "missing"
 		} else {
 			newStatus = "failed"

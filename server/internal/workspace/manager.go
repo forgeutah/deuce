@@ -70,6 +70,16 @@ type Manager struct {
 	// (see prebuild.go). Empty keeps Create on its original path.
 	prebuildRepo string
 
+	// vscodeCacheDir enables carrying ~/.vscode-server across container
+	// recreates when non-empty (see vscode_cache.go).
+	vscodeCacheDir string
+
+	// resolveTargetHook is the seam the vscode-cache tests use to stand in
+	// for the container/user/home lookup, which would otherwise shell out
+	// to docker. Nil in production. Mirrors the per-instance hook pattern
+	// at sshproxy.Server.resolveContainerHook.
+	resolveTargetHook func(ctx context.Context, workspaceID string) (container, user, home string, err error)
+
 	// userMu guards userCache, which memoizes ContainerUser lookups.
 	// VS Code Remote-SSH opens many channels per connection and each one
 	// resolves the exec user, so an uncached `docker inspect` per channel

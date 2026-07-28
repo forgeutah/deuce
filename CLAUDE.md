@@ -100,6 +100,13 @@ DEVPOD_PROVIDER=       # DevPod provider (empty = default)
 # install. Tags stay local to the Docker daemon; no registry is required.
 DEUCE_PREBUILD_REPOSITORY=
 
+# Carries a workspace's ~/.vscode-server tree across container recreates so
+# VS Code Remote-SSH does not re-download its ~120MB server payload. Empty
+# (default) = off. Must be an absolute path. Budget ~120MB per workspace that
+# has been opened in VS Code; an entry is removed when its workspace is
+# deleted. Keyed by workspace, not by user — see the VS Code section below.
+DEUCE_VSCODE_SERVER_CACHE_DIR=
+
 # Agent backend. Pi (pi.dev) runs in --mode rpc inside each session's DevPod
 # container, driven over a persistent JSONL channel — one process per session.
 # PiProvider/PiModel select the Pi backend (v1 runs Claude models through Pi).
@@ -249,7 +256,11 @@ Devcontainers used with "Open in VS Code" must include:
 - `openssh-sftp-server` (Debian: `/usr/lib/openssh/sftp-server`) — required for SFTP-based file operations
 - A **glibc-compatible base image** — VS Code Remote requires glibc ≥ 2.17. Alpine + musl needs `apk add gcompat`.
 
-`~/.vscode-server` lives in the container's own filesystem; a fresh ~120MB download fires on every container recreate. Per-user named volume caching is a v2 follow-up.
+`~/.vscode-server` lives in the container's own filesystem, so a fresh ~120MB download would fire on every container recreate. Setting `DEUCE_VSCODE_SERVER_CACHE_DIR` avoids that: Deuce copies the tree out to a host cache before stop/rebuild and copies it back in after the container is recreated (`server/internal/workspace/vscode_cache.go`).
+
+A named volume would be the obvious mechanism, but DevPod exposes no way to add one — `devpod up` has no mount flag and the docker provider's options are only `DOCKER_BUILDER`/`DOCKER_HOST`/`DOCKER_PATH`/`INACTIVITY_TIMEOUT`. Mounts can only come from the repo's own `devcontainer.json`, which Deuce does not control, hence `docker cp`.
+
+The cache is keyed by **workspace**, not by user. A workspace's container is already shared by every member of its session, so a per-workspace cache adds no new reach; keying it per user would copy one user's extension state — including credentials their extensions have stored — into a container other session members hold a shell on.
 
 ## Documented Solutions
 
