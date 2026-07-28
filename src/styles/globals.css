@@ -631,14 +631,8 @@ button,
 .q-resp .q-actsum {
   margin-left: 32px;
 }
-.q-resp code {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--color-foreground-emphasis);
-  background: var(--color-background-subtle);
-  padding: 1px 5px;
-  border-radius: 4px;
-}
+/* Inline code inside agent replies is now handled by the shared `.md` prose
+   styles below (the reply body renders through <Markdown>). */
 
 .q-typingline {
   display: flex;
@@ -918,4 +912,147 @@ button,
 }
 .q-actsum:hover {
   color: var(--color-foreground);
+}
+
+/* ---------------------------------------------------------------------------
+   Markdown prose (.md) — shared styling for all rendered message content
+   (agent replies, system notices, human chat messages). Scoped under `.md`
+   so prose rhythm never leaks into the surrounding chat/card chrome. Dark
+   mode only, using the Primer color tokens. See <Markdown> (markdown.tsx).
+--------------------------------------------------------------------------- */
+.md {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--color-foreground);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* Collapse outer margins so a message renders flush inside its bubble. */
+.md > :first-child {
+  margin-top: 0;
+}
+.md > :last-child {
+  margin-bottom: 0;
+}
+.md p {
+  margin: 0 0 8px;
+}
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  margin: 14px 0 6px;
+  line-height: 1.3;
+  font-weight: 600;
+  color: var(--color-foreground-emphasis);
+}
+.md h1 {
+  font-size: 18px;
+}
+.md h2 {
+  font-size: 16px;
+}
+.md h3 {
+  font-size: 14px;
+}
+.md h4 {
+  font-size: 13px;
+}
+.md ul,
+.md ol {
+  margin: 0 0 8px;
+  padding-left: 22px;
+}
+.md li {
+  margin: 2px 0;
+}
+.md li > ul,
+.md li > ol {
+  margin: 2px 0;
+}
+/* GFM task-list items drop the bullet and align the checkbox. */
+.md li:has(> input[type="checkbox"]) {
+  list-style: none;
+  margin-left: -18px;
+}
+.md li > input[type="checkbox"] {
+  margin-right: 6px;
+}
+.md a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.md a:hover {
+  color: var(--color-accent-emphasis);
+}
+.md strong {
+  font-weight: 600;
+  color: var(--color-foreground-emphasis);
+}
+.md blockquote {
+  margin: 0 0 8px;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--color-border-emphasis);
+  color: var(--color-foreground-muted);
+}
+.md hr {
+  margin: 12px 0;
+  border: none;
+  border-top: 1px solid var(--color-border-muted);
+}
+/* Inline code (parent is not a code block). */
+.md :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-foreground-emphasis);
+  background: var(--color-background-subtle);
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+}
+/* Fenced code blocks — the highlighter renders token spans on a transparent
+   background; this container supplies the frame and horizontal scroll. The
+   plain (unhighlighted) fallback shares the same frame. */
+.md .md-code {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-muted);
+  border-radius: var(--radius-md);
+  background: var(--color-background-inset);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.md pre.md-code--plain {
+  white-space: pre;
+  color: var(--color-foreground);
+}
+.md pre.md-code--plain code {
+  font-family: inherit;
+}
+.md table {
+  margin: 0 0 8px;
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+  font-size: 12px;
+}
+.md th,
+.md td {
+  border: 1px solid var(--color-border-muted);
+  padding: 4px 8px;
+  text-align: left;
+}
+.md th {
+  background: var(--color-background-subtle);
+  font-weight: 600;
+  color: var(--color-foreground-emphasis);
+}
+.md img {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
 }
