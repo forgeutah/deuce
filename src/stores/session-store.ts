@@ -93,6 +93,11 @@ interface SessionState {
   loadArchivedSessions: () => Promise<void>;
   archiveSession: (sessionId: string) => Promise<void>;
   restoreSession: (sessionId: string) => Promise<void>;
+  // Open an archived session for read-only history viewing: merge it into
+  // `sessions` (so the center/chat panels, which resolve via sessions.find,
+  // can render it) and make it active. The sidebar groups filter archived
+  // status out, so this does not resurface it in the live lists.
+  viewArchivedSession: (session: Session) => void;
 
   // Data setters
   setCurrentUser: (user: User | null) => void;
@@ -392,6 +397,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         (s) => s.id !== sessionId,
       ),
     }));
+  },
+
+  viewArchivedSession: (session) => {
+    set((state) => ({
+      sessions: state.sessions.some((s) => s.id === session.id)
+        ? state.sessions
+        : [session, ...state.sessions],
+    }));
+    get().setActiveSession(session.id);
   },
 
   setCurrentUser: (currentUser) => set({ currentUser }),
