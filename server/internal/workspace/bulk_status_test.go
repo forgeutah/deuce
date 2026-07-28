@@ -16,7 +16,7 @@ func newFakeRunner(output []byte, err error) commandRunner {
 }
 
 func TestBulkContainerStatus_HappyPath(t *testing.T) {
-	m := NewManager("", "")
+	m := NewManager("", "", "")
 	m.runner = newFakeRunner([]byte(
 		"uid-aaa\trunning\n"+
 			"uid-bbb\trunning\n"+
@@ -44,7 +44,7 @@ func TestBulkContainerStatus_HappyPath(t *testing.T) {
 }
 
 func TestBulkContainerStatus_EmptyOutput(t *testing.T) {
-	m := NewManager("", "")
+	m := NewManager("", "", "")
 	m.runner = newFakeRunner([]byte(""), nil)
 
 	got, err := m.BulkContainerStatus(context.Background())
@@ -57,7 +57,7 @@ func TestBulkContainerStatus_EmptyOutput(t *testing.T) {
 }
 
 func TestBulkContainerStatus_RunnerError(t *testing.T) {
-	m := NewManager("", "")
+	m := NewManager("", "", "")
 	bang := errors.New("docker daemon not running")
 	m.runner = newFakeRunner([]byte("Cannot connect to the Docker daemon"), bang)
 
@@ -71,7 +71,7 @@ func TestBulkContainerStatus_RunnerError(t *testing.T) {
 }
 
 func TestBulkContainerStatus_MalformedLineSkipped(t *testing.T) {
-	m := NewManager("", "")
+	m := NewManager("", "", "")
 	// Second line has no tab — should be skipped with a warn.
 	m.runner = newFakeRunner([]byte(
 		"uid-aaa\trunning\n"+
@@ -95,7 +95,7 @@ func TestBulkContainerStatus_MalformedLineSkipped(t *testing.T) {
 }
 
 func TestBulkContainerStatus_DuplicateUidKeepsLast(t *testing.T) {
-	m := NewManager("", "")
+	m := NewManager("", "", "")
 	// Same uid twice — last one wins. Real-world this should not happen
 	// (one container per workspace), but a stale prior container could
 	// produce it transiently.
@@ -114,7 +114,7 @@ func TestBulkContainerStatus_DuplicateUidKeepsLast(t *testing.T) {
 }
 
 func TestBulkContainerStatus_StateVariantsCollapseToStopped(t *testing.T) {
-	m := NewManager("", "")
+	m := NewManager("", "", "")
 	// Docker emits several non-running states; reconciler only cares
 	// about running vs not-running.
 	m.runner = newFakeRunner([]byte(

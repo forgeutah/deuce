@@ -120,7 +120,7 @@ func (s *Server) Router() http.Handler {
 		r.Use(auth.Middleware(s.cfg.UserID))
 	}
 
-	wm := workspace.NewManager(s.cfg.DevPodBin, s.cfg.DevPodProvider)
+	wm := workspace.NewManager(s.cfg.DevPodBin, s.cfg.DevPodProvider, s.cfg.GitHubToken)
 	if !wm.Available() {
 		slog.Warn("devpod binary not found, workspace creation will be skipped")
 	} else {
