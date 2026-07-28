@@ -100,7 +100,7 @@ func main() {
 			MaxChannelsPerConn: cfg.SSHMaxChannelsPerConn,
 			GoroutineCap:       cfg.SSHGoroutineCap,
 		}
-		wm := workspace.NewManager(cfg.DevPodBin, cfg.DevPodProvider)
+		wm := workspace.NewManager(cfg.DevPodBin, cfg.DevPodProvider, cfg.GitHubToken)
 		s, err := sshproxy.New(sshCfg, db.New(pool), wm)
 		if err != nil {
 			slog.Error("ssh proxy startup failed — HTTP continues without VS Code remote access", "error", err)
@@ -122,7 +122,7 @@ func main() {
 	// drifts. Shares the same shutdown context as HTTP and SSH so SIGTERM
 	// drains all three together. Docker-provider-only by design — the
 	// BulkContainerStatus method assumes the docker DevPod provider.
-	reconWM := workspace.NewManager(cfg.DevPodBin, cfg.DevPodProvider)
+	reconWM := workspace.NewManager(cfg.DevPodBin, cfg.DevPodProvider, cfg.GitHubToken)
 	reconciler := reconcile.New(db.New(pool), srv.Hub(), reconWM, reconWM, 10*time.Second)
 	go reconciler.Run(ctx)
 

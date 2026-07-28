@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // ErrContainerNotRunning is returned by ContainerName when no Docker
@@ -56,13 +57,75 @@ type Manager struct {
 	bin      string
 	provider string
 	runner   commandRunner
+
+	// githubToken authenticates private-repo clones. It is not passed to
+	// devpod directly; instead it seeds an isolated git credential store
+	// (see gitCredentialEnv) that DevPod's host-side `git credential fill`
+	// consults during the clone.
+	githubToken string
+	gitOnce     sync.Once
+	gitEnv      []string
 }
 
-func NewManager(bin, provider string) *Manager {
+func NewManager(bin, provider, githubToken string) *Manager {
 	if bin == "" {
 		bin = "devpod"
 	}
-	return &Manager{bin: bin, provider: provider, runner: defaultCommandRunner}
+	return &Manager{bin: bin, provider: provider, githubToken: githubToken, runner: defaultCommandRunner}
+}
+
+// gitCredentialFiles writes an isolated git config plus a credentials store
+// under baseDir so DevPod's clone-time credential lookup — `git credential
+// fill`, run on this host by `devpod agent git-credentials` — can authenticate
+// private github.com repos with the configured GITHUB_TOKEN, without touching
+// the operator's real ~/.gitconfig. It returns the env vars to set on the
+// devpod subprocess (nil when no token is configured).
+//
+// GitHub PATs are URL-safe, so the token is embedded in the credentials line
+// as-is (x-access-token is GitHub's documented username for PAT-over-HTTPS
+// basic auth). baseDir must not contain spaces — git splits the store helper's
+// value on whitespace.
+func gitCredentialFiles(baseDir, token string) ([]string, error) {
+	if token == "" {
+		return nil, nil
+	}
+	if err := os.MkdirAll(baseDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create git credential dir: %w", err)
+	}
+	credPath := filepath.Join(baseDir, "git-credentials")
+	credLine := fmt.Sprintf("https://x-access-token:%s@github.com\n", token)
+	if err := os.WriteFile(credPath, []byte(credLine), 0o600); err != nil {
+		return nil, fmt.Errorf("write git credentials: %w", err)
+	}
+	cfgPath := filepath.Join(baseDir, "gitconfig")
+	cfg := fmt.Sprintf("[credential]\n\thelper = store --file=%s\n", credPath)
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		return nil, fmt.Errorf("write gitconfig: %w", err)
+	}
+	return []string{
+		"GIT_CONFIG_GLOBAL=" + cfgPath,
+		"GIT_CONFIG_SYSTEM=/dev/null",
+	}, nil
+}
+
+// gitCredentialEnv lazily provisions the isolated credential store (once) and
+// returns the env vars to add to the devpod command. On failure it logs and
+// returns nil — public-repo clones still work; only private ones would fail.
+func (m *Manager) gitCredentialEnv() []string {
+	m.gitOnce.Do(func() {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			slog.Warn("git credential setup skipped: no home dir; private repo clones will fail", "error", err)
+			return
+		}
+		env, err := gitCredentialFiles(filepath.Join(home, ".deuce"), m.githubToken)
+		if err != nil {
+			slog.Warn("git credential setup failed; private repo clones will fail", "error", err)
+			return
+		}
+		m.gitEnv = env
+	})
+	return m.gitEnv
 }
 
 // Available checks if the devpod binary is installed and accessible.
@@ -118,6 +181,14 @@ func (m *Manager) Create(ctx context.Context, workspaceID, repoURL string, logFn
 
 	slog.Info("starting devpod workspace", "id", workspaceID, "repo", repoURL)
 	cmd := exec.CommandContext(ctx, m.bin, args...)
+
+	// Make GITHUB_TOKEN available to DevPod's clone-time credential lookup.
+	// DevPod runs `git credential fill` on this host (via `devpod agent
+	// git-credentials`) as a child of this process, so pointing git at our
+	// isolated config here authenticates private-repo clones.
+	if gitEnv := m.gitCredentialEnv(); gitEnv != nil {
+		cmd.Env = append(os.Environ(), gitEnv...)
+	}
 
 	// Merge stderr into stdout so we capture everything
 	stdout, err := cmd.StdoutPipe()
