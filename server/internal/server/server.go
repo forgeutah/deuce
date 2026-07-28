@@ -207,6 +207,8 @@ func (s *Server) Router() http.Handler {
 			r.Route("/{sessionID}", func(r chi.Router) {
 				r.Get("/", h.GetSession)
 				r.Patch("/", h.UpdateSession)
+				r.Post("/archive", h.ArchiveSession)
+				r.Post("/unarchive", h.UnarchiveSession)
 				r.Post("/join", h.JoinSession)
 				r.Post("/members", h.AddSessionMember)
 				r.Delete("/members/{userID}", h.RemoveSessionMember)

@@ -85,7 +85,17 @@ func (h *Handler) ListSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessions, err := h.queries.ListSessionsForUser(r.Context(), userID)
+	// ?archived=true returns only archived sessions (the Archived view); the
+	// default returns only non-archived sessions (the normal sidebar).
+	archived := r.URL.Query().Get("archived")
+	listArchived := archived == "true" || archived == "1"
+
+	var sessions []db.Session
+	if listArchived {
+		sessions, err = h.queries.ListArchivedSessionsForUser(r.Context(), userID)
+	} else {
+		sessions, err = h.queries.ListSessionsForUser(r.Context(), userID)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to list sessions")
 		return
@@ -342,6 +352,120 @@ func (h *Handler) UpdateSession(w http.ResponseWriter, r *http.Request) {
 	// Broadcast update
 	msg, _ := ws.NewServerMessage(ws.TypeSessionUpdate, sessionID.String(), sr)
 	h.hub.BroadcastToSession(sessionID.String(), msg, nil)
+
+	writeJSON(w, http.StatusOK, sr)
+}
+
+// ArchiveSession POST /api/sessions/{sessionID}/archive retires a session:
+// it flips status to "archived" (preserving all history) and tears down the
+// session's DevPod container in the background to reclaim resources. The
+// session disappears from the normal sidebar (ListSessionsForUser excludes
+// archived) and surfaces only through the Archived view.
+func (h *Handler) ArchiveSession(w http.ResponseWriter, r *http.Request) {
+	sessionID, err := uuid.Parse(chi.URLParam(r, "sessionID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_SESSION_ID", "invalid session ID")
+		return
+	}
+
+	userID, err := uuid.Parse(getUserID(r))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_USER", "invalid user ID")
+		return
+	}
+
+	// Write gate: archiving retires the session and destroys its container, so
+	// it requires SESSION membership. Runs before any existence lookup.
+	if !h.requireSessionMember(w, r, sessionID, userID) {
+		return
+	}
+
+	// Flip status to archived FIRST, before teardown. The reconciler keys off
+	// ListNonArchivedSessions, so flipping first removes the session from its
+	// view and prevents a race to restart the container mid-teardown.
+	session, err := h.queries.UpdateSessionStatus(r.Context(), db.UpdateSessionStatusParams{
+		ID:     sessionID,
+		Status: "archived",
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to archive session")
+		return
+	}
+
+	// Tear down the container in the background when devpod is available and a
+	// container may still exist. Reuses the shared delete action path, which
+	// writes the terminal workspace_status ("missing"/"failed") and broadcasts
+	// it. Archive still succeeds (status-only) when devpod is unavailable.
+	if h.workspaces != nil && h.workspaces.Available() &&
+		session.WorkspaceStatus != "missing" && !isTransitionalStatus(session.WorkspaceStatus) {
+		if _, derr := h.queries.UpdateSessionWorkspaceStatus(r.Context(), db.UpdateSessionWorkspaceStatusParams{
+			ID:              sessionID,
+			WorkspaceStatus: "deleting",
+		}); derr == nil {
+			session.WorkspaceStatus = "deleting"
+		}
+		h.workspaceActions.Add(1)
+		go func() {
+			defer h.workspaceActions.Done()
+			h.runWorkspaceAction(sessionID, session.Name, session.RepoUrl, actionDelete)
+		}()
+	}
+
+	sr, err := h.buildSessionResponse(r, session, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to build session")
+		return
+	}
+
+	// Broadcast the archived state; clients refetch the (now archived-filtered)
+	// list and drop the session from the sidebar.
+	if msg, mErr := ws.NewServerMessage(ws.TypeSessionUpdate, sessionID.String(), sr); mErr == nil {
+		h.hub.BroadcastToSession(sessionID.String(), msg, nil)
+	}
+
+	writeJSON(w, http.StatusOK, sr)
+}
+
+// UnarchiveSession POST /api/sessions/{sessionID}/unarchive restores an
+// archived session by flipping status back to "active". The container was torn
+// down at archive time, so workspace_status remains "missing"; the session
+// reappears in the sidebar with the normal start-workspace affordance.
+func (h *Handler) UnarchiveSession(w http.ResponseWriter, r *http.Request) {
+	sessionID, err := uuid.Parse(chi.URLParam(r, "sessionID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_SESSION_ID", "invalid session ID")
+		return
+	}
+
+	userID, err := uuid.Parse(getUserID(r))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_USER", "invalid user ID")
+		return
+	}
+
+	// Write gate: same membership requirement as archive.
+	if !h.requireSessionMember(w, r, sessionID, userID) {
+		return
+	}
+
+	session, err := h.queries.UpdateSessionStatus(r.Context(), db.UpdateSessionStatusParams{
+		ID:     sessionID,
+		Status: "active",
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to restore session")
+		return
+	}
+
+	sr, err := h.buildSessionResponse(r, session, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "DB_ERROR", "failed to build session")
+		return
+	}
+
+	if msg, mErr := ws.NewServerMessage(ws.TypeSessionUpdate, sessionID.String(), sr); mErr == nil {
+		h.hub.BroadcastToSession(sessionID.String(), msg, nil)
+	}
 
 	writeJSON(w, http.StatusOK, sr)
 }

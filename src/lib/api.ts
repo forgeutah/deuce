@@ -147,6 +147,16 @@ export const api = {
 
   listSessions: () => request<Session[]>("/sessions"),
 
+  // Archived sessions are excluded from listSessions; fetch them on demand
+  // for the Archived view.
+  listArchivedSessions: () => request<Session[]>("/sessions?archived=true"),
+
+  archiveSession: (id: string) =>
+    request<Session>(`/sessions/${id}/archive`, { method: "POST" }),
+
+  unarchiveSession: (id: string) =>
+    request<Session>(`/sessions/${id}/unarchive`, { method: "POST" }),
+
   getSession: (id: string) => request<Session>(`/sessions/${id}`),
 
   createSession: (body: CreateSessionBody) =>

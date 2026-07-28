@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Archive,
   Hash,
   Key,
   Pencil,
@@ -25,6 +26,8 @@ import { api } from "@/lib/api";
 import { useSessionStore } from "@/stores/session-store";
 import { isSessionMember } from "@/lib/membership";
 import { CreateSessionDialog } from "@/components/session/CreateSessionDialog";
+import { ArchiveSessionDialog } from "@/components/session/ArchiveSessionDialog";
+import { ArchivedSessionsDialog } from "@/components/session/ArchivedSessionsDialog";
 import { AgentSettingsDialog } from "@/components/settings/AgentSettingsDialog";
 import { SSHKeysDialog } from "@/components/settings/SSHKeysDialog";
 import { TeamManagementDialog } from "@/components/teams/TeamManagementDialog";
@@ -48,6 +51,7 @@ function SessionCard({
   );
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(session.description);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -195,6 +199,28 @@ function SessionCard({
         )}
       </div>
       <div className="mt-1.5 flex shrink-0 items-center gap-1">
+        {!viewOnly && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setArchiveOpen(true);
+            }}
+            aria-label={`Archive ${session.name}`}
+            className="shrink-0 rounded p-0.5 text-foreground-subtle opacity-0 transition-opacity hover:text-foreground-muted focus:opacity-100 group-hover:opacity-100"
+            tabIndex={-1}
+          >
+            <Archive className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {archiveOpen && (
+          <ArchiveSessionDialog
+            sessionId={session.id}
+            sessionName={session.name}
+            open={archiveOpen}
+            onOpenChange={setArchiveOpen}
+          />
+        )}
         {viewOnly && (
           <span title="Viewing — not a member" className="flex shrink-0">
             <Eye
@@ -290,6 +316,7 @@ export function SessionSidebar() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sshKeysOpen, setSshKeysOpen] = useState(false);
   const [teamsOpen, setTeamsOpen] = useState(false);
+  const [archivedOpen, setArchivedOpen] = useState(false);
   const {
     projects,
     teams,
@@ -301,8 +328,13 @@ export function SessionSidebar() {
     setSearchQuery,
   } = useSessionStore();
 
-  const filteredSessions = sessions.filter((s) =>
-    s.name.toLowerCase().includes(searchQuery.toLowerCase()),
+  // Archived sessions are excluded from listSessions server-side; this guard
+  // also keeps an archived session that was merged in for read-only viewing
+  // (viewArchivedSession) out of the live sidebar groups.
+  const filteredSessions = sessions.filter(
+    (s) =>
+      s.status !== "archived" &&
+      s.name.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
   // A session references a project; the project carries the teamId used to
@@ -447,6 +479,13 @@ export function SessionSidebar() {
       {/* Footer Nav */}
       <div className="flex flex-col gap-0.5 p-2">
         <button
+          onClick={() => setArchivedOpen(true)}
+          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground-muted hover:bg-background-hover hover:text-foreground"
+        >
+          <Archive className="h-4 w-4" />
+          Archived
+        </button>
+        <button
           onClick={() => setTeamsOpen(true)}
           className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground-muted hover:bg-background-hover hover:text-foreground"
         >
@@ -470,6 +509,10 @@ export function SessionSidebar() {
       </div>
 
       <CreateSessionDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <ArchivedSessionsDialog
+        open={archivedOpen}
+        onOpenChange={setArchivedOpen}
+      />
       <AgentSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <SSHKeysDialog open={sshKeysOpen} onOpenChange={setSshKeysOpen} />
       <TeamManagementDialog open={teamsOpen} onOpenChange={setTeamsOpen} />

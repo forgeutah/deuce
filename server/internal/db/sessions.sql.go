@@ -129,6 +129,47 @@ func (q *Queries) IsSessionTeamMember(ctx context.Context, arg IsSessionTeamMemb
 	return is_member, err
 }
 
+const listArchivedSessionsForUser = `-- name: ListArchivedSessionsForUser :many
+SELECT s.id, s.name, s.project_id, s.status, s.workspace_status, s.plan_content, s.created_at, s.last_activity_at, s.repo_url, s.description FROM sessions s
+JOIN projects p ON p.id = s.project_id
+JOIN team_members tm ON tm.team_id = p.team_id
+WHERE tm.user_id = $1 AND s.status = 'archived'
+ORDER BY s.last_activity_at DESC
+`
+
+// Same team-scoped visibility as ListSessionsForUser, restricted to archived
+// sessions. Backs the on-demand Archived view (GET /sessions?archived=true).
+func (q *Queries) ListArchivedSessionsForUser(ctx context.Context, userID uuid.UUID) ([]Session, error) {
+	rows, err := q.db.Query(ctx, listArchivedSessionsForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Session{}
+	for rows.Next() {
+		var i Session
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.ProjectID,
+			&i.Status,
+			&i.WorkspaceStatus,
+			&i.PlanContent,
+			&i.CreatedAt,
+			&i.LastActivityAt,
+			&i.RepoUrl,
+			&i.Description,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNonArchivedSessions = `-- name: ListNonArchivedSessions :many
 SELECT id, name, project_id, status, workspace_status, plan_content, created_at, last_activity_at, repo_url, description FROM sessions
 WHERE status != 'archived'
@@ -204,7 +245,7 @@ const listSessionsForUser = `-- name: ListSessionsForUser :many
 SELECT s.id, s.name, s.project_id, s.status, s.workspace_status, s.plan_content, s.created_at, s.last_activity_at, s.repo_url, s.description FROM sessions s
 JOIN projects p ON p.id = s.project_id
 JOIN team_members tm ON tm.team_id = p.team_id
-WHERE tm.user_id = $1
+WHERE tm.user_id = $1 AND s.status != 'archived'
 ORDER BY s.last_activity_at DESC
 `
 
@@ -213,6 +254,8 @@ ORDER BY s.last_activity_at DESC
 // session_members. session_members is the write/participation gate, not the
 // read gate. The session -> project -> team -> team_members chain has one row
 // per (session, user) so no DISTINCT is needed.
+// Archived sessions are excluded here; they surface only through
+// ListArchivedSessionsForUser (the Archived view).
 func (q *Queries) ListSessionsForUser(ctx context.Context, userID uuid.UUID) ([]Session, error) {
 	rows, err := q.db.Query(ctx, listSessionsForUser, userID)
 	if err != nil {
