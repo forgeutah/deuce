@@ -42,6 +42,19 @@ type Config struct {
 	DevPodProvider  string `env:"DEVPOD_PROVIDER" envDefault:"docker"`
 	AnthropicAPIKey string `env:"ANTHROPIC_API_KEY" envDefault:""`
 
+	// PrebuildRepository turns on the devcontainer prebuild cache. Empty
+	// (the default) keeps the original behaviour exactly: every session
+	// runs a from-scratch `devpod up` and installs Pi over `devpod ssh`.
+	// When set, each repo's devcontainer image is built once per
+	// devcontainer-definition hash, has Pi and the agent tooling baked on
+	// top, and later sessions start from that cached image.
+	//
+	// The value is a Docker repository name. It does not have to resolve
+	// to a registry — tags stay local to the Docker daemon, because the
+	// image is consumed via `devpod up --devcontainer-image` rather than
+	// `--prebuild-repository` (which only ever does a registry lookup).
+	PrebuildRepository string `env:"DEUCE_PREBUILD_REPOSITORY" envDefault:""`
+
 	// PiProvider/PiModel configure the Pi agent backend (the sole harness);
 	// v1 runs Claude models through Pi.
 	PiProvider string `env:"DEUCE_PI_PROVIDER" envDefault:"anthropic"`
@@ -124,6 +137,19 @@ func (c *Config) ProxyRoleCheckEnabled() bool {
 	return c.ProxyHeaderRoles != ""
 }
 
+// prebuildRepoRE matches a Docker repository name without a tag: optional
+// registry host (with optional port), then one or more lowercase path
+// components. Deliberately strict — the value reaches `docker build -t` and
+// `devpod up --devcontainer-image` argv, and a tag separator here would
+// collide with the hash tag Deuce appends.
+var prebuildRepoRE = regexp.MustCompile(`^[a-z0-9]+([._-][a-z0-9]+)*(:[0-9]+)?(/[a-z0-9]+([._-][a-z0-9]+)*)*$`)
+
+// PrebuildEnabled reports whether the devcontainer prebuild cache is turned
+// on. When false, workspace creation keeps its original from-scratch path.
+func (c *Config) PrebuildEnabled() bool {
+	return c.PrebuildRepository != ""
+}
+
 // Validate checks the config for self-consistency before the server binds.
 // In proxy mode it refuses to start when the optional-check env-var pairs
 // are asymmetric (a header without its value, or vice versa), when the
@@ -143,6 +169,12 @@ func (c *Config) Validate() error {
 	origins := c.WSAllowedOriginList()
 	if slices.Contains(origins, "*") {
 		return errors.New("DEUCE_WS_ALLOWED_ORIGINS cannot contain '*' — wildcard origins re-open cross-site WebSocket hijacking")
+	}
+
+	// Caught at startup rather than at first session create, where the
+	// failure would surface as a confusing mid-provisioning docker error.
+	if c.PrebuildRepository != "" && !prebuildRepoRE.MatchString(c.PrebuildRepository) {
+		return fmt.Errorf("DEUCE_PREBUILD_REPOSITORY=%q is not a valid Docker repository name (lowercase, no tag — Deuce appends the devcontainer hash as the tag)", c.PrebuildRepository)
 	}
 
 	if c.AuthMode == AuthModeProxy {

@@ -34,6 +34,22 @@ func (h *Handler) provisionAgentTools(ctx context.Context, workspaceID string, l
 	}
 }
 
+// provisionAgentToolsIfNeeded runs the over-ssh install only when the
+// container did not start from a Deuce-baked image. When the tooling is
+// baked in, the installers would be a no-op that still costs several ssh
+// round-trips on the session-open path — which is the cost the prebuild
+// cache exists to remove.
+func (h *Handler) provisionAgentToolsIfNeeded(ctx context.Context, workspaceID string, res workspace.PrebuildResult, logFn workspace.LogFunc) {
+	if res.ToolsBaked {
+		slog.Info("agent tooling baked into workspace image; skipping over-ssh provisioning", "workspace", workspaceID)
+		if logFn != nil {
+			logFn("Agent tooling already present in the workspace image")
+		}
+		return
+	}
+	h.provisionAgentTools(ctx, workspaceID, logFn)
+}
+
 // workspaceAction names the four lifecycle operations the user can trigger.
 // Each one maps to a transitional workspace_status that the handler writes
 // synchronously, then a devpod CLI call in a tracked background goroutine,
@@ -223,12 +239,13 @@ func (h *Handler) runWorkspaceAction(sessionID uuid.UUID, workspaceID, repoURL s
 		// devpod up is idempotent against existing workspaces: it resumes
 		// a stopped container without rebuilding (verified — `--recreate`
 		// is the explicit opt-in for a fresh container).
-		actErr = h.workspaces.Create(ctx, workspaceID, repoURL, logFn)
+		var prebuilt workspace.PrebuildResult
+		prebuilt, actErr = h.workspaces.Create(ctx, workspaceID, repoURL, logFn)
 		if actErr == nil {
 			// (Re)provision agent tooling on every start so containers created
 			// before agent support — or where a prior install failed — pick up
 			// Pi + the ask-user extension. The installers are idempotent.
-			h.provisionAgentTools(ctx, workspaceID, logFn)
+			h.provisionAgentToolsIfNeeded(ctx, workspaceID, prebuilt, logFn)
 			newStatus = "ready"
 		} else {
 			newStatus = "failed"
@@ -246,13 +263,14 @@ func (h *Handler) runWorkspaceAction(sessionID uuid.UUID, workspaceID, repoURL s
 		// Delete + Create. Note: Manager.Delete uses CombinedOutput so its
 		// output is not streamed via logFn — the user will see logs once
 		// Create begins. Documented in the plan's Rebuild risk note.
+		var rebuilt workspace.PrebuildResult
 		if delErr := h.workspaces.Delete(ctx, workspaceID); delErr != nil {
 			actErr = fmt.Errorf("rebuild delete: %w", delErr)
 		} else {
-			actErr = h.workspaces.Create(ctx, workspaceID, repoURL, logFn)
+			rebuilt, actErr = h.workspaces.Create(ctx, workspaceID, repoURL, logFn)
 		}
 		if actErr == nil {
-			h.provisionAgentTools(ctx, workspaceID, logFn)
+			h.provisionAgentToolsIfNeeded(ctx, workspaceID, rebuilt, logFn)
 			newStatus = "ready"
 		} else {
 			newStatus = "failed"

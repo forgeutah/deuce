@@ -57,6 +57,7 @@ cd server && make migrate               # Run migrations + seed data
 - **Auth**: Two modes selected by `DEUCE_AUTH_MODE`. `dev` (default) injects a fixed user ID from `DEUCE_USER_ID` — localhost-only, do not bind on a non-loopback interface. `forge-proxy` trusts `X-Forge-*` headers from the [forge-proxy](https://github.com/forgeutah/forge-proxy) reverse proxy (validates the shared secret in constant time, checks a single required role from CSV, auto-provisions users by `forge_user_id`). See `server/internal/auth/forge_proxy.go`.
 - **Agent runtime**: One persistent Pi (`pi --mode rpc`) process per session inside its DevPod container, driven over JSONL (`server/internal/agent/`). `@deuce` mentions are detected server-side (`server/internal/handler/messages.go`) and enqueue tasks on the session's serial queue; `GET/PUT /api/agent` reads/edits deuce's global system prompt. The agent's fixed UUID is `agent.DeuceAgentID` (mirrored by `DEUCE` in `src/lib/deuce.ts`); the nil UUID is the system-notice author sentinel.
 - **DevPod**: Workspace manager shells out to `devpod` CLI via os/exec (`server/internal/workspace/manager.go`)
+- **Devcontainer prebuild cache** (opt-in via `DEUCE_PREBUILD_REPOSITORY`, `server/internal/workspace/prebuild.go`): `devpod build --repository R --skip-push` builds the repo's devcontainer once and tags it `R:devpod-<hash>`, where `<hash>` is devpod's hash of the devcontainer definition. A thin Deuce layer then bakes Pi, pi-subagents and the ask-user extension on top as `R:deuce-<hash>`, and `devpod up --devcontainer-image R:deuce-<hash>` starts sessions from it with no build and no over-ssh provisioning. Because the tag carries the definition hash, a devcontainer change invalidates the cache while ordinary code pushes reuse it.
 
 ### Adding a New API Endpoint
 
@@ -89,6 +90,15 @@ DEUCE_USER_ID=10000000-0000-0000-0000-000000000001
 GITHUB_TOKEN=          # GitHub PAT for repo listing (optional)
 DEVPOD_BIN=devpod      # DevPod binary path
 DEVPOD_PROVIDER=       # DevPod provider (empty = default)
+
+# Devcontainer prebuild cache. Empty (default) = off: every session runs a
+# from-scratch `devpod up` and installs Pi over `devpod ssh`. When set to a
+# Docker repository name (no tag — Deuce appends the devcontainer hash), each
+# repo's devcontainer image is built once per devcontainer-definition hash,
+# has Pi + pi-subagents + the ask-user extension baked on top, and later
+# sessions start straight from that image with no build and no over-ssh
+# install. Tags stay local to the Docker daemon; no registry is required.
+DEUCE_PREBUILD_REPOSITORY=
 
 # Agent backend. Pi (pi.dev) runs in --mode rpc inside each session's DevPod
 # container, driven over a persistent JSONL channel — one process per session.
