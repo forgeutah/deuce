@@ -15,6 +15,7 @@ import type { AgentTask } from "@/types";
 import { DEUCE } from "@/lib/deuce";
 import { AgentAvatar, StopButton, TypingDots } from "./atoms";
 import { askUserQuestion, stripMention } from "./utils";
+import { toPlainText } from "@/lib/markdown-plain";
 
 export function AgentTaskCard({
   sessionId,
@@ -124,12 +125,13 @@ export function AgentTaskCard({
             </span>
             <span className="l">
               <b>{DEUCE.name}</b>{" "}
-              {task.reply ??
-                (state === "failed"
+              {task.reply
+                ? toPlainText(task.reply)
+                : state === "failed"
                   ? "Run failed."
                   : state === "cancelled"
                     ? "Run cancelled."
-                    : "Done.")}
+                    : "Done."}
             </span>
             <span className="chev" style={{ marginLeft: 2 }}>
               <ChevronRight size={14} style={{ color: "var(--color-foreground-subtle)" }} />
