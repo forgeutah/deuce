@@ -178,8 +178,8 @@ func TestSaveVSCodeServer_PromotesAtomically(t *testing.T) {
 		}
 		return []byte("[]"), nil
 	}
-	// ContainerName/ContainerUser would shell out; short-circuit by seeding
-	// the user cache and stubbing the container lookup through the runner.
+	// ContainerName/ContainerUser would shell out to docker; the hook stands
+	// in for the whole container/user/home resolution.
 	m.resolveTargetHook = func(context.Context, string) (string, string, string, error) {
 		return "devpod-abc", "vscode", "/home/vscode", nil
 	}
@@ -193,5 +193,34 @@ func TestSaveVSCodeServer_PromotesAtomically(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "ws1.partial")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("staging directory should be gone after promotion, stat err = %v", err)
+	}
+}
+
+// TestIsMissingContainerPath pins the detection against docker's real
+// wording. "Could not find the file" does not contain "not found", so a
+// naive match reported every never-opened workspace as a save failure.
+func TestIsMissingContainerPath(t *testing.T) {
+	missing := []string{
+		"Error response from daemon: Could not find the file /home/vscode/.vscode-server in container ca466b78eedf",
+		"Error: No such container:path: devpod-abc:/home/vscode/.vscode-server",
+		"lstat /home/vscode/.vscode-server: not found in container",
+	}
+	for _, out := range missing {
+		if !isMissingContainerPath(out) {
+			t.Errorf("should be treated as an absent path: %q", out)
+		}
+	}
+
+	// Real failures must stay real — they need the error path, not silence.
+	genuine := []string{
+		"Error response from daemon: container ca466b78eedf is not running",
+		"permission denied",
+		"Cannot connect to the Docker daemon",
+		"",
+	}
+	for _, out := range genuine {
+		if isMissingContainerPath(out) {
+			t.Errorf("should NOT be swallowed as an absent path: %q", out)
+		}
 	}
 }

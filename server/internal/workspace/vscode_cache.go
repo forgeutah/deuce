@@ -127,6 +127,11 @@ func (m *Manager) SaveVSCodeServer(ctx context.Context, workspaceID string, logF
 	// Stage into a sibling directory and swap, so an interrupted copy cannot
 	// leave a half-written tree that a later restore would push into a
 	// container as if it were complete.
+	//
+	// Two concurrent saves for the same workspace would contend over the
+	// staging directory, but the worst case is that one of them fails and
+	// logs: the promoted cache is only ever replaced by a completed rename,
+	// never by a partial copy.
 	staging := dst + ".partial"
 	if err := os.RemoveAll(staging); err != nil {
 		return fmt.Errorf("clear staging dir: %w", err)
@@ -137,8 +142,10 @@ func (m *Manager) SaveVSCodeServer(ctx context.Context, workspaceID string, logF
 
 	if out, err := m.runner(ctx, "docker", "cp", "-a", src, staging); err != nil {
 		_ = os.RemoveAll(staging)
-		// The overwhelmingly common case: VS Code was never opened here.
-		if strings.Contains(string(out), "No such container:path") || strings.Contains(string(out), "not found") {
+		// The overwhelmingly common case: VS Code was never opened against
+		// this workspace, so there is simply nothing to cache. Treating it
+		// as an error would warn on every stop of every such workspace.
+		if isMissingContainerPath(string(out)) {
 			slog.Debug("no vscode-server directory to cache", "workspace", workspaceID)
 			return nil
 		}
@@ -159,6 +166,21 @@ func (m *Manager) SaveVSCodeServer(ctx context.Context, workspaceID string, logF
 		logFn("Saved the VS Code server payload for reuse on the next container")
 	}
 	return nil
+}
+
+// isMissingContainerPath reports whether a `docker cp` failure was just an
+// absent source path. Docker phrases this as
+//
+//	Error response from daemon: Could not find the file /home/vscode/.vscode-server in container <id>
+//
+// Note "Could not find" — matching on "not found" silently misses it, which
+// is how this turned into a warning on every stop of a workspace that had
+// never been opened in VS Code.
+func isMissingContainerPath(dockerOutput string) bool {
+	s := strings.ToLower(dockerOutput)
+	return strings.Contains(s, "could not find the file") ||
+		strings.Contains(s, "no such container:path") ||
+		strings.Contains(s, "not found in container")
 }
 
 // RestoreVSCodeServer copies a previously cached ~/.vscode-server tree back
