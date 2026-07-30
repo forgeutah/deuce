@@ -121,6 +121,13 @@ func (s *Server) Router() http.Handler {
 	}
 
 	wm := workspace.NewManager(s.cfg.DevPodBin, s.cfg.DevPodProvider, s.cfg.GitHubToken)
+	// Only this manager creates workspaces; the sshproxy and reconciler
+	// managers in main.go never call Create, so they need no prebuild repo.
+	wm.SetPrebuildRepository(s.cfg.PrebuildRepository)
+	wm.SetVSCodeCacheDir(s.cfg.VSCodeCacheDir)
+	if s.cfg.PrebuildEnabled() {
+		slog.Info("devcontainer prebuild cache enabled", "repository", s.cfg.PrebuildRepository)
+	}
 	if !wm.Available() {
 		slog.Warn("devpod binary not found, workspace creation will be skipped")
 	} else {

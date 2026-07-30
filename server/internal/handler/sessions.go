@@ -585,17 +585,19 @@ func (h *Handler) startWorkspace(sessionID uuid.UUID, workspaceID, repoURL strin
 		h.hub.BroadcastToSession(sessionID.String(), msg, nil)
 	}
 
-	err := h.workspaces.Create(ctx, workspaceID, repoURL, logFn)
+	prebuilt, err := h.workspaces.Create(ctx, workspaceID, repoURL, logFn)
 
 	var newStatus string
 	if err != nil {
 		slog.Error("workspace creation failed", "sessionID", sessionID, "error", err)
 		newStatus = "failed"
 	} else {
-		// Install the agent harnesses (Claude fallback + Pi + ask-user
-		// extension) after workspace creation. Idempotent and non-fatal; the
-		// same helper runs on every start/rebuild so older containers migrate.
-		h.provisionAgentTools(ctx, workspaceID, logFn)
+		// Install the agent harnesses (Pi + subagents + ask-user extension)
+		// after workspace creation. Idempotent and non-fatal; the same helper
+		// runs on every start/rebuild so older containers migrate. Skipped
+		// when the workspace image already carries them.
+		h.provisionAgentToolsIfNeeded(ctx, workspaceID, prebuilt, logFn)
+		h.restoreVSCodeServer(ctx, workspaceID, logFn)
 		newStatus = "ready"
 	}
 

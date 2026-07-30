@@ -57,6 +57,7 @@ cd server && make migrate               # Run migrations + seed data
 - **Auth**: Two modes selected by `DEUCE_AUTH_MODE`. `dev` (default) injects a fixed user ID from `DEUCE_USER_ID` — localhost-only, do not bind on a non-loopback interface. `forge-proxy` trusts `X-Forge-*` headers from the [forge-proxy](https://github.com/forgeutah/forge-proxy) reverse proxy (validates the shared secret in constant time, checks a single required role from CSV, auto-provisions users by `forge_user_id`). See `server/internal/auth/forge_proxy.go`.
 - **Agent runtime**: One persistent Pi (`pi --mode rpc`) process per session inside its DevPod container, driven over JSONL (`server/internal/agent/`). `@deuce` mentions are detected server-side (`server/internal/handler/messages.go`) and enqueue tasks on the session's serial queue; `GET/PUT /api/agent` reads/edits deuce's global system prompt. The agent's fixed UUID is `agent.DeuceAgentID` (mirrored by `DEUCE` in `src/lib/deuce.ts`); the nil UUID is the system-notice author sentinel.
 - **DevPod**: Workspace manager shells out to `devpod` CLI via os/exec (`server/internal/workspace/manager.go`)
+- **Devcontainer prebuild cache** (opt-in via `DEUCE_PREBUILD_REPOSITORY`, `server/internal/workspace/prebuild.go`): `devpod build --repository R --skip-push` builds the repo's devcontainer once and tags it `R:devpod-<hash>`, where `<hash>` is devpod's hash of the devcontainer definition. A thin Deuce layer then bakes Pi, pi-subagents and the ask-user extension on top as `R:deuce-<hash>`, and `devpod up --devcontainer-image R:deuce-<hash>` starts sessions from it with no build and no over-ssh provisioning. Because the tag carries the definition hash, a devcontainer change invalidates the cache while ordinary code pushes reuse it.
 
 ### Adding a New API Endpoint
 
@@ -89,6 +90,22 @@ DEUCE_USER_ID=10000000-0000-0000-0000-000000000001
 GITHUB_TOKEN=          # GitHub PAT for repo listing (optional)
 DEVPOD_BIN=devpod      # DevPod binary path
 DEVPOD_PROVIDER=       # DevPod provider (empty = default)
+
+# Devcontainer prebuild cache. Empty (default) = off: every session runs a
+# from-scratch `devpod up` and installs Pi over `devpod ssh`. When set to a
+# Docker repository name (no tag — Deuce appends the devcontainer hash), each
+# repo's devcontainer image is built once per devcontainer-definition hash,
+# has Pi + pi-subagents + the ask-user extension baked on top, and later
+# sessions start straight from that image with no build and no over-ssh
+# install. Tags stay local to the Docker daemon; no registry is required.
+DEUCE_PREBUILD_REPOSITORY=
+
+# Carries a workspace's ~/.vscode-server tree across container recreates so
+# VS Code Remote-SSH does not re-download its ~120MB server payload. Empty
+# (default) = off. Must be an absolute path. Budget ~120MB per workspace that
+# has been opened in VS Code; an entry is removed when its workspace is
+# deleted. Keyed by workspace, not by user — see the VS Code section below.
+DEUCE_VSCODE_SERVER_CACHE_DIR=
 
 # Agent backend. Pi (pi.dev) runs in --mode rpc inside each session's DevPod
 # container, driven over a persistent JSONL channel — one process per session.
@@ -239,7 +256,11 @@ Devcontainers used with "Open in VS Code" must include:
 - `openssh-sftp-server` (Debian: `/usr/lib/openssh/sftp-server`) — required for SFTP-based file operations
 - A **glibc-compatible base image** — VS Code Remote requires glibc ≥ 2.17. Alpine + musl needs `apk add gcompat`.
 
-`~/.vscode-server` lives in the container's own filesystem; a fresh ~120MB download fires on every container recreate. Per-user named volume caching is a v2 follow-up.
+`~/.vscode-server` lives in the container's own filesystem, so a fresh ~120MB download would fire on every container recreate. Setting `DEUCE_VSCODE_SERVER_CACHE_DIR` avoids that: Deuce copies the tree out to a host cache before stop/rebuild and copies it back in after the container is recreated (`server/internal/workspace/vscode_cache.go`).
+
+A named volume would be the obvious mechanism, but DevPod exposes no way to add one — `devpod up` has no mount flag and the docker provider's options are only `DOCKER_BUILDER`/`DOCKER_HOST`/`DOCKER_PATH`/`INACTIVITY_TIMEOUT`. Mounts can only come from the repo's own `devcontainer.json`, which Deuce does not control, hence `docker cp`.
+
+The cache is keyed by **workspace**, not by user. A workspace's container is already shared by every member of its session, so a per-workspace cache adds no new reach; keying it per user would copy one user's extension state — including credentials their extensions have stored — into a container other session members hold a shell on.
 
 ## Documented Solutions
 

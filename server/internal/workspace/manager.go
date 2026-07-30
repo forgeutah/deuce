@@ -66,6 +66,20 @@ type Manager struct {
 	gitOnce     sync.Once
 	gitEnv      []string
 
+	// prebuildRepo enables the devcontainer prebuild cache when non-empty
+	// (see prebuild.go). Empty keeps Create on its original path.
+	prebuildRepo string
+
+	// vscodeCacheDir enables carrying ~/.vscode-server across container
+	// recreates when non-empty (see vscode_cache.go).
+	vscodeCacheDir string
+
+	// resolveTargetHook is the seam the vscode-cache tests use to stand in
+	// for the container/user/home lookup, which would otherwise shell out
+	// to docker. Nil in production. Mirrors the per-instance hook pattern
+	// at sshproxy.Server.resolveContainerHook.
+	resolveTargetHook func(ctx context.Context, workspaceID string) (container, user, home string, err error)
+
 	// userMu guards userCache, which memoizes ContainerUser lookups.
 	// VS Code Remote-SSH opens many channels per connection and each one
 	// resolves the exec user, so an uncached `docker inspect` per channel
@@ -180,11 +194,30 @@ func (m *Manager) EnsureDockerProvider(ctx context.Context) error {
 // Create starts a new DevPod workspace from a git repo URL.
 // Output is streamed line-by-line to logFn (if non-nil).
 // This blocks until the workspace is ready or fails.
-func (m *Manager) Create(ctx context.Context, workspaceID, repoURL string, logFn LogFunc) error {
-	args := []string{"up", repoURL, "--id", workspaceID, "--ide", "none"}
-	if m.provider != "" {
-		args = append(args, "--provider", m.provider)
+//
+// When a prebuild repository is configured, the repo's devcontainer image is
+// built once and cached with the agent tooling baked in, and the container
+// starts from that image instead of building from scratch. The returned
+// PrebuildResult reports whether the tooling was baked; ToolsBaked false
+// means the caller must still run the over-ssh provisioning path. Any
+// failure in the prebuild path degrades to the original behaviour rather
+// than failing the session.
+func (m *Manager) Create(ctx context.Context, workspaceID, repoURL string, logFn LogFunc) (PrebuildResult, error) {
+	var prebuilt PrebuildResult
+	if m.prebuildRepo != "" {
+		res, err := m.EnsurePrebuild(ctx, repoURL, logFn)
+		if err != nil {
+			slog.Warn("prebuild failed; falling back to from-scratch devcontainer build",
+				"id", workspaceID, "repo", repoURL, "error", err)
+			if logFn != nil {
+				logFn("WARNING: could not prepare a cached workspace image — building from scratch")
+			}
+		} else {
+			prebuilt = res
+		}
 	}
+
+	args := devpodUpArgs(workspaceID, repoURL, m.provider, prebuilt.Image)
 
 	slog.Info("starting devpod workspace", "id", workspaceID, "repo", repoURL)
 	cmd := exec.CommandContext(ctx, m.bin, args...)
@@ -200,12 +233,12 @@ func (m *Manager) Create(ctx context.Context, workspaceID, repoURL string, logFn
 	// Merge stderr into stdout so we capture everything
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("stdout pipe: %w", err)
+		return prebuilt, fmt.Errorf("stdout pipe: %w", err)
 	}
 	cmd.Stderr = cmd.Stdout
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("devpod start: %w", err)
+		return prebuilt, fmt.Errorf("devpod start: %w", err)
 	}
 
 	// Stream output line by line
@@ -223,11 +256,26 @@ func (m *Manager) Create(ctx context.Context, workspaceID, repoURL string, logFn
 		if logFn != nil {
 			logFn(fmt.Sprintf("ERROR: devpod up failed: %v", err))
 		}
-		return fmt.Errorf("devpod up failed: %w", err)
+		return prebuilt, fmt.Errorf("devpod up failed: %w", err)
 	}
 
-	slog.Info("devpod workspace ready", "id", workspaceID)
-	return nil
+	slog.Info("devpod workspace ready", "id", workspaceID, "toolsBaked", prebuilt.ToolsBaked)
+	return prebuilt, nil
+}
+
+// devpodUpArgs assembles the `devpod up` argv. A non-empty image switches
+// devpod off its build path entirely — it starts the container straight from
+// that image, keeping the devcontainer.json's own metadata (features,
+// remoteUser) because those travel on the image's labels.
+func devpodUpArgs(workspaceID, repoURL, provider, image string) []string {
+	args := []string{"up", repoURL, "--id", workspaceID, "--ide", "none"}
+	if provider != "" {
+		args = append(args, "--provider", provider)
+	}
+	if image != "" {
+		args = append(args, "--devcontainer-image", image)
+	}
+	return args
 }
 
 // Stop halts a running workspace (can be resumed later).

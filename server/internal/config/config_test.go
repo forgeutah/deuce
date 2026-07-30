@@ -307,3 +307,94 @@ func TestWSAllowedOriginList_TrimsAndDropsEmpty(t *testing.T) {
 		}
 	}
 }
+
+func TestPrebuildEnabled(t *testing.T) {
+	cfg := &Config{}
+	if cfg.PrebuildEnabled() {
+		t.Error("prebuild should be off by default — an empty repository keeps the original from-scratch path")
+	}
+	cfg.PrebuildRepository = "deuce-prebuild"
+	if !cfg.PrebuildEnabled() {
+		t.Error("prebuild should be on when a repository is configured")
+	}
+}
+
+func TestValidate_PrebuildRepositoryAccepted(t *testing.T) {
+	valid := []string{
+		"",                                 // off
+		"deuce-prebuild",                   // bare local name
+		"ghcr.io/forgeutah/deuce-prebuild", // registry path
+		"localhost:5000/deuce-prebuild",    // registry with port
+		"deuce_prebuild",                   // underscore separator
+	}
+	for _, repo := range valid {
+		cfg := &Config{
+			AuthMode:           AuthModeDev,
+			WSAllowedOrigins:   "localhost:4000",
+			PrebuildRepository: repo,
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("PrebuildRepository=%q should validate: %v", repo, err)
+		}
+	}
+}
+
+func TestValidate_PrebuildRepositoryRejected(t *testing.T) {
+	// A tag here would collide with the devcontainer hash Deuce appends,
+	// and the flag- and shell-shaped values must never reach docker argv.
+	invalid := []string{
+		"deuce-prebuild:latest",
+		"Deuce-Prebuild",
+		"--build-arg=evil",
+		"repo with space",
+		"repo;rm -rf /",
+		"repo$(hostile)",
+	}
+	for _, repo := range invalid {
+		cfg := &Config{
+			AuthMode:           AuthModeDev,
+			WSAllowedOrigins:   "localhost:4000",
+			PrebuildRepository: repo,
+		}
+		err := cfg.Validate()
+		if err == nil {
+			t.Errorf("PrebuildRepository=%q should be rejected", repo)
+			continue
+		}
+		if !strings.Contains(err.Error(), "DEUCE_PREBUILD_REPOSITORY") {
+			t.Errorf("error for %q should name the env var: %v", repo, err)
+		}
+	}
+}
+
+func TestValidate_VSCodeCacheDirMustBeAbsolute(t *testing.T) {
+	// A relative root would resolve against the server's working directory,
+	// which differs between `make dev` and a deployed unit — the cache would
+	// silently land somewhere different depending on how deuce was started.
+	for _, dir := range []string{"relative/path", "./cache", "cache"} {
+		cfg := &Config{
+			AuthMode:         AuthModeDev,
+			WSAllowedOrigins: "localhost:4000",
+			VSCodeCacheDir:   dir,
+		}
+		err := cfg.Validate()
+		if err == nil {
+			t.Errorf("VSCodeCacheDir=%q should be rejected", dir)
+			continue
+		}
+		if !strings.Contains(err.Error(), "DEUCE_VSCODE_SERVER_CACHE_DIR") {
+			t.Errorf("error for %q should name the env var: %v", dir, err)
+		}
+	}
+
+	for _, dir := range []string{"", "/var/lib/deuce/vscode"} {
+		cfg := &Config{
+			AuthMode:         AuthModeDev,
+			WSAllowedOrigins: "localhost:4000",
+			VSCodeCacheDir:   dir,
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("VSCodeCacheDir=%q should validate: %v", dir, err)
+		}
+	}
+}
