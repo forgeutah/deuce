@@ -1,0 +1,82 @@
+# Deuce single-VM deployment — SPIKE CANDIDATE, not yet validated.
+#
+# This is the "socket mount with path parity" topology under test in
+# docs/plans/2026-07-31-001-feat-vm-deploy-topology-spike-plan.md. Do not treat
+# it as a supported deployment until that spike records a decision.
+#
+# THE ONE THING THAT MATTERS HERE
+#
+# Deuce does not read workspace files through DevPod. It reads them off its own
+# filesystem and runs git against them, and it locates workspace containers by a
+# label it reads from DevPod's own on-disk records. Both of those trees resolve
+# through $HOME. So Deuce and the host Docker daemon must agree on what a path
+# string means: DEUCE_STATE_DIR is mounted at the SAME ABSOLUTE PATH on both
+# sides, and HOME points at it.
+#
+# Break that parity and nothing errors. DevPod succeeds, the container starts,
+# and the bind mount silently resolves to an empty host directory — the files
+# tab shows nothing while the agent works normally somewhere nobody is looking.
+# If you change the mount, change both sides together.
+#
+# Copy .env.example to .env in this directory before bringing the stack up.
+# The required-variable checks below fail loudly rather than defaulting, because
+# every one of them is something that silently misbehaves when guessed.
+
+services:
+  deuce:
+    # Pinned tag, never a floating one: an upgrade should be a deliberate edit
+    # and a rollback the reverse edit.
+    image: ghcr.io/forgeutah/deuce:${DEUCE_IMAGE_TAG:?set DEUCE_IMAGE_TAG to a released tag, e.g. 0.2.0 — floating tags make rollback ambiguous}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Overrides anything in .env. HOME is what makes the mount below
+      # meaningful — see the header.
+      HOME: ${DEUCE_STATE_DIR:?set DEUCE_STATE_DIR to an absolute host path, e.g. /var/lib/deuce}
+      DATABASE_URL: postgres://deuce:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/deuce?sslmode=disable
+    volumes:
+      # The host daemon Deuce drives. Workspace containers are created as
+      # siblings of this container, not as children.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Path parity. Both sides are the same string on purpose.
+      - ${DEUCE_STATE_DIR:?set DEUCE_STATE_DIR}:${DEUCE_STATE_DIR:?set DEUCE_STATE_DIR}
+    # The container runs as UID 65532 and needs the host's docker group to reach
+    # the socket. This gid is host-specific — find it with:
+    #   getent group docker | cut -d: -f3
+    group_add:
+      - "${DOCKER_GID:?set DOCKER_GID to the host docker group id — see the comment above}"
+    ports:
+      # Loopback by default. In dev auth mode ANY reachable client is admitted
+      # as any user, so this must not be published broadly until proxy auth is
+      # configured. Front it with `tailscale serve`, which proxies from
+      # localhost, or tunnel to it.
+      - "${DEUCE_HTTP_BIND:-127.0.0.1}:${DEUCE_HTTP_PORT:-8080}:8080"
+      # The SSH proxy for "Open in VS Code". Must be reachable by the VS Code
+      # client to exercise that path, which means widening this bind and
+      # relying on the tailnet as the boundary.
+      - "${DEUCE_SSH_BIND:-127.0.0.1}:${DEUCE_SSH_PORT:-2222}:2222"
+
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: deuce
+      POSTGRES_USER: deuce
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Gates deuce's start. Migrations run in-process before the HTTP listener
+      # binds and exit non-zero on failure, so a half-migrated schema never
+      # serves — but the app still has to find a live database first.
+      test: ["CMD-SHELL", "pg_isready -U deuce -d deuce"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
