@@ -1,7 +1,7 @@
 ---
 title: VM deploy topology spike — validate socket-mount with path parity
 type: feat
-status: active
+status: completed
 date: 2026-07-31
 origin: docs/brainstorms/2026-07-30-vm-deploy-and-upgrade-requirements.md
 ---
