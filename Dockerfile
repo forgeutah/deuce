@@ -93,6 +93,20 @@ RUN apt-get update \
 # host directory already owned for the old image keeps working.
 RUN groupadd --gid 65532 deuce \
     && useradd --uid 65532 --gid 65532 --home-dir /var/lib/deuce --create-home deuce
+# Deuce runs git against workspace trees it does not own. DevPod clones content
+# as the devcontainer's remoteUser (uid 1000 on most images), while this process
+# runs as 65532, and git refuses to operate across that mismatch — it reports
+# "detected dubious ownership" and exits non-zero. The files tab degrades
+# quietly when that happens: the tree still lists, because walking a directory
+# needs no ownership match, but every file loses its git status.
+#
+# Matching the uids is not available as a fix. remoteUser varies per
+# devcontainer image, one deployment serves many repos at once, and the value
+# is not known until after the workspace is built. Declaring the trees safe is
+# the accurate description of the situation: this container's entire job is
+# reading repositories owned by other uids, which is the case git's ownership
+# check was never meant to cover.
+RUN git config --system --add safe.directory '*'
 COPY --from=tools /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=tools /usr/local/bin/devpod /usr/local/bin/devpod
 COPY --from=backend /out/deuce /usr/local/bin/deuce
