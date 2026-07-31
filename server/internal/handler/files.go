@@ -387,12 +387,36 @@ func discoverRepoRoots(ctx context.Context, rootPath string) ([]string, error) {
 	return roots, nil
 }
 
+// gitStatusArgs is the argv for the workspace git-status probe.
+//
+// core.fsmonitor is pinned off because the repositories this runs against are
+// not trusted. Git treats fsmonitor as a command to execute, and it honours it
+// from the repository's own .git/config — so a value planted inside a workspace
+// would run here, in the server process, rather than in the workspace container
+// where whoever planted it already had execution. On a deployment that mounts
+// the Docker socket that is a path from workspace to host root.
+//
+// Git's own defence against this is the dubious-ownership check, which fires
+// because DevPod clones as the devcontainer's remoteUser while this process
+// runs as its own uid. Deuce has to suppress that check to read workspaces at
+// all (see the safe.directory line in the Dockerfile), which means suppressing
+// the protection it was providing. Pinning the setting on the command line
+// takes precedence over repository config and restores it.
+//
+// Confine additions here to flags that are inert or safe by construction; a
+// command-line -c is the only layer standing between untrusted repository
+// config and this process.
+var gitStatusArgs = []string{
+	"-c", "core.fsmonitor=false",
+	"status", "--porcelain=v1", "--untracked-files=normal",
+}
+
 // loadGitStatus runs `git status --porcelain=v1` in the given repo root and
 // records workspace-relative paths in statusByPath. Errors from one repo do
 // not abort the whole walk.
 func loadGitStatus(ctx context.Context, rootPath, repoRoot string, statusByPath map[string]string) error {
 	absRepoPath := filepath.Join(rootPath, repoRoot)
-	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain=v1", "--untracked-files=normal")
+	cmd := exec.CommandContext(ctx, "git", gitStatusArgs...)
 	cmd.Dir = absRepoPath
 
 	out, err := cmd.Output()
