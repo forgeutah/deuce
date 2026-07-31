@@ -126,14 +126,21 @@ The naive variant of C — socket mounted without path parity — is the shape m
 
 **Release artifacts**
 
-- R15. The devcontainer prebuild cache key incorporates the inputs to Deuce's own baked layer, not only DevPod's hash of the devcontainer definition. Today `bakedTag()` in `server/internal/workspace/prebuild.go` reuses DevPod's definition hash and skips the bake when that tag exists, so upgrading Deuce leaves cached repos starting sessions from the previously baked agent tooling.
-- R16. Upgrading Deuce causes affected workspaces to be rebuilt from the new baked layer on their next start, without an operator manually clearing images.
+- R15. The devcontainer prebuild cache produces a usable image at all. The spike found it non-functional against DevPod v0.6.15: `devpod build --repository R --skip-push` prints `Successfully build image R:latest` and exits zero, but the tag carries no `devpod-` prefix for `bakedTag()` to parse **and no image is left on the daemon**. Every session silently falls back to a from-scratch build plus an over-SSH tooling install, logging one WARN. Verified with two repositories, one with a `devcontainer.json` and one without.
+- R16. Once the cache populates, its key incorporates the inputs to Deuce's own baked layer rather than only DevPod's definition hash, so upgrading Deuce rebuilds the baked tooling instead of reusing a stale image. This was the originally-identified defect; the spike showed it is currently unreachable, since a cache that never populates cannot go stale. It remains real and becomes live the moment R15 is fixed.
 - R17. The release publishes `linux/arm64` alongside `linux/amd64`. Common low-cost self-host VMs are ARM, and the binary is statically linked and cross-compiles.
 
 **Documentation**
 
 - R18. Deploy docs cover install, upgrade, rollback, the required VM prerequisites, and what to do when a session comes back `missing`.
 - R19. The README's stale claim that the devcontainer "mounts the host Docker socket" is corrected — no such mount exists in the repo; the devcontainer runs a nested daemon.
+
+**First boot**
+
+Both of these were found by standing the deployment up on a real VM. Neither appears on a developer laptop, where the database has accumulated state over time.
+
+- R20. A fresh deployment is usable by its first user without hand-editing the database. On first boot the `users` table is empty and no `team_members` rows exist, and the consequences cascade: every read returns `FORBIDDEN — not a team member`, session listing returns empty despite seeded sessions, newly created sessions get `members: []` because the creator row doesn't exist to be added, and the SSH proxy then rejects every key because it authorizes on session membership. The spike got past this by inserting a user and a membership by hand.
+- R21. Configuration expresses "off" in a way that works. The config loader falls back to a field's built-in default when a variable is set-but-empty, so an env file cannot express an empty value at all. `DEUCE_SSH_LISTEN_ADDR=` does not disable the SSH proxy — verified across unset, empty, and explicit values, the listener came up on `:2222` in the first two cases — yet the SSH deployment checklist instructs operators to disable it exactly that way. `DEUCE_WS_ALLOWED_ORIGINS=` silently becomes the localhost dev default, which is the same trap on a security-relevant setting.
 
 ---
 
@@ -183,9 +190,10 @@ The naive variant of C — socket mounted without path parity — is the shape m
 
 ## Outstanding Questions
 
-### Resolve Before Planning
+### Resolved
 
-- [Affects R5, R6, R7] The topology spike. Stand up candidate C on a real VM and confirm, at minimum: the files tab shows real content (AE1), the terminal attaches, the SSH proxy's `docker exec` reaches the container as the right user, and an upgrade leaves workspaces running. Decision rule: if C passes, take it; if parity proves fragile, fall back to A rather than B, since A is the same architecture with the container removed. B remains the backstop if both fail, at the cost of privileged mode and workspaces stopping on every upgrade.
+- The topology spike is complete and candidate C — the socket-mounted container with path parity — is adopted. Every check passed on an Ubuntu 24.04 VM: parity held, writes crossed the boundary in both directions, upgrades left workspace containers running untouched, the reconciler reported `stopped` rather than `missing`, and the SSH proxy landed in the container as the devcontainer's `remoteUser`. See `docs/solutions/architecture-patterns/deploy-deuce-as-a-container-sharing-the-host-daemon.md` for the evidence and for the two degradation symptoms that indicate parity or file ownership has been broken later.
+
 ### Deferred to Planning
 
 - [Affects R3, R4] Whether the deployment pins a tag in the compose file, in the env file, or both, and how rollback is documented against that choice.

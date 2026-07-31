@@ -1,11 +1,20 @@
 ---
 title: Deploy Deuce to exe.dev VM via GitHub Actions
 type: feat
-status: active
+status: superseded
 date: 2026-05-23
 deepened: 2026-05-23
 origin: docs/brainstorms/2026-05-23-exe-dev-dogfood-deploy-requirements.md
+superseded_by: docs/brainstorms/2026-07-30-vm-deploy-and-upgrade-requirements.md
 ---
+
+> **Superseded.** The build-and-publish half of this plan shipped as
+> `docs/plans/2026-05-26-001-feat-tag-triggered-release-plan.md`. The deploy half
+> never landed and is replaced by
+> `docs/brainstorms/2026-07-30-vm-deploy-and-upgrade-requirements.md`, which
+> targets a self-hostable deployment rather than a single dogfood VM. The
+> container topology that plan left open was settled by
+> `docs/plans/2026-07-31-001-feat-vm-deploy-topology-spike-plan.md`.
 
 # Deploy Deuce to exe.dev VM via GitHub Actions
 
