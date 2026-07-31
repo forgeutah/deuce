@@ -15,6 +15,22 @@ import (
 // allocation-free.
 const defaultDockerBin = "docker"
 
+// execShell interprets client-supplied exec commands inside the container.
+//
+// Bash, not sh. A real sshd hands the command to the account's login shell,
+// and clients write to that expectation: VS Code Remote-SSH's bootstrap, and
+// the shell-integration payloads terminals like iTerm2 and Warp inject on
+// connect, are multi-line bash scripts. On Debian-derived images /bin/sh is
+// dash, which rejects process substitution and the rest of the bash-only
+// syntax those scripts use — the whole command dies on a syntax error before
+// anything runs.
+//
+// bash is already a hard requirement for devcontainers used with this proxy
+// (VS Code's own install probe needs it), and the interactive shell modes
+// below have always used it, so this only aligns the exec path with the shell
+// path.
+const execShell = "/bin/bash"
+
 // Env-var allowlist. Forwarded onto cmd.Env as-is when the request name
 // matches. Everything else is silently dropped — see filterEnv. This is
 // the only path by which a hostile session-member key can influence the
@@ -194,10 +210,10 @@ func dockerArgs(container, command string, mode execMode, user string) []string 
 	case execModeNonPTYShell:
 		return append(pre, "-i", container, "/bin/bash", "-l")
 	case execModePTYExec:
-		return append(pre, "-it", container, "/bin/sh", "-c", command)
+		return append(pre, "-it", container, execShell, "-c", command)
 	case execModeSFTP:
 		return append(pre, "-i", container, "/usr/lib/openssh/sftp-server", "-e")
 	default: // execModeNonPTY
-		return append(pre, "-i", container, "/bin/sh", "-c", command)
+		return append(pre, "-i", container, execShell, "-c", command)
 	}
 }
