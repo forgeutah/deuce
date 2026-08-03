@@ -54,7 +54,10 @@ jobs:
       - name: ESLint
         run: npm run lint
       - name: TypeScript typecheck
-        run: npx tsc --noEmit
+        # Build mode, not a bare --noEmit: the root tsconfig is solution-style
+        # ("files": [] plus project references), so `tsc --noEmit` compiles zero
+        # files and exits 0 no matter what. This step checked nothing until now.
+        run: npx tsc -b --noEmit
       - name: Frontend build
         run: npm run build
       - name: Go tests (integration enabled via TEST_DATABASE_URL)
