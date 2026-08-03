@@ -24,9 +24,14 @@ import (
 // Pure unit tests: command builders + env filter.
 // ----------------------------------------------------------------------
 
+// TestDockerArgs_NonPTY pins bash as the exec interpreter. Clients send
+// commands written for a login shell — VS Code Remote-SSH's bootstrap and the
+// shell-integration payloads terminals inject on connect are multi-line bash
+// scripts — and /bin/sh is dash on Debian-derived images, which dies on
+// bash-only syntax before running anything.
 func TestDockerArgs_NonPTY(t *testing.T) {
 	got := dockerArgs("alice", "echo hi", execModeNonPTY, "")
-	want := []string{"exec", "-i", "alice", "/bin/sh", "-c", "echo hi"}
+	want := []string{"exec", "-i", "alice", "/bin/bash", "-c", "echo hi"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("dockerArgs(non-pty):\n got: %#v\nwant: %#v", got, want)
 	}
@@ -54,9 +59,29 @@ func TestDockerArgs_NonPTYShell(t *testing.T) {
 
 func TestDockerArgs_PTYExec(t *testing.T) {
 	got := dockerArgs("alice", "ls /", execModePTYExec, "")
-	want := []string{"exec", "-it", "alice", "/bin/sh", "-c", "ls /"}
+	want := []string{"exec", "-it", "alice", "/bin/bash", "-c", "ls /"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("dockerArgs(pty-exec):\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+// TestDockerArgs_ExecUsesBashNotDash is the regression guard for the failure
+// this replaced: a client sent a multi-line bash script and dash rejected it
+// with `Syntax error: "(" unexpected`, closing the connection before the
+// command ran. Both exec modes must reach bash.
+func TestDockerArgs_ExecUsesBashNotDash(t *testing.T) {
+	for _, mode := range []execMode{execModeNonPTY, execModePTYExec} {
+		args := dockerArgs("alice", "cat <(echo bash-only)", mode, "")
+		var interp string
+		for i, a := range args {
+			if a == "-c" && i > 0 {
+				interp = args[i-1]
+				break
+			}
+		}
+		if interp != "/bin/bash" {
+			t.Errorf("mode %v: exec interpreter = %q, want /bin/bash (dash cannot parse bash-only syntax)", mode, interp)
+		}
 	}
 }
 

@@ -27,11 +27,93 @@ RUN cd server && CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w -X main.Version=${VERSION}" \
     -o /out/deuce .
 
-# Stage 2: minimal runtime. distroless/static-debian12:nonroot is correct for
-# CGO_ENABLED=0 static Go binaries: no glibc, no shell, no package manager.
-# Runs as UID 65532.
-FROM gcr.io/distroless/static-debian12:nonroot
-COPY --from=backend /out/deuce /deuce
-EXPOSE 8080
+# Stage 2: fetch the CLI binaries the server shells out to.
+#
+# Deuce is not a self-contained binary at runtime: it drives `devpod` for every
+# workspace operation, `docker` for the SSH proxy / SFTP / container-user lookup
+# / devcontainer prebuild, and `git` for the files tab. A distroless runtime
+# (the previous base) boots, migrates, and serves the SPA, then fails on the
+# first session create with an exec-not-found. Both CLIs are fetched here so
+# curl and the tarball never reach the runtime stage.
+#
+# Version pins are duplicated from .devcontainer/tool-versions.env rather than
+# read from it: .dockerignore excludes .devcontainer from the build context, so
+# the file is not readable here. Keep DEVPOD_VERSION in step with that file when
+# bumping either one — a drift means the devcontainer and the shipped image
+# drive DevPod differently.
+FROM debian:bookworm-slim AS tools
+ARG DEVPOD_VERSION=v0.6.15
+ARG DOCKER_CLI_VERSION=29.7.0
+# TARGETARCH is supplied by buildx. The release workflow builds linux/amd64
+# only today; parameterizing here means adding linux/arm64 is a workflow
+# change rather than a Dockerfile change.
+ARG TARGETARCH
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+        amd64) docker_arch="x86_64" ;; \
+        arm64) docker_arch="aarch64" ;; \
+        *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl --fail --silent --show-error --location \
+        --output /tmp/docker.tgz \
+        "https://download.docker.com/linux/static/stable/${docker_arch}/docker-${DOCKER_CLI_VERSION}.tgz"; \
+    # The tarball carries the full engine; extract only the client. dockerd,
+    # containerd and runc have no business in this image — the daemon is the
+    # host's.
+    tar --extract --file /tmp/docker.tgz --strip-components=1 --directory /usr/local/bin docker/docker; \
+    curl --fail --silent --show-error --location \
+        --output /usr/local/bin/devpod \
+        "https://github.com/loft-sh/devpod/releases/download/${DEVPOD_VERSION}/devpod-linux-${TARGETARCH}"; \
+    chmod 0755 /usr/local/bin/docker /usr/local/bin/devpod; \
+    /usr/local/bin/docker --version; \
+    /usr/local/bin/devpod version
+
+# Stage 3: runtime.
+#
+# HOME is load-bearing, not cosmetic. Both DevPod state trees resolve through
+# os.UserHomeDir(): the CLI's workspace records (which supply the container
+# label the reconciler matches on) and the agent's cloned workspace content
+# (which the files tab reads and runs git against). The SSH host key defaults
+# under it too. A deployment mounts one host directory here so all three
+# survive container replacement — and, for the socket-mounted topology, so the
+# path string resolves to the same directory for both Deuce and the host
+# daemon. See docs/plans/2026-07-31-001-feat-vm-deploy-topology-spike-plan.md.
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates \
+        git \
+    && rm -rf /var/lib/apt/lists/*
+# UID 65532 matches the distroless `nonroot` user this image replaced, so any
+# host directory already owned for the old image keeps working.
+RUN groupadd --gid 65532 deuce \
+    && useradd --uid 65532 --gid 65532 --home-dir /var/lib/deuce --create-home deuce
+# Deuce runs git against workspace trees it does not own. DevPod clones content
+# as the devcontainer's remoteUser (uid 1000 on most images), while this process
+# runs as 65532, and git refuses to operate across that mismatch — it reports
+# "detected dubious ownership" and exits non-zero. The files tab degrades
+# quietly when that happens: the tree still lists, because walking a directory
+# needs no ownership match, but every file loses its git status.
+#
+# Matching the uids is not available as a fix. remoteUser varies per
+# devcontainer image, one deployment serves many repos at once, and the value
+# is not known until after the workspace is built. Declaring the trees safe is
+# the accurate description of the situation: this container's entire job is
+# reading repositories owned by other uids, which is the case git's ownership
+# check was never meant to cover.
+RUN git config --system --add safe.directory '*'
+COPY --from=tools /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=tools /usr/local/bin/devpod /usr/local/bin/devpod
+COPY --from=backend /out/deuce /usr/local/bin/deuce
+ENV HOME=/var/lib/deuce
+WORKDIR /var/lib/deuce
+# 8080 HTTP (API + WS + embedded SPA), 2222 embedded SSH proxy for
+# "Open in VS Code" (DEUCE_SSH_LISTEN_ADDR default).
+EXPOSE 8080 2222
 USER 65532:65532
-ENTRYPOINT ["/deuce"]
+ENTRYPOINT ["/usr/local/bin/deuce"]
