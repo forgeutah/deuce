@@ -58,12 +58,20 @@ jobs:
       - name: ESLint
         run: npm run lint
       - name: TypeScript typecheck
-        run: npx tsc --noEmit
+        # Build mode, not a bare --noEmit: the root tsconfig is solution-style
+        # ("files": [] plus project references), so `tsc --noEmit` compiles zero
+        # files and exits 0 no matter what. This step checked nothing until now.
+        run: npx tsc -b --noEmit
       - name: Go tests (integration enabled via TEST_DATABASE_URL)
         working-directory: server
         env:
           TEST_DATABASE_URL: postgres://deuce:deuce@localhost:5432/deuce?sslmode=disable
-        run: go test ./...
+        # -p 1 runs PACKAGES serially, matching ci.yml. The db, handler and
+        # sshproxy integration packages each reset the schema on the SAME
+        # database, so running them in parallel fails outright. Without this
+        # the release cannot publish — the test job dies before the image is
+        # ever built.
+        run: go test -p 1 ./...
 
   frontend_build:
     if: github.repository == 'forgeutah/deuce'
