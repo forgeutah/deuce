@@ -16,6 +16,9 @@
     "The `timeout` values below are 2100000ms (35 min), which is what Deuce's extension passes: it must stay strictly above the runtime's defaultAwaitTimeout (30 min) so Deuce's ceiling always fires before Pi's (KTD7)."
   ],
 
+  "$deuceAwaitCeilingComment": "NOT part of Pi's contract. This is Deuce's own ceiling on an unanswered question — `defaultAwaitTimeout` in server/internal/agent/runtime.go — recorded here so both sides of the KTD7 invariant read the same number from one file instead of each hardcoding a copy. A Go test asserts defaultAwaitTimeout equals this value; ask-user.test.ts asserts the dialog `timeout` above is strictly greater than it. Moving one side alone now fails a test instead of silently inverting the ordering.",
+  "deuceAwaitCeilingMs": 1800000,
+
   "requests": [
     {
       "name": "select",
@@ -189,6 +192,16 @@
         "method": "select",
         "title": "A question for you",
         "options": "Which framework should I use?"
+      }
+    },
+    "inputQuestionAsPlaceholder": {
+      "$comment": "Emitted by a pre-fix Deuce extension calling input(title, question): Pi's signature is input(title, placeholder, opts), so the question lands in `placeholder` behind the extension's constant boilerplate title. Same stale-prebuild version-skew window as selectOptionsAsBareString. The question text is in `placeholder` — recovering it from `title` would yield the boilerplate and discard the question (R2).",
+      "line": {
+        "type": "extension_ui_request",
+        "id": "ui-skew-2",
+        "method": "input",
+        "title": "A question for you",
+        "placeholder": "Which environment should I deploy to?"
       }
     },
     "unknownMethod": {

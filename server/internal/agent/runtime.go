@@ -86,9 +86,12 @@ const (
 	// than this one so this ceiling always fires first. If Pi's timer won the
 	// race it would resolve the dialog with its own default (false for
 	// confirm, undefined for select/input) and hand the model a fabricated
-	// answer while the drawer still showed the question as answerable. Nothing
-	// but these two comments ties the values together — raise this and the
-	// extension constant has to move with it.
+	// answer while the drawer still showed the question as answerable. The two
+	// values are tied together through the contract fixture: this constant is
+	// mirrored as `deuceAwaitCeilingMs` in pirun/testdata/pi-ui-protocol.json,
+	// a Go test asserts the two match, and ask-user.test.ts asserts its dialog
+	// timeout is strictly greater than the same field. Change this and the
+	// fixture must move with it.
 	defaultAwaitTimeout = 30 * time.Minute
 )
 
@@ -231,7 +234,11 @@ func (r *Runtime) RouteOrEnqueue(ctx context.Context, p EnqueueParams) (RouteRes
 		// response Pi would silently resolve to its own fallback. (Boot recovery
 		// fails every awaiting_input task before the scheduler starts, so an
 		// untracked awaiting task is a tracking gap, not a restart path.)
-		if pend, tracked := r.pendingDialog(taskID); sok && state == StateAwaitingInput && tracked {
+		pend, tracked := pendingRequest{}, false
+		if sok && state == StateAwaitingInput {
+			pend, tracked = r.pendingDialog(taskID)
+		}
+		if tracked {
 			if err := r.sup.Send(key, uiResponseFor(taskID, pend, p.Prompt)); err == nil {
 				// The run has resumed in-process — always tear down the awaiting
 				// ceiling and pending state so it can't later fail a live task,
@@ -281,9 +288,20 @@ func uiResponseFor(taskID string, pend pendingRequest, answer string) pirun.Exte
 // affirmative/negative are the leading tokens recognized on a yes/no answer.
 // The drawer's Yes/No buttons send "yes"/"no", but its composer stays live
 // beside them, so free text reaches here by design.
+// Both sets are matched against leadingWord's output, which is a run of ASCII
+// letters — so an apostrophe form like "don't" is matched by its "don" prefix
+// and a literal "don't" key here would be unreachable.
 var (
-	affirmativeTokens = map[string]bool{"yes": true, "y": true, "yeah": true, "ok": true, "sure": true}
-	negativeTokens    = map[string]bool{"no": true, "n": true, "nope": true}
+	affirmativeTokens = map[string]bool{
+		"yes": true, "y": true, "yeah": true, "yep": true, "yup": true,
+		"ok": true, "okay": true, "sure": true, "affirmative": true,
+		"correct": true, "approved": true, "approve": true,
+		"proceed": true, "go": true, "do": true, "confirm": true,
+	}
+	negativeTokens = map[string]bool{
+		"no": true, "n": true, "nope": true, "nah": true, "negative": true,
+		"cancel": true, "stop": true, "dont": true, "don": true,
+	}
 )
 
 // answerIsAffirmative maps a drawer answer onto Pi's confirm boolean by leading

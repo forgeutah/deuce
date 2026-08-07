@@ -645,6 +645,22 @@ func TestAnswerConfirmSendsBoolean(t *testing.T) {
 		{"affirmative free text", "yes, go ahead", true},
 		{"uppercase with punctuation", "Yeah!", true},
 		{"negative free text", "no, stop", false},
+		// A narrow token set is indistinguishable from a refusal at the wire:
+		// these are ordinary ways to approve, and defaulting them to false
+		// delivers the user's approval to the agent as a No.
+		{"yep", "yep", true},
+		{"okay", "Okay.", true},
+		{"go ahead", "go ahead", true},
+		{"do it", "do it", true},
+		{"proceed", "Proceed", true},
+		{"approved", "approved", true},
+		{"nah", "nah", false},
+		{"cancel", "cancel that", false},
+		// "don't" reaches leadingWord as "don" — the apostrophe ends the run.
+		{"contraction negative", "don't", false},
+		// Near-miss: still not recognized, so it must still default negative.
+		// An unparsed reply must never read as approval (R6).
+		{"near miss stays negative", "yesterday's build was fine", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rt, _, _, h, _ := awaitingOnFixture(t, "confirm")
@@ -746,6 +762,34 @@ func TestRouteEnqueuesWhenIdle(t *testing.T) {
 	running, ok, _ := store.RunningTask(ctx, "s1")
 	if !ok || store.state(running) != StateRunning {
 		t.Errorf("expected a running task after idle enqueue")
+	}
+}
+
+// TestAwaitCeilingMatchesContractFixture pins the Go half of the KTD7
+// cross-language invariant. The extension's PI_DIALOG_TIMEOUT_MS must stay
+// strictly above defaultAwaitTimeout so Deuce's ceiling always fires first; if
+// Pi's timer won the race it would resolve the dialog with its own default and
+// hand the model a fabricated answer. That ordering used to be enforced by two
+// hand-written comments and a hardcoded copy of this constant in
+// ask-user.test.ts, so a one-sided edit could invert it silently. The contract
+// fixture is now the single source of truth: this test binds the Go constant to
+// it, and ask-user.test.ts reads the same field for its strictly-greater
+// assertion. The fixture lives under pirun/testdata because both sides assert
+// against one file; deuceAwaitCeilingMs is Deuce's own value, not Pi's contract.
+func TestAwaitCeilingMatchesContractFixture(t *testing.T) {
+	var f struct {
+		DeuceAwaitCeilingMs int64 `json:"deuceAwaitCeilingMs"`
+	}
+	if err := json.Unmarshal(readProtocolFixture(t), &f); err != nil {
+		t.Fatalf("parse pi-ui-protocol fixture: %v", err)
+	}
+	if f.DeuceAwaitCeilingMs == 0 {
+		t.Fatal("fixture has no deuceAwaitCeilingMs — the KTD7 invariant has no shared anchor")
+	}
+	if got := defaultAwaitTimeout.Milliseconds(); got != f.DeuceAwaitCeilingMs {
+		t.Errorf("defaultAwaitTimeout = %dms, fixture deuceAwaitCeilingMs = %dms — "+
+			"move both together or the extension's dialog timeout may no longer sit above Deuce's ceiling (KTD7)",
+			got, f.DeuceAwaitCeilingMs)
 	}
 }
 

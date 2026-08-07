@@ -63,7 +63,7 @@ type Event struct {
 
 	// Awaiting-input (KindAwaitingInput).
 	RequestID   string
-	RequestKind string // select / confirm / input / editor
+	RequestKind string // select / confirm / input — an editor dialog decodes to input
 	Prompt      string
 	Options     []string // choice labels for a select request (empty otherwise)
 
@@ -240,6 +240,12 @@ const (
 	uiMethodSetEditorText = "set_editor_text"
 )
 
+// legacyBoilerplateTitle is the constant title the PRE-FIX ask-user extension
+// passed as the first argument to every ctx.ui dialog, with the real question in
+// the second. It is matched only to recognize that version-skew shape; the
+// post-fix extension never emits it.
+const legacyBoilerplateTitle = "A question for you"
+
 // decodeUIRequest decodes an extension_ui_request against Pi's published
 // RpcExtensionUIRequest union. The union is FLAT: every field sits at the top
 // level next to type/id/method, and no arm nests anything under "params". The
@@ -252,14 +258,16 @@ const (
 //	input   → title            editor  → title
 //
 // placeholder and prefill are input hints, not the question, so they are not
-// folded into the prompt.
+// folded into the prompt. The one exception is the version-skew recovery in the
+// input arm below, where a pre-fix extension put the question in placeholder.
 func decodeUIRequest(line []byte) (Event, error) {
 	var p struct {
-		ID      string          `json:"id"`
-		Method  string          `json:"method"`
-		Title   string          `json:"title"`
-		Message string          `json:"message"`
-		Options json.RawMessage `json:"options"`
+		ID          string          `json:"id"`
+		Method      string          `json:"method"`
+		Title       string          `json:"title"`
+		Message     string          `json:"message"`
+		Placeholder string          `json:"placeholder"`
+		Options     json.RawMessage `json:"options"`
 	}
 	if err := json.Unmarshal(line, &p); err != nil {
 		return Event{Kind: KindUnknown, RawType: "extension_ui_request"}, err
@@ -294,7 +302,17 @@ func decodeUIRequest(line []byte) (Event, error) {
 	case uiMethodConfirm:
 		ev.Prompt = joinPrompt(p.Title, p.Message)
 	case uiMethodInput:
-		// Prompt is the title, already set.
+		// Prompt is the title, already set — except under version skew. A pre-fix
+		// extension called input(title, question), and Pi's signature is
+		// input(title, placeholder, opts), so the question landed in
+		// `placeholder` behind a constant boilerplate title. Keeping the title
+		// would surface that boilerplate and discard the question (R2), the same
+		// failure the select skew branch above recovers from. Keyed on the exact
+		// legacy literal so a post-fix request — real question as the title, no
+		// placeholder — is left untouched.
+		if p.Title == legacyBoilerplateTitle && p.Placeholder != "" {
+			ev.Prompt = p.Placeholder
+		}
 	case uiMethodEditor:
 		// The drawer has no editor control and the frontend QuestionKind union
 		// has no "editor" member — an editor dialog is answered through the

@@ -40,6 +40,7 @@ interface FixtureRequest {
 interface Fixture {
   piVersion: string;
   requests: FixtureRequest[];
+  deuceAwaitCeilingMs: number;
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -55,8 +56,14 @@ function arm(name: string): Record<string, unknown> {
 
 // The ceiling Deuce's runtime applies to an unanswered question
 // (defaultAwaitTimeout in server/internal/agent/runtime.go). Pi's dialog
-// timeout must stay strictly above it (KTD7).
-const DEUCE_AWAIT_CEILING_MS = 30 * 60 * 1000;
+// timeout must stay strictly above it (KTD7). Read from the fixture rather
+// than hardcoded here: a hardcoded copy drifts silently when the Go constant
+// moves. The Go side asserts defaultAwaitTimeout equals this same field, so
+// the fixture is the one place the invariant's two halves meet.
+const DEUCE_AWAIT_CEILING_MS = fixture.deuceAwaitCeilingMs;
+if (typeof DEUCE_AWAIT_CEILING_MS !== "number") {
+  throw new Error("contract fixture has no numeric deuceAwaitCeilingMs");
+}
 
 // ---------------------------------------------------------------------------
 // Pi harness

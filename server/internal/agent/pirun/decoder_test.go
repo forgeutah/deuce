@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -386,7 +387,7 @@ func TestDecodeUIRequestContract(t *testing.T) {
 			if ev.Prompt != w.prompt {
 				t.Errorf("prompt = %q, want %q", ev.Prompt, w.prompt)
 			}
-			if !sameStrings(ev.Options, w.options) {
+			if !slices.Equal(ev.Options, w.options) {
 				t.Errorf("options = %v, want %v", ev.Options, w.options)
 			}
 		})
@@ -418,6 +419,32 @@ func TestDecodeUIRequestBareStringOptions(t *testing.T) {
 	}
 	if ev.RequestID != "ui-skew-1" {
 		t.Errorf("requestID = %q, want ui-skew-1", ev.RequestID)
+	}
+}
+
+// TestDecodeUIRequestQuestionAsPlaceholder covers the other half of the same
+// version-skew window: the pre-fix extension called input(title, question), and
+// Pi's signature is input(title, placeholder, opts), so the question arrives in
+// `placeholder` behind a constant boilerplate title. Taking the title would
+// render "A question for you" and drop the question entirely (R2) — the exact
+// failure the skew guard exists to prevent.
+func TestDecodeUIRequestQuestionAsPlaceholder(t *testing.T) {
+	f := loadUIFixture(t)
+	ev, err := Decode(f.offContract(t, "inputQuestionAsPlaceholder"))
+	if err != nil {
+		t.Fatalf("question-as-placeholder must not error: %v", err)
+	}
+	if ev.Kind != KindAwaitingInput {
+		t.Fatalf("kind = %q, want %q", ev.Kind, KindAwaitingInput)
+	}
+	if ev.Prompt != "Which environment should I deploy to?" {
+		t.Errorf("prompt = %q, want the question carried in placeholder — the boilerplate title is not the question", ev.Prompt)
+	}
+	if ev.RequestKind != "input" {
+		t.Errorf("requestKind = %q, want input", ev.RequestKind)
+	}
+	if ev.RequestID != "ui-skew-2" {
+		t.Errorf("requestID = %q, want ui-skew-2", ev.RequestID)
 	}
 }
 
@@ -459,18 +486,6 @@ func TestDecodeStreamNotificationDoesNotInterrupt(t *testing.T) {
 			t.Fatalf("emitted kinds = %v, want %v", kinds, wantKinds)
 		}
 	}
-}
-
-func sameStrings(got, want []string) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func TestNormalizeTool(t *testing.T) {
