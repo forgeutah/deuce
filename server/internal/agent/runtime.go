@@ -40,7 +40,7 @@ type Runtime struct {
 	workspace  map[pirun.Key]string         // workspace id per key, for relaunch
 	consumers  map[pirun.Key]*pirun.Process // process a consumer goroutine is attached to
 	replies    map[string]*strings.Builder  // accumulated assistant reply per task id
-	pendingReq map[string]string            // task id → pending extension_ui_request id
+	pendingReq map[string]pendingRequest    // task id → the dialog it is blocked on
 	timers     map[string]*taskTimers       // per-task active-work / awaiting-input timers
 
 	activeTimeout time.Duration // active-work budget (suspended during awaiting_input)
@@ -67,9 +67,32 @@ type taskTimers struct {
 	await  *time.Timer
 }
 
+// pendingRequest is the blocking Pi dialog a task is waiting on. The method is
+// tracked alongside the id because Pi's response union has one arm per method
+// (KTD3): confirm takes a boolean, select/input/editor take a string value.
+// Answering with the wrong arm is silently discarded by Pi's parser.
+type pendingRequest struct {
+	id     string
+	method string // decoder-normalized UI method: select / confirm / input
+}
+
 const (
 	defaultActiveTimeout = 10 * time.Minute
-	defaultAwaitTimeout  = 30 * time.Minute
+
+	// defaultAwaitTimeout is Deuce's ceiling on an unanswered question. It is
+	// half of a cross-language invariant (KTD7): the ask-user extension passes
+	// Pi its own dialog timeout as PI_DIALOG_TIMEOUT_MS in
+	// pirun/extension/ask-user.ts, and that value MUST stay strictly greater
+	// than this one so this ceiling always fires first. If Pi's timer won the
+	// race it would resolve the dialog with its own default (false for
+	// confirm, undefined for select/input) and hand the model a fabricated
+	// answer while the drawer still showed the question as answerable. The two
+	// values are tied together through the contract fixture: this constant is
+	// mirrored as `deuceAwaitCeilingMs` in pirun/testdata/pi-ui-protocol.json,
+	// a Go test asserts the two match, and ask-user.test.ts asserts its dialog
+	// timeout is strictly greater than the same field. Change this and the
+	// fixture must move with it.
+	defaultAwaitTimeout = 30 * time.Minute
 )
 
 // DefaultBaseSystemPrompt is the global system prompt applied to the deuce
@@ -101,7 +124,7 @@ func NewRuntime(store Store, sup *pirun.Supervisor, bc Broadcaster, baseSystemPr
 		workspace:        make(map[pirun.Key]string),
 		consumers:        make(map[pirun.Key]*pirun.Process),
 		replies:          make(map[string]*strings.Builder),
-		pendingReq:       make(map[string]string),
+		pendingReq:       make(map[string]pendingRequest),
 		timers:           make(map[string]*taskTimers),
 		activeTimeout:    defaultActiveTimeout,
 		awaitTimeout:     defaultAwaitTimeout,
@@ -205,10 +228,18 @@ func (r *Runtime) RouteOrEnqueue(ctx context.Context, p EnqueueParams) (RouteRes
 		if err != nil {
 			return 0, err
 		}
+		// Answer the agent's blocking question (KTD15). The tracked dialog's
+		// method picks the response arm; with no tracked dialog there is no arm
+		// to fill, so fall through to steer rather than sending an armless
+		// response Pi would silently resolve to its own fallback. (Boot recovery
+		// fails every awaiting_input task before the scheduler starts, so an
+		// untracked awaiting task is a tracking gap, not a restart path.)
+		pend, tracked := pendingRequest{}, false
 		if sok && state == StateAwaitingInput {
-			// Answer the agent's blocking question (KTD15).
-			reqID := r.pendingRequest(taskID)
-			if err := r.sup.Send(key, pirun.ExtensionUIResponse{ID: reqID, Response: p.Prompt}); err == nil {
+			pend, tracked = r.pendingDialog(taskID)
+		}
+		if tracked {
+			if err := r.sup.Send(key, uiResponseFor(taskID, pend, p.Prompt)); err == nil {
 				// The run has resumed in-process — always tear down the awaiting
 				// ceiling and pending state so it can't later fail a live task,
 				// even if the DB resolve below fails (the next event reconciles).
@@ -240,6 +271,68 @@ func (r *Runtime) RouteOrEnqueue(ctx context.Context, p EnqueueParams) (RouteRes
 	}
 	r.promoteLocked(ctx, key)
 	return RouteEnqueued, nil
+}
+
+// uiResponseFor builds the arm of Pi's response union that the pending dialog's
+// method expects (KTD3): a boolean for confirm, the answer text as the value for
+// select, input and editor. For select the drawer sends the chosen option's
+// label, which is exactly what Pi's value arm wants, so typed free text answers
+// a pick-one question unchanged (R7).
+func uiResponseFor(taskID string, pend pendingRequest, answer string) pirun.ExtensionUIResponse {
+	if pirun.IsConfirmMethod(pend.method) {
+		return pirun.UIResponseConfirmed(pend.id, answerIsAffirmative(taskID, answer))
+	}
+	return pirun.UIResponseValue(pend.id, answer)
+}
+
+// affirmative/negative are the leading tokens recognized on a yes/no answer.
+// The drawer's Yes/No buttons send "yes"/"no", but its composer stays live
+// beside them, so free text reaches here by design.
+// Both sets are matched against leadingWord's output, which is a run of ASCII
+// letters — so an apostrophe form like "don't" is matched by its "don" prefix
+// and a literal "don't" key here would be unreachable.
+var (
+	affirmativeTokens = map[string]bool{
+		"yes": true, "y": true, "yeah": true, "yep": true, "yup": true,
+		"ok": true, "okay": true, "sure": true, "affirmative": true,
+		"correct": true, "approved": true, "approve": true,
+		"proceed": true, "go": true, "do": true, "confirm": true,
+	}
+	negativeTokens = map[string]bool{
+		"no": true, "n": true, "nope": true, "nah": true, "negative": true,
+		"cancel": true, "stop": true, "dont": true, "don": true,
+	}
+)
+
+// answerIsAffirmative maps a drawer answer onto Pi's confirm boolean by leading
+// token, case-insensitively. An answer matching neither set is logged and
+// treated as NEGATIVE: an unparsed reply must never read as approval ("not sure"
+// cannot authorize a force-push), and false is also Pi's own confirm fallback,
+// so a mis-decoded case degrades identically on both sides of the wire.
+// Matching on the leading token rather than the whole string is what keeps
+// "yes, go ahead" affirmative (R6/AE8).
+func answerIsAffirmative(taskID, answer string) bool {
+	tok := leadingWord(answer)
+	if affirmativeTokens[tok] {
+		return true
+	}
+	if !negativeTokens[tok] {
+		slog.Warn("runtime: unrecognized yes/no answer, answering no",
+			"task", taskID, "answer", answer)
+	}
+	return false
+}
+
+// leadingWord lowercases an answer and returns its leading run of ASCII letters,
+// so trailing punctuation ("yeah!") and following words ("yes, go ahead") do not
+// defeat the match.
+func leadingWord(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	i := 0
+	for i < len(s) && s[i] >= 'a' && s[i] <= 'z' {
+		i++
+	}
+	return s[:i]
 }
 
 // promote takes the per-key lock and promotes the next queued task if the agent
@@ -381,7 +474,7 @@ func (r *Runtime) translate(key pirun.Key, ev pirun.Event) {
 			slog.Error("runtime: set awaiting input", "task", taskID, "error", err)
 			return
 		}
-		r.setPending(taskID, ev.RequestID)
+		r.setPending(taskID, ev.RequestID, ev.RequestKind)
 		r.enterAwaiting(key, taskID) // suspend active timeout, start ceiling (KTD8)
 		r.broadcastTask(ws.TypeTaskAwaitingInput, ws.TaskEventPayload{
 			Seq: seq, TaskID: taskID, State: StateAwaitingInput,
@@ -573,16 +666,19 @@ func (r *Runtime) takeReply(taskID string) string {
 	return b.String()
 }
 
-func (r *Runtime) setPending(taskID, reqID string) {
+func (r *Runtime) setPending(taskID, reqID, method string) {
 	r.mu.Lock()
-	r.pendingReq[taskID] = reqID
+	r.pendingReq[taskID] = pendingRequest{id: reqID, method: method}
 	r.mu.Unlock()
 }
 
-func (r *Runtime) pendingRequest(taskID string) string {
+// pendingDialog returns the dialog a task is blocked on. ok is false when no
+// request is tracked, in which case no response arm can be chosen.
+func (r *Runtime) pendingDialog(taskID string) (pendingRequest, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.pendingReq[taskID]
+	p, ok := r.pendingReq[taskID]
+	return p, ok
 }
 
 func (r *Runtime) clearPending(taskID string) {

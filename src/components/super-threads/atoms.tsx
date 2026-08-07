@@ -135,7 +135,7 @@ function ActionItem({ action }: { action: AgentAction }) {
           <span className="q-act-ic">
             <Sparkles size={13} />
           </span>
-          <span>
+          <span className="q-act-txt" title={`Thinking${action.text ? ` — ${action.text}` : ""}`}>
             <span className="tool" style={{ fontStyle: "normal" }}>
               Thinking
             </span>
@@ -165,7 +165,10 @@ function ActionItem({ action }: { action: AgentAction }) {
           <span className="q-act-ic">
             <MessageCircleQuestion size={13} />
           </span>
-          <span>
+          {/* The row truncates, and the store clears `pendingQuestion` once the
+              task completes — so `title` is the only remaining way to read back
+              what was asked. */}
+          <span className="q-act-txt" title={`Asked — ${question}`}>
             <span className="tool">Asked</span>
             <span className="paren"> — </span>
             <span className="arg">{question}</span>
@@ -188,7 +191,10 @@ function ActionItem({ action }: { action: AgentAction }) {
         <span className="q-act-ic">
           <ToolIcon size={13} />
         </span>
-        <span>
+        <span
+          className="q-act-txt"
+          title={`${action.tool}(${action.arg})${action.stat ? ` ${action.stat}` : ""}`}
+        >
           <span className="tool">{action.tool}</span>
           <span className="paren">(</span>
           <span className="arg">{action.arg}</span>

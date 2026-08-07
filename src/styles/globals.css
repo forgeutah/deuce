@@ -386,6 +386,9 @@ button,
 }
 .tc-live .arg {
   color: var(--color-foreground);
+  /* direct flex child, so it is blockified and its ellipsis applies — but only
+     once it is allowed to shrink below its intrinsic width */
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -696,8 +699,11 @@ button,
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
+/* A question the user has to read to answer wraps rather than truncating, and
+   `anywhere` keeps a long unbroken token (file path, URL) inside the block. */
 .q-pending-q .q-text {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 /* typed-question controls (select buttons / confirm) */
 .q-choices {
@@ -716,6 +722,8 @@ button,
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
+  /* a long option label wraps inside its button instead of widening the row */
+  overflow-wrap: anywhere;
 }
 .q-choice:hover {
   background: color-mix(in srgb, var(--color-warning) 14%, var(--color-background-input));
@@ -812,10 +820,17 @@ button,
 .q-act .paren {
   color: var(--color-foreground-subtle);
 }
-.q-act .arg {
-  color: var(--color-foreground);
+/* The whole tool-plus-argument run truncates as one line. Truncation has to
+   live here rather than on `.arg`: this span is the flex item, and `overflow`/
+   `text-overflow` do not apply to the non-replaced inline `.arg` box inside it. */
+.q-act-txt {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.q-act .arg {
+  color: var(--color-foreground);
   white-space: nowrap;
 }
 .q-act .note {

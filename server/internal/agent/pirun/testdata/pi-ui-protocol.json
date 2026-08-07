@@ -1,0 +1,217 @@
+{
+  "$comment": "Contract fixture for Pi's extension UI sub-protocol. Every line under `requests`, `responses` and `extensionError` is transcribed from the published package listed in `derivedFrom` — NOT from Deuce's own assumptions about the wire. Both the Go decoder tests (server/internal/agent/pirun) and the TypeScript extension tests (server/internal/agent/pirun/extension) assert against this file, so a Pi upgrade is diffed here once instead of being re-guessed on each side of the wire. When Pi changes, re-transcribe from the .d.ts and bump `piVersion`.",
+  "package": "@earendil-works/pi-coding-agent",
+  "piVersion": "0.84.0",
+  "transcribedOn": "2026-08-06",
+  "derivedFrom": [
+    "dist/modes/rpc/rpc-types.d.ts — RpcExtensionUIRequest (nine arms), RpcExtensionUIResponse (three arms)",
+    "dist/modes/rpc/rpc-mode.js — createDialogPromise() spreads the request flat after {type, id}; createExtensionUIContext() shows each method's emitted fields",
+    "docs/rpc.md — 'Extension UI Protocol' section and the extension_error event"
+  ],
+  "notes": [
+    "The request union is FLAT: every field sits at the top level next to `type`, `id` and `method`. No arm nests anything under `params`.",
+    "Dialog (blocking) methods: select, confirm, input, editor. They block until the client sends a matching extension_ui_response.",
+    "Fire-and-forget methods: notify, setStatus, setWidget, setTitle, set_editor_text. They carry an `id` but must never be answered and must never raise a pending question.",
+    "Pi's select response is the chosen LABEL, not an index. A cancelled select/input/editor resolves to undefined; a cancelled or timed-out confirm resolves to false.",
+    "The `timeout` values below are 2100000ms (35 min), which is what Deuce's extension passes: it must stay strictly above the runtime's defaultAwaitTimeout (30 min) so Deuce's ceiling always fires before Pi's (KTD7)."
+  ],
+
+  "$deuceAwaitCeilingComment": "NOT part of Pi's contract. This is Deuce's own ceiling on an unanswered question — `defaultAwaitTimeout` in server/internal/agent/runtime.go — recorded here so both sides of the KTD7 invariant read the same number from one file instead of each hardcoding a copy. A Go test asserts defaultAwaitTimeout equals this value; ask-user.test.ts asserts the dialog `timeout` above is strictly greater than it. Moving one side alone now fails a test instead of silently inverting the ordering.",
+  "deuceAwaitCeilingMs": 1800000,
+
+  "requests": [
+    {
+      "name": "select",
+      "method": "select",
+      "blocking": true,
+      "responseArm": "value",
+      "line": {
+        "type": "extension_ui_request",
+        "id": "ui-select-1",
+        "method": "select",
+        "title": "Which framework should I use?",
+        "options": ["React", "Vue", "Svelte"],
+        "timeout": 2100000
+      }
+    },
+    {
+      "name": "confirm",
+      "method": "confirm",
+      "blocking": true,
+      "responseArm": "confirmed",
+      "line": {
+        "type": "extension_ui_request",
+        "id": "ui-confirm-1",
+        "method": "confirm",
+        "title": "Force-push to main?",
+        "message": "This rewrites remote history.",
+        "timeout": 2100000
+      }
+    },
+    {
+      "name": "confirm_empty_message",
+      "method": "confirm",
+      "blocking": true,
+      "responseArm": "confirmed",
+      "$comment": "What Deuce's own extension emits: the question rides in `title` and `message` is the empty string Pi's arm requires (U1 step 2).",
+      "line": {
+        "type": "extension_ui_request",
+        "id": "ui-confirm-2",
+        "method": "confirm",
+        "title": "Should I delete the stale branches?",
+        "message": "",
+        "timeout": 2100000
+      }
+    },
+    {
+      "name": "input",
+      "method": "input",
+      "blocking": true,
+      "responseArm": "value",
+      "line": {
+        "type": "extension_ui_request",
+        "id": "ui-input-1",
+        "method": "input",
+        "title": "Which environment should I deploy to?",
+        "placeholder": "e.g. staging",
+        "timeout": 2100000
+      }
+    },
+    {
+      "name": "editor",
+      "method": "editor",
+      "blocking": true,
+      "responseArm": "value",
+      "$comment": "Pi's editor arm carries no timeout field. Deuce's extension never opens one today; it is decoded so a future dialog style is not an unhandled event.",
+      "line": {
+        "type": "extension_ui_request",
+        "id": "ui-editor-1",
+        "method": "editor",
+        "title": "Edit the release notes before I publish them",
+        "prefill": "## Release\n"
+      }
+    },
+    {
+      "name": "notify",
+      "method": "notify",
+      "blocking": false,
+      "responseArm": null,
+      "line": {
+        "type": "extension_ui_request",
+        "id": "ui-notify-1",
+        "method": "notify",
+        "message": "Subagent alpha finished",
+        "notifyType": "info"
+      }
+    },
+    {
+      "name": "setStatus",
+      "method": "setStatus",
+      "blocking": false,
+      "responseArm": null,
+      "line": {
+        "type": "extension_ui_request",
+        "id": "ui-status-1",
+        "method": "setStatus",
+        "statusKey": "subagents",
+        "statusText": "2 running"
+      }
+    },
+    {
+      "name": "setWidget",
+      "method": "setWidget",
+      "blocking": false,
+      "responseArm": null,
+      "line": {
+        "type": "extension_ui_request",
+        "id": "ui-widget-1",
+        "method": "setWidget",
+        "widgetKey": "subagents",
+        "widgetLines": ["alpha  running", "beta   done"],
+        "widgetPlacement": "aboveEditor"
+      }
+    },
+    {
+      "name": "setTitle",
+      "method": "setTitle",
+      "blocking": false,
+      "responseArm": null,
+      "line": {
+        "type": "extension_ui_request",
+        "id": "ui-title-1",
+        "method": "setTitle",
+        "title": "deuce - session 42"
+      }
+    },
+    {
+      "name": "set_editor_text",
+      "method": "set_editor_text",
+      "blocking": false,
+      "responseArm": null,
+      "line": {
+        "type": "extension_ui_request",
+        "id": "ui-editortext-1",
+        "method": "set_editor_text",
+        "text": "draft reply text"
+      }
+    }
+  ],
+
+  "responses": {
+    "value": {
+      "$comment": "Answers select, input and editor. Pi's parser reads `value` and nothing else; for select it is the chosen label.",
+      "line": { "type": "extension_ui_response", "id": "ui-select-1", "value": "Vue" }
+    },
+    "confirmed": {
+      "$comment": "Answers confirm. Pi's parser reads `confirmed` and falls back to false when the key is absent — which is why a `response` string silently answered No.",
+      "line": { "type": "extension_ui_response", "id": "ui-confirm-1", "confirmed": true }
+    },
+    "cancelled": {
+      "$comment": "Valid for any dialog. Resolves select/input/editor to undefined and confirm to false. Deuce does not send this today (see the plan's deferred work).",
+      "line": { "type": "extension_ui_response", "id": "ui-input-1", "cancelled": true }
+    }
+  },
+
+  "extensionError": {
+    "$comment": "docs/rpc.md 'extension_error'. Emitted when an extension throws, including at load time — the only visibility Deuce has into a broken extension.",
+    "line": {
+      "type": "extension_error",
+      "extensionPath": "/home/vscode/.pi/agent/extensions/ask-user.ts",
+      "event": "tool_call",
+      "error": "TypeError: ui.select is not a function"
+    }
+  },
+
+  "offContractNote": "The `offContract` entries below are NOT part of Pi's published union. They are shapes Deuce must survive in the field, kept out of `requests` so the contract-completeness assertion stays honest.",
+  "offContract": {
+    "selectOptionsAsBareString": {
+      "$comment": "Emitted by a pre-fix Deuce extension calling select(title, question, options): Pi spreads the request flat, so the question lands in `options` as a string. This is the version-skew case a stale prebuild image reproduces. The question text is in `options` — recovering it from `title` would yield the constant boilerplate title and discard the question (R2).",
+      "line": {
+        "type": "extension_ui_request",
+        "id": "ui-skew-1",
+        "method": "select",
+        "title": "A question for you",
+        "options": "Which framework should I use?"
+      }
+    },
+    "inputQuestionAsPlaceholder": {
+      "$comment": "Emitted by a pre-fix Deuce extension calling input(title, question): Pi's signature is input(title, placeholder, opts), so the question lands in `placeholder` behind the extension's constant boilerplate title. Same stale-prebuild version-skew window as selectOptionsAsBareString. The question text is in `placeholder` — recovering it from `title` would yield the boilerplate and discard the question (R2).",
+      "line": {
+        "type": "extension_ui_request",
+        "id": "ui-skew-2",
+        "method": "input",
+        "title": "A question for you",
+        "placeholder": "Which environment should I deploy to?"
+      }
+    },
+    "unknownMethod": {
+      "$comment": "A dialog method a future Pi adds. Must not raise a pending question, and must not abort the stream.",
+      "line": {
+        "type": "extension_ui_request",
+        "id": "ui-future-1",
+        "method": "someFutureDialog",
+        "title": "Pick a colour"
+      }
+    }
+  }
+}

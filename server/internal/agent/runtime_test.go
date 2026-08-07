@@ -2,11 +2,17 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -507,7 +513,7 @@ func TestRecycleIdleStopsOnlyIdleSessions(t *testing.T) {
 	// s3 is blocked on a question (awaiting_input) — busy, must NOT recycle.
 	t3, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s3", Prompt: "c", WorkspaceID: "ws3"})
 	bc.waitFor(t, ws.TypeTaskStarted, 3)
-	lr.handle(t, 2).push(`{"type":"extension_ui_request","id":"ui-1","params":{"prompt":"?"}}`)
+	lr.handle(t, 2).push(uiRequestLine(t, "input"))
 	bc.waitFor(t, ws.TypeTaskAwaitingInput, 1)
 
 	rt.RecycleIdleProcesses()
@@ -553,7 +559,7 @@ func TestRouteAnswersAwaitingInput(t *testing.T) {
 	bc.waitFor(t, ws.TypeTaskStarted, 1)
 	h := lr.handle(t, 0)
 
-	h.push(`{"type":"extension_ui_request","id":"ui-1","method":"input","params":{"prompt":"which env?"}}`)
+	h.push(uiRequestLine(t, "input"))
 	bc.waitFor(t, ws.TypeTaskAwaitingInput, 1)
 	if store.state(task) != StateAwaitingInput {
 		t.Fatalf("state = %q, want awaiting_input", store.state(task))
@@ -563,12 +569,184 @@ func TestRouteAnswersAwaitingInput(t *testing.T) {
 	if err != nil || res != RouteFed {
 		t.Fatalf("RouteOrEnqueue = (%v,%v), want RouteFed", res, err)
 	}
+	// The answer must be correlated back to the request id that opened the
+	// dialog AND ride in the arm Pi's parser reads for this method — the old
+	// `response` field was accepted and discarded, so the id alone proves
+	// nothing about the user's answer arriving.
 	m := h.waitCmd(t, "extension_ui_response")
-	if m["id"] != "ui-1" || m["response"] != "prod" {
-		t.Errorf("extension_ui_response = %v, want id=ui-1 response=prod", m)
+	assertResponseMatchesArm(t, m, "value", "ui-input-1", "prod")
+	if store.state(task) != StateRunning {
+		t.Errorf("state after answer = %q, want running", store.state(task))
+	}
+}
+
+// --- answer round trips (U3 / KTD3) -----------------------------------------
+//
+// Each of these drives a real Pi request line from the contract fixture through
+// to the response Deuce writes back, and asserts that response against the
+// fixture's own arm rather than against a literal written beside the code under
+// test. The steer-while-running case (no question pending) is covered by
+// TestRouteFeedsRunningRun above.
+
+// TestAnswerSelectSendsChosenLabel covers AE1/R5: Pi's select response is the
+// chosen option's LABEL in the `value` arm, not an index and not a `response`.
+func TestAnswerSelectSendsChosenLabel(t *testing.T) {
+	rt, store, _, h, task := awaitingOnFixture(t, "select")
+
+	res, err := rt.RouteOrEnqueue(context.Background(), EnqueueParams{SessionID: "s1", Prompt: "Vue"})
+	if err != nil || res != RouteFed {
+		t.Fatalf("RouteOrEnqueue = (%v,%v), want RouteFed", res, err)
+	}
+	m := h.waitCmd(t, "extension_ui_response")
+	// The fixture's value arm is exactly this answer to exactly this request.
+	if want := uiResponseLine(t, "value"); !reflect.DeepEqual(m, want) {
+		t.Errorf("extension_ui_response = %v, want %v (the fixture's value arm)", m, want)
 	}
 	if store.state(task) != StateRunning {
 		t.Errorf("state after answer = %q, want running", store.state(task))
+	}
+}
+
+// TestAnswerSelectWithTypedTextSendsItUnchanged covers R7: the drawer keeps its
+// "or type another answer below" path, and typed text answers a pick-one
+// question verbatim.
+func TestAnswerSelectWithTypedTextSendsItUnchanged(t *testing.T) {
+	rt, _, _, h, _ := awaitingOnFixture(t, "select")
+
+	const typed = "None of these — use Solid"
+	if _, err := rt.RouteOrEnqueue(context.Background(), EnqueueParams{SessionID: "s1", Prompt: typed}); err != nil {
+		t.Fatalf("RouteOrEnqueue: %v", err)
+	}
+	assertResponseMatchesArm(t, h.waitCmd(t, "extension_ui_response"), "value", "ui-select-1", typed)
+}
+
+// TestAnswerInputSendsTypedText covers R5 for the free-text style.
+func TestAnswerInputSendsTypedText(t *testing.T) {
+	rt, _, _, h, _ := awaitingOnFixture(t, "input")
+
+	if _, err := rt.RouteOrEnqueue(context.Background(), EnqueueParams{SessionID: "s1", Prompt: "staging"}); err != nil {
+		t.Fatalf("RouteOrEnqueue: %v", err)
+	}
+	assertResponseMatchesArm(t, h.waitCmd(t, "extension_ui_response"), "value", "ui-input-1", "staging")
+}
+
+// TestAnswerConfirmSendsBoolean covers AE3/R6: Yes and No reach Pi as booleans
+// in the `confirmed` arm. Sending the drawer's literal "yes"/"no" string in a
+// `response` field is what made every yes/no answer read as No.
+func TestAnswerConfirmSendsBoolean(t *testing.T) {
+	for _, tc := range []struct {
+		name, answer string
+		want         bool
+	}{
+		{"yes button", "yes", true},
+		{"no button", "no", false},
+		// AE8: the composer stays live beside the buttons, so free text is a
+		// reachable input on a yes/no question.
+		{"affirmative free text", "yes, go ahead", true},
+		{"uppercase with punctuation", "Yeah!", true},
+		{"negative free text", "no, stop", false},
+		// A narrow token set is indistinguishable from a refusal at the wire:
+		// these are ordinary ways to approve, and defaulting them to false
+		// delivers the user's approval to the agent as a No.
+		{"yep", "yep", true},
+		{"okay", "Okay.", true},
+		{"go ahead", "go ahead", true},
+		{"do it", "do it", true},
+		{"proceed", "Proceed", true},
+		{"approved", "approved", true},
+		{"nah", "nah", false},
+		{"cancel", "cancel that", false},
+		// "don't" reaches leadingWord as "don" — the apostrophe ends the run.
+		{"contraction negative", "don't", false},
+		// Near-miss: still not recognized, so it must still default negative.
+		// An unparsed reply must never read as approval (R6).
+		{"near miss stays negative", "yesterday's build was fine", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, _, _, h, _ := awaitingOnFixture(t, "confirm")
+
+			if _, err := rt.RouteOrEnqueue(context.Background(), EnqueueParams{SessionID: "s1", Prompt: tc.answer}); err != nil {
+				t.Fatalf("RouteOrEnqueue: %v", err)
+			}
+			m := h.waitCmd(t, "extension_ui_response")
+			assertResponseMatchesArm(t, m, "confirmed", "ui-confirm-1", tc.want)
+			if tc.want {
+				// Guard the exact bug: a Yes that arrives as anything but a true
+				// boolean is discarded by Pi's parser and falls back to false.
+				if b, ok := m["confirmed"].(bool); !ok || !b {
+					t.Errorf("confirmed = %#v, want the JSON boolean true", m["confirmed"])
+				}
+			}
+		})
+	}
+}
+
+// TestAnswerConfirmUnrecognizedTextIsNegativeAndLogged: an answer matching
+// neither token set defaults to false and is logged at warn. Defaulting negative
+// means an unparsed reply can never read as approval, and it matches Pi's own
+// confirm fallback.
+func TestAnswerConfirmUnrecognizedTextIsNegativeAndLogged(t *testing.T) {
+	logs := captureLogs(t)
+	rt, _, _, h, _ := awaitingOnFixture(t, "confirm")
+
+	if _, err := rt.RouteOrEnqueue(context.Background(), EnqueueParams{SessionID: "s1", Prompt: "not sure"}); err != nil {
+		t.Fatalf("RouteOrEnqueue: %v", err)
+	}
+	m := h.waitCmd(t, "extension_ui_response")
+	assertResponseMatchesArm(t, m, "confirmed", "ui-confirm-1", false)
+
+	out := logs.String()
+	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "unrecognized yes/no answer") {
+		t.Errorf("want a WARN log naming the unrecognized answer, got:\n%s", out)
+	}
+	if !strings.Contains(out, "not sure") {
+		t.Errorf("warn log should carry the answer text for diagnosis, got:\n%s", out)
+	}
+}
+
+// TestAnswerClearsPendingDialog: the pending record is dropped once answered, so
+// a later reply on the same task cannot be mistaken for a second answer to a
+// dialog Pi has already resolved.
+func TestAnswerClearsPendingDialog(t *testing.T) {
+	rt, _, _, h, task := awaitingOnFixture(t, "input")
+	if _, ok := rt.pendingDialog(task); !ok {
+		t.Fatalf("no pending dialog tracked while awaiting_input")
+	}
+
+	if _, err := rt.RouteOrEnqueue(context.Background(), EnqueueParams{SessionID: "s1", Prompt: "staging"}); err != nil {
+		t.Fatalf("RouteOrEnqueue: %v", err)
+	}
+	h.waitCmd(t, "extension_ui_response")
+
+	if pend, ok := rt.pendingDialog(task); ok {
+		t.Errorf("pending dialog still tracked after answering: %+v", pend)
+	}
+}
+
+// TestAwaitingWithoutTrackedDialogSteers: with a task marked awaiting but no
+// tracked dialog there is no arm to fill, so the reply falls through to the
+// existing steer path rather than emitting an armless response Pi would resolve
+// to its own fallback. Boot recovery fails every awaiting_input task before the
+// scheduler starts, so this is a tracking-gap guard, not a restart path.
+func TestAwaitingWithoutTrackedDialogSteers(t *testing.T) {
+	rt, store, bc, lr := newTestRuntime(t)
+	ctx := context.Background()
+	task, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "go", WorkspaceID: "ws"})
+	bc.waitFor(t, ws.TypeTaskStarted, 1)
+	h := lr.handle(t, 0)
+
+	// Awaiting in the store, with nothing tracked in the runtime.
+	store.setState("s1", task, StateAwaitingInput)
+	if _, ok := rt.pendingDialog(task); ok {
+		t.Fatalf("precondition: no dialog should be tracked")
+	}
+
+	res, err := rt.RouteOrEnqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "carry on"})
+	if err != nil || res != RouteFed {
+		t.Fatalf("RouteOrEnqueue = (%v,%v), want RouteFed", res, err)
+	}
+	if m := h.waitCmd(t, "steer"); m["message"] != "carry on" {
+		t.Errorf("steer = %v, want message 'carry on'", m)
 	}
 }
 
@@ -587,6 +765,34 @@ func TestRouteEnqueuesWhenIdle(t *testing.T) {
 	}
 }
 
+// TestAwaitCeilingMatchesContractFixture pins the Go half of the KTD7
+// cross-language invariant. The extension's PI_DIALOG_TIMEOUT_MS must stay
+// strictly above defaultAwaitTimeout so Deuce's ceiling always fires first; if
+// Pi's timer won the race it would resolve the dialog with its own default and
+// hand the model a fabricated answer. That ordering used to be enforced by two
+// hand-written comments and a hardcoded copy of this constant in
+// ask-user.test.ts, so a one-sided edit could invert it silently. The contract
+// fixture is now the single source of truth: this test binds the Go constant to
+// it, and ask-user.test.ts reads the same field for its strictly-greater
+// assertion. The fixture lives under pirun/testdata because both sides assert
+// against one file; deuceAwaitCeilingMs is Deuce's own value, not Pi's contract.
+func TestAwaitCeilingMatchesContractFixture(t *testing.T) {
+	var f struct {
+		DeuceAwaitCeilingMs int64 `json:"deuceAwaitCeilingMs"`
+	}
+	if err := json.Unmarshal(readProtocolFixture(t), &f); err != nil {
+		t.Fatalf("parse pi-ui-protocol fixture: %v", err)
+	}
+	if f.DeuceAwaitCeilingMs == 0 {
+		t.Fatal("fixture has no deuceAwaitCeilingMs — the KTD7 invariant has no shared anchor")
+	}
+	if got := defaultAwaitTimeout.Milliseconds(); got != f.DeuceAwaitCeilingMs {
+		t.Errorf("defaultAwaitTimeout = %dms, fixture deuceAwaitCeilingMs = %dms — "+
+			"move both together or the extension's dialog timeout may no longer sit above Deuce's ceiling (KTD7)",
+			got, f.DeuceAwaitCeilingMs)
+	}
+}
+
 func TestAwaitingCeilingFailsTask(t *testing.T) {
 	rt, store, bc, lr := newTestRuntime(t)
 	rt.awaitTimeout = 60 * time.Millisecond // ceiling for the test (same package)
@@ -594,13 +800,181 @@ func TestAwaitingCeilingFailsTask(t *testing.T) {
 	task, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "go", WorkspaceID: "ws"})
 	bc.waitFor(t, ws.TypeTaskStarted, 1)
 
-	lr.handle(t, 0).push(`{"type":"extension_ui_request","id":"ui-1","params":{"prompt":"?"}}`)
+	lr.handle(t, 0).push(uiRequestLine(t, "input"))
 	bc.waitFor(t, ws.TypeTaskAwaitingInput, 1)
 	// No answer → ceiling fails the task and frees the lane.
 	bc.waitFor(t, ws.TypeTaskCompleted, 1)
 	if store.state(task) != StateFailed {
 		t.Errorf("state = %q, want failed after awaiting ceiling", store.state(task))
 	}
+}
+
+// TestAwaitingSuspendsActiveTimeout covers AE5 / R4: a decoded blocking request
+// suspends the active-work budget and starts the awaiting ceiling instead, so a
+// question outliving the active budget is still answerable. This is the timeout
+// the original bug never reached — the select line was dropped before it could
+// fire, so the ten-minute active budget killed the task with the question still
+// unanswered.
+func TestAwaitingSuspendsActiveTimeout(t *testing.T) {
+	rt, store, bc, lr := newTestRuntime(t)
+	// Active budget expires almost immediately; the ceiling is generous. If the
+	// question did not suspend the active timer, the task would be failed.
+	rt.activeTimeout = 200 * time.Millisecond
+	rt.awaitTimeout = 30 * time.Second
+	ctx := context.Background()
+	task, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "go", WorkspaceID: "ws"})
+	bc.waitFor(t, ws.TypeTaskStarted, 1)
+	h := lr.handle(t, 0)
+
+	h.push(uiRequestLine(t, "select"))
+	bc.waitFor(t, ws.TypeTaskAwaitingInput, 1)
+
+	// Well past the active budget, with the ceiling nowhere near.
+	time.Sleep(500 * time.Millisecond)
+	if got := store.state(task); got != StateAwaitingInput {
+		t.Fatalf("state = %q past the active budget, want awaiting_input (the active timeout must be suspended while a question is pending)", got)
+	}
+
+	// And it is still answerable.
+	res, err := rt.RouteOrEnqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "Vue"})
+	if err != nil || res != RouteFed {
+		t.Fatalf("RouteOrEnqueue = (%v,%v), want RouteFed — a question past the active budget must still be answerable", res, err)
+	}
+	if m := h.waitCmd(t, "extension_ui_response"); m["id"] != "ui-select-1" {
+		t.Errorf("extension_ui_response = %v, want id=ui-select-1", m)
+	}
+	if got := store.state(task); got != StateRunning {
+		t.Errorf("state after answer = %q, want running", got)
+	}
+}
+
+// awaitingOnFixture starts a task and drives it to awaiting_input by pushing the
+// named request arm from the contract fixture, returning the runtime, its store,
+// the broadcaster, the Pi handle and the blocked task id.
+func awaitingOnFixture(t *testing.T, request string) (*Runtime, *fakeStore, *fakeBroadcaster, *tHandle, string) {
+	t.Helper()
+	rt, store, bc, lr := newTestRuntime(t)
+	task, err := rt.Enqueue(context.Background(), EnqueueParams{SessionID: "s1", Prompt: "go", WorkspaceID: "ws"})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	bc.waitFor(t, ws.TypeTaskStarted, 1)
+	h := lr.handle(t, 0)
+	h.push(uiRequestLine(t, request))
+	bc.waitFor(t, ws.TypeTaskAwaitingInput, 1)
+	if store.state(task) != StateAwaitingInput {
+		t.Fatalf("state = %q, want awaiting_input", store.state(task))
+	}
+	return rt, store, bc, h, task
+}
+
+// assertResponseMatchesArm checks an emitted extension_ui_response against the
+// fixture's arm for `arm`, with the id and answer substituted. The comparison is
+// over the whole map, so a second arm or a stray legacy `response` field fails
+// it — Pi's dispatcher correlates on type+id only and hands the raw object to a
+// per-method parser, so an extra key is not an error on the wire and only an
+// exact-shape assertion can catch one.
+func assertResponseMatchesArm(t *testing.T, got map[string]any, arm, id string, answer any) {
+	t.Helper()
+	want := uiResponseLine(t, arm)
+	want["id"] = id
+	want[arm] = answer
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("extension_ui_response = %v, want %v (Pi's %q arm)", got, want, arm)
+	}
+}
+
+// readProtocolFixture returns the parsed contract fixture the decoder tests also
+// assert against (server/internal/agent/pirun/testdata/pi-ui-protocol.json).
+func readProtocolFixture(t *testing.T) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("pirun", "testdata", "pi-ui-protocol.json"))
+	if err != nil {
+		t.Fatalf("read pi-ui-protocol fixture: %v", err)
+	}
+	return b
+}
+
+// uiResponseLine returns a named arm of Pi's published RpcExtensionUIResponse
+// union ("value", "confirmed", "cancelled") as a decoded JSON object, so the
+// runtime's answers are asserted against the transcribed contract rather than
+// against literals written next to the code that builds them (KTD6).
+func uiResponseLine(t *testing.T, arm string) map[string]any {
+	t.Helper()
+	var f struct {
+		Responses map[string]struct {
+			Line map[string]any `json:"line"`
+		} `json:"responses"`
+	}
+	if err := json.Unmarshal(readProtocolFixture(t), &f); err != nil {
+		t.Fatalf("parse pi-ui-protocol fixture: %v", err)
+	}
+	r, ok := f.Responses[arm]
+	if !ok {
+		t.Fatalf("fixture has no response arm %q", arm)
+	}
+	return r.Line
+}
+
+// syncBuffer collects log output from the runtime's own goroutines as well as
+// the test's.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// captureLogs redirects the default slog logger into a buffer for the test.
+func captureLogs(t *testing.T) *syncBuffer {
+	t.Helper()
+	buf := &syncBuffer{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return buf
+}
+
+// uiRequestLine returns a named arm of Pi's published extension_ui_request
+// union as a single JSONL line, read from the contract fixture the decoder
+// tests assert against (server/internal/agent/pirun/testdata/pi-ui-protocol.json).
+// Runtime tests use it instead of inline literals so both layers exercise the
+// same transcribed wire shape — inline literals invented next to the decoder
+// are what let the wrong decoder pass a green suite (KTD6).
+func uiRequestLine(t *testing.T, name string) string {
+	t.Helper()
+	b := readProtocolFixture(t)
+	var f struct {
+		Requests []struct {
+			Name string          `json:"name"`
+			Line json.RawMessage `json:"line"`
+		} `json:"requests"`
+	}
+	if err := json.Unmarshal(b, &f); err != nil {
+		t.Fatalf("parse pi-ui-protocol fixture: %v", err)
+	}
+	for _, r := range f.Requests {
+		if r.Name != name {
+			continue
+		}
+		var buf bytes.Buffer
+		if err := json.Compact(&buf, r.Line); err != nil {
+			t.Fatalf("compact fixture line: %v", err)
+		}
+		return buf.String()
+	}
+	t.Fatalf("fixture has no request named %q", name)
+	return ""
 }
 
 func sameOrder(got, want []string) bool {
