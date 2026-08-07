@@ -65,12 +65,57 @@ func (SetSteeringMode) commandType() string { return "set_steering_mode" }
 
 // ExtensionUIResponse answers a blocking extension_ui_request (the ask-user
 // mechanism, KTD15). The ID must match the originating request's ID.
+//
+// Pi's RpcExtensionUIResponse is a three-arm union (transcribed in
+// testdata/pi-ui-protocol.json from the version recorded there):
+//
+//	{value: string}       answers select, input and editor — for select it is
+//	                      the chosen option LABEL, not an index
+//	{confirmed: boolean}  answers confirm — a JSON boolean
+//	{cancelled: true}     valid for any dialog
+//
+// Exactly one arm may be set. Pi's stdin dispatcher correlates on type+id only
+// and hands the raw object to a per-method parser, so an unrecognized key is
+// not an error — it resolves to that parser's fallback (undefined for the value
+// arms, false for confirm). That is why the previous single `response` field
+// silently discarded every answer, and why the arms are pointers here: a
+// zero-valued scalar would emit a stray second key that Pi would read as the
+// answer. Build one with UIResponseValue / UIResponseConfirmed /
+// UIResponseCancelled rather than by hand.
 type ExtensionUIResponse struct {
-	ID       string `json:"id"`
-	Response any    `json:"response"`
+	ID        string  `json:"id"`
+	Value     *string `json:"value,omitempty"`
+	Confirmed *bool   `json:"confirmed,omitempty"`
+	Cancelled bool    `json:"cancelled,omitempty"`
 }
 
 func (ExtensionUIResponse) commandType() string { return "extension_ui_response" }
+
+// UIResponseValue answers a select, input or editor dialog. For select, value
+// must be the chosen option's label.
+func UIResponseValue(id, value string) ExtensionUIResponse {
+	return ExtensionUIResponse{ID: id, Value: &value}
+}
+
+// UIResponseConfirmed answers a confirm dialog with Pi's boolean arm.
+func UIResponseConfirmed(id string, confirmed bool) ExtensionUIResponse {
+	return ExtensionUIResponse{ID: id, Confirmed: &confirmed}
+}
+
+// UIResponseCancelled dismisses any dialog without an answer. Pi resolves a
+// cancelled select/input/editor to undefined and a cancelled confirm to false.
+// Deuce does not send this today — a stopped run tears the Pi process down, so
+// the dialog dies with it — but the arm is part of the union Pi publishes and
+// this is the only shape it may take.
+func UIResponseCancelled(id string) ExtensionUIResponse {
+	return ExtensionUIResponse{ID: id, Cancelled: true}
+}
+
+// IsConfirmMethod reports whether a dialog opened with this UI method (as the
+// decoder reports it in Event.RequestKind) is answered with the `confirmed`
+// boolean arm rather than the `value` string arm. Every other blocking method —
+// select, input, and editor, which the decoder folds into input — takes value.
+func IsConfirmMethod(method string) bool { return method == uiMethodConfirm }
 
 // Marshal renders a command as a single JSONL line (no trailing newline; the
 // writer adds it). It injects the discriminator "type" field Pi expects.
