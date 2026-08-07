@@ -78,7 +78,18 @@ type pendingRequest struct {
 
 const (
 	defaultActiveTimeout = 10 * time.Minute
-	defaultAwaitTimeout  = 30 * time.Minute
+
+	// defaultAwaitTimeout is Deuce's ceiling on an unanswered question. It is
+	// half of a cross-language invariant (KTD7): the ask-user extension passes
+	// Pi its own dialog timeout as PI_DIALOG_TIMEOUT_MS in
+	// pirun/extension/ask-user.ts, and that value MUST stay strictly greater
+	// than this one so this ceiling always fires first. If Pi's timer won the
+	// race it would resolve the dialog with its own default (false for
+	// confirm, undefined for select/input) and hand the model a fabricated
+	// answer while the drawer still showed the question as answerable. Nothing
+	// but these two comments ties the values together — raise this and the
+	// extension constant has to move with it.
+	defaultAwaitTimeout = 30 * time.Minute
 )
 
 // DefaultBaseSystemPrompt is the global system prompt applied to the deuce

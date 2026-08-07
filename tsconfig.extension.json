@@ -1,0 +1,37 @@
+{
+  /* The Pi extension Deuce embeds in the Go binary and provisions into each
+     workspace container. It ships as plain TypeScript that Pi loads at
+     runtime, so nothing here emits — but it does need real type resolution:
+     the original ask-user bug was an argument-order error against Pi's
+     published `ExtensionUIContext`, and this project is what puts those
+     declarations in front of `tsc`. Referenced from tsconfig.json so
+     `npx tsc -b --force` covers it. */
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.extension.tsbuildinfo",
+    "target": "es2023",
+    "lib": ["ES2023"],
+    "module": "esnext",
+    /* Pi runs the extension under Node, and the test suite reads the Go
+       contract fixture from disk. */
+    "types": ["node"],
+    /* Mirrors the app/node projects: Pi's declarations pull in a large
+       upstream type graph, and an unrelated error in it must not fail this
+       gate. */
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["server/internal/agent/pirun/extension"]
+}
