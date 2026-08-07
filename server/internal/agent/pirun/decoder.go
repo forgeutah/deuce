@@ -29,6 +29,11 @@ const (
 	// KindAwaitingInput maps from "extension_ui_request": the agent is blocked
 	// on a human answer via the ask-user extension (KTD15).
 	KindAwaitingInput EventKind = "awaiting_input"
+	// KindExtensionError maps from "extension_error": an extension threw, at
+	// load time or while handling an event. It is the only visibility Deuce has
+	// into a broken extension, and it is logged rather than forwarded to the
+	// runtime — a load-time error has no task to attach to (R9).
+	KindExtensionError EventKind = "extension_error"
 	// KindRunCompleted maps from "agent_end": the run finished.
 	KindRunCompleted EventKind = "run_completed"
 	// KindCommandReply maps from a "response" envelope (reply to a client command).
@@ -66,6 +71,11 @@ type Event struct {
 	Command string
 	ReplyID string
 	Success bool
+
+	// Extension error (KindExtensionError).
+	ExtensionPath  string // the extension file that threw
+	ExtensionEvent string // the Pi event it was handling ("tool_call", …)
+	ErrorText      string
 }
 
 // envelope is the minimal shared shape used to classify a line before decoding
@@ -114,10 +124,12 @@ func Decode(line []byte) (Event, error) {
 		return decodeMessageUpdate(line)
 	case "extension_ui_request":
 		return decodeUIRequest(line)
+	case "extension_error":
+		return decodeExtensionError(line)
 	case "message_start", "message_end", "turn_start", "turn_end",
 		"tool_execution_update", "queue_update",
 		"compaction_start", "compaction_end",
-		"auto_retry_start", "auto_retry_end", "extension_error":
+		"auto_retry_start", "auto_retry_end":
 		// Recognized but not acted on by the runtime.
 		return Event{Kind: KindIgnore, RawType: env.Type}, nil
 	default:
@@ -193,39 +205,149 @@ func decodeMessageUpdate(line []byte) (Event, error) {
 	}
 }
 
-func decodeUIRequest(line []byte) (Event, error) {
-	// The exact extension_ui_request shape is pinned when the ask-user
-	// extension (U12) lands; decode best-effort by id + common prompt/kind keys
-	// so the awaiting-input transition fires regardless of minor field naming.
+// decodeExtensionError decodes Pi's "extension_error" event (docs/rpc.md):
+// extensionPath, the event being handled, and the error text.
+func decodeExtensionError(line []byte) (Event, error) {
 	var p struct {
-		ID      string   `json:"id"`
-		Method  string   `json:"method"`
-		Kind    string   `json:"kind"`
-		Prompt  string   `json:"prompt"`
-		Options []string `json:"options"`
-		Params  struct {
-			Prompt  string   `json:"prompt"`
-			Message string   `json:"message"`
-			Options []string `json:"options"`
-		} `json:"params"`
+		ExtensionPath string `json:"extensionPath"`
+		Event         string `json:"event"`
+		Error         string `json:"error"`
+	}
+	if err := json.Unmarshal(line, &p); err != nil {
+		return Event{Kind: KindUnknown, RawType: "extension_error"}, err
+	}
+	return Event{
+		Kind:           KindExtensionError,
+		RawType:        "extension_error",
+		ExtensionPath:  p.ExtensionPath,
+		ExtensionEvent: p.Event,
+		ErrorText:      p.Error,
+	}, nil
+}
+
+// Pi's extension UI methods (RpcExtensionUIRequest, nine arms keyed on
+// "method"). The first four block on a client response; the rest are
+// fire-and-forget and must never raise a pending question (KTD4 / R3).
+const (
+	uiMethodSelect        = "select"
+	uiMethodConfirm       = "confirm"
+	uiMethodInput         = "input"
+	uiMethodEditor        = "editor"
+	uiMethodNotify        = "notify"
+	uiMethodSetStatus     = "setStatus"
+	uiMethodSetWidget     = "setWidget"
+	uiMethodSetTitle      = "setTitle"
+	uiMethodSetEditorText = "set_editor_text"
+)
+
+// decodeUIRequest decodes an extension_ui_request against Pi's published
+// RpcExtensionUIRequest union. The union is FLAT: every field sits at the top
+// level next to type/id/method, and no arm nests anything under "params". The
+// contract is transcribed arm-by-arm in testdata/pi-ui-protocol.json, which
+// records the Pi version it came from.
+//
+// Prompt text per arm (the union carries no single "prompt" field):
+//
+//	select  → title            confirm → title + message
+//	input   → title            editor  → title
+//
+// placeholder and prefill are input hints, not the question, so they are not
+// folded into the prompt.
+func decodeUIRequest(line []byte) (Event, error) {
+	var p struct {
+		ID      string          `json:"id"`
+		Method  string          `json:"method"`
+		Title   string          `json:"title"`
+		Message string          `json:"message"`
+		Options json.RawMessage `json:"options"`
 	}
 	if err := json.Unmarshal(line, &p); err != nil {
 		return Event{Kind: KindUnknown, RawType: "extension_ui_request"}, err
 	}
-	prompt := firstNonEmpty(p.Prompt, p.Params.Prompt, p.Params.Message)
-	kind := firstNonEmpty(p.Kind, p.Method)
-	options := p.Options
-	if len(options) == 0 {
-		options = p.Params.Options
-	}
-	return Event{
+
+	ev := Event{
 		Kind:        KindAwaitingInput,
 		RawType:     "extension_ui_request",
 		RequestID:   p.ID,
-		RequestKind: kind,
-		Prompt:      prompt,
-		Options:     options,
-	}, nil
+		RequestKind: p.Method,
+		Prompt:      p.Title,
+	}
+
+	switch p.Method {
+	case uiMethodSelect:
+		labels, question, ok := decodeUIOptions(p.Options)
+		switch {
+		case ok && len(labels) > 0:
+			ev.Options = labels
+		case question != "":
+			// Version skew: a pre-fix extension called select(title, question,
+			// options), so Pi spread the question into the options slot. The
+			// question text exists only there — falling back to the title would
+			// surface the extension's boilerplate and discard the question (R2).
+			// Degrade to free text: there are no option labels to render.
+			ev.RequestKind = uiMethodInput
+			ev.Prompt = question
+		default:
+			// A select with no usable labels can only be answered as free text.
+			ev.RequestKind = uiMethodInput
+		}
+	case uiMethodConfirm:
+		ev.Prompt = joinPrompt(p.Title, p.Message)
+	case uiMethodInput:
+		// Prompt is the title, already set.
+	case uiMethodEditor:
+		// The drawer has no editor control and the frontend QuestionKind union
+		// has no "editor" member — an editor dialog is answered through the
+		// composer, so it rides the existing input kind rather than putting an
+		// undeclared value on the wire.
+		ev.RequestKind = uiMethodInput
+	case uiMethodNotify, uiMethodSetStatus, uiMethodSetWidget, uiMethodSetTitle, uiMethodSetEditorText:
+		// Fire-and-forget: carries an id but expects no response. Answering one
+		// is impossible and treating one as a question wedges the task.
+		return Event{Kind: KindIgnore, RawType: "extension_ui_request"}, nil
+	default:
+		// A method a future Pi adds. Tolerated like an unknown event type: the
+		// stream continues, but no unanswerable question reaches the user.
+		// DecodeStream logs it (R8).
+		return Event{
+			Kind:        KindUnknown,
+			RawType:     "extension_ui_request",
+			RequestID:   p.ID,
+			RequestKind: p.Method,
+		}, nil
+	}
+	return ev, nil
+}
+
+// decodeUIOptions reads Pi's select `options` field tolerantly. It returns the
+// labels when the field is the published string array; otherwise, when the
+// field is a bare string, it returns that string — which in the version-skew
+// case is the question text itself.
+func decodeUIOptions(raw json.RawMessage) (labels []string, bare string, ok bool) {
+	if len(raw) == 0 {
+		return nil, "", false
+	}
+	if err := json.Unmarshal(raw, &labels); err == nil {
+		return labels, "", true
+	}
+	if err := json.Unmarshal(raw, &bare); err == nil {
+		return nil, strings.TrimSpace(bare), false
+	}
+	return nil, "", false
+}
+
+// joinPrompt renders confirm's two-field prompt as one block. Pi's confirm arm
+// requires a message, but Deuce's own extension sends the question as the title
+// and an empty message, so the blank line must not be emitted for it.
+func joinPrompt(title, message string) string {
+	switch {
+	case strings.TrimSpace(message) == "":
+		return title
+	case strings.TrimSpace(title) == "":
+		return message
+	default:
+		return title + "\n\n" + message
+	}
 }
 
 // DecodeStream reads JSONL lines from r and invokes fn for every emitted event
@@ -238,13 +360,31 @@ func DecodeStream(r io.Reader, fn func(Event)) error {
 	for sc.Scan() {
 		ev, err := Decode(sc.Bytes())
 		if err != nil {
-			slog.Warn("pirun: skipping malformed event line", "error", err)
+			// Name the event type: a dropped line that says only "malformed"
+			// cannot be traced back to the arm that broke (R8). Empty when the
+			// line was not parseable as JSON at all.
+			slog.Warn("pirun: skipping malformed event line", "type", ev.RawType, "error", err)
 			continue
 		}
 		switch ev.Kind {
 		case KindIgnore:
 			continue
+		case KindExtensionError:
+			// Logged here, not forwarded: an extension can throw at load time,
+			// when there is no task to attach the failure to, and the runtime's
+			// translation returns early for a key with no current task — a
+			// forwarded error would be silently dropped (R9).
+			slog.Warn("pirun: extension error",
+				"extensionPath", ev.ExtensionPath, "event", ev.ExtensionEvent, "error", ev.ErrorText)
+			continue
 		case KindUnknown:
+			if ev.RawType == "extension_ui_request" {
+				// A UI method Deuce cannot classify. Louder than an unknown
+				// event type: it means Pi opened a dialog no one will answer.
+				slog.Warn("pirun: unknown extension UI method",
+					"method", ev.RequestKind, "requestId", ev.RequestID)
+				continue
+			}
 			slog.Debug("pirun: skipping unknown event type", "type", ev.RawType)
 			continue
 		default:
@@ -267,15 +407,6 @@ func joinText(blocks []contentBlock) string {
 		}
 	}
 	return b.String()
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func trimLine(line []byte) []byte {

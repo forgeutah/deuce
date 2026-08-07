@@ -2,10 +2,13 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"testing"
@@ -507,7 +510,7 @@ func TestRecycleIdleStopsOnlyIdleSessions(t *testing.T) {
 	// s3 is blocked on a question (awaiting_input) — busy, must NOT recycle.
 	t3, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s3", Prompt: "c", WorkspaceID: "ws3"})
 	bc.waitFor(t, ws.TypeTaskStarted, 3)
-	lr.handle(t, 2).push(`{"type":"extension_ui_request","id":"ui-1","params":{"prompt":"?"}}`)
+	lr.handle(t, 2).push(uiRequestLine(t, "input"))
 	bc.waitFor(t, ws.TypeTaskAwaitingInput, 1)
 
 	rt.RecycleIdleProcesses()
@@ -553,7 +556,7 @@ func TestRouteAnswersAwaitingInput(t *testing.T) {
 	bc.waitFor(t, ws.TypeTaskStarted, 1)
 	h := lr.handle(t, 0)
 
-	h.push(`{"type":"extension_ui_request","id":"ui-1","method":"input","params":{"prompt":"which env?"}}`)
+	h.push(uiRequestLine(t, "input"))
 	bc.waitFor(t, ws.TypeTaskAwaitingInput, 1)
 	if store.state(task) != StateAwaitingInput {
 		t.Fatalf("state = %q, want awaiting_input", store.state(task))
@@ -563,9 +566,12 @@ func TestRouteAnswersAwaitingInput(t *testing.T) {
 	if err != nil || res != RouteFed {
 		t.Fatalf("RouteOrEnqueue = (%v,%v), want RouteFed", res, err)
 	}
+	// The response arm this must carry is asserted by U3, against
+	// pirun/testdata/pi-ui-protocol.json. Here the point is only that the answer
+	// is correlated back to the request id that opened the dialog.
 	m := h.waitCmd(t, "extension_ui_response")
-	if m["id"] != "ui-1" || m["response"] != "prod" {
-		t.Errorf("extension_ui_response = %v, want id=ui-1 response=prod", m)
+	if m["id"] != "ui-input-1" {
+		t.Errorf("extension_ui_response = %v, want id=ui-input-1", m)
 	}
 	if store.state(task) != StateRunning {
 		t.Errorf("state after answer = %q, want running", store.state(task))
@@ -594,13 +600,87 @@ func TestAwaitingCeilingFailsTask(t *testing.T) {
 	task, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "go", WorkspaceID: "ws"})
 	bc.waitFor(t, ws.TypeTaskStarted, 1)
 
-	lr.handle(t, 0).push(`{"type":"extension_ui_request","id":"ui-1","params":{"prompt":"?"}}`)
+	lr.handle(t, 0).push(uiRequestLine(t, "input"))
 	bc.waitFor(t, ws.TypeTaskAwaitingInput, 1)
 	// No answer → ceiling fails the task and frees the lane.
 	bc.waitFor(t, ws.TypeTaskCompleted, 1)
 	if store.state(task) != StateFailed {
 		t.Errorf("state = %q, want failed after awaiting ceiling", store.state(task))
 	}
+}
+
+// TestAwaitingSuspendsActiveTimeout covers AE5 / R4: a decoded blocking request
+// suspends the active-work budget and starts the awaiting ceiling instead, so a
+// question outliving the active budget is still answerable. This is the timeout
+// the original bug never reached — the select line was dropped before it could
+// fire, so the ten-minute active budget killed the task with the question still
+// unanswered.
+func TestAwaitingSuspendsActiveTimeout(t *testing.T) {
+	rt, store, bc, lr := newTestRuntime(t)
+	// Active budget expires almost immediately; the ceiling is generous. If the
+	// question did not suspend the active timer, the task would be failed.
+	rt.activeTimeout = 200 * time.Millisecond
+	rt.awaitTimeout = 30 * time.Second
+	ctx := context.Background()
+	task, _ := rt.Enqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "go", WorkspaceID: "ws"})
+	bc.waitFor(t, ws.TypeTaskStarted, 1)
+	h := lr.handle(t, 0)
+
+	h.push(uiRequestLine(t, "select"))
+	bc.waitFor(t, ws.TypeTaskAwaitingInput, 1)
+
+	// Well past the active budget, with the ceiling nowhere near.
+	time.Sleep(500 * time.Millisecond)
+	if got := store.state(task); got != StateAwaitingInput {
+		t.Fatalf("state = %q past the active budget, want awaiting_input (the active timeout must be suspended while a question is pending)", got)
+	}
+
+	// And it is still answerable.
+	res, err := rt.RouteOrEnqueue(ctx, EnqueueParams{SessionID: "s1", Prompt: "Vue"})
+	if err != nil || res != RouteFed {
+		t.Fatalf("RouteOrEnqueue = (%v,%v), want RouteFed — a question past the active budget must still be answerable", res, err)
+	}
+	if m := h.waitCmd(t, "extension_ui_response"); m["id"] != "ui-select-1" {
+		t.Errorf("extension_ui_response = %v, want id=ui-select-1", m)
+	}
+	if got := store.state(task); got != StateRunning {
+		t.Errorf("state after answer = %q, want running", got)
+	}
+}
+
+// uiRequestLine returns a named arm of Pi's published extension_ui_request
+// union as a single JSONL line, read from the contract fixture the decoder
+// tests assert against (server/internal/agent/pirun/testdata/pi-ui-protocol.json).
+// Runtime tests use it instead of inline literals so both layers exercise the
+// same transcribed wire shape — inline literals invented next to the decoder
+// are what let the wrong decoder pass a green suite (KTD6).
+func uiRequestLine(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("pirun", "testdata", "pi-ui-protocol.json"))
+	if err != nil {
+		t.Fatalf("read pi-ui-protocol fixture: %v", err)
+	}
+	var f struct {
+		Requests []struct {
+			Name string          `json:"name"`
+			Line json.RawMessage `json:"line"`
+		} `json:"requests"`
+	}
+	if err := json.Unmarshal(b, &f); err != nil {
+		t.Fatalf("parse pi-ui-protocol fixture: %v", err)
+	}
+	for _, r := range f.Requests {
+		if r.Name != name {
+			continue
+		}
+		var buf bytes.Buffer
+		if err := json.Compact(&buf, r.Line); err != nil {
+			t.Fatalf("compact fixture line: %v", err)
+		}
+		return buf.String()
+	}
+	t.Fatalf("fixture has no request named %q", name)
+	return ""
 }
 
 func sameOrder(got, want []string) bool {
