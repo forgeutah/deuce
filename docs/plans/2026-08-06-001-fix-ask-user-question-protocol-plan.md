@@ -237,9 +237,8 @@ No matching issues exist in `github.com/earendil-works/pi` for the extension UI 
 **Test scenarios:**
 - A pick-one question with three options produces a request whose options field is an array of those three labels and whose title carries the question text.
 - A pick-one question with `kind` omitted but options supplied still infers the pick-one style, preserving today's inference.
-- A yes/no question produces a request carrying the question text in its message field.
 - A free-text question produces a request carrying the question text in its title, not only in a placeholder.
-- A yes/no question carries the question in its title, so the prompt renders without the boilerplate prefix.
+- A yes/no question carries the question in its title with an empty message, so the prompt renders without the boilerplate prefix.
 - Every dialog call carries a timeout greater than the 30-minute awaiting ceiling, and an abort signal.
 - Covers AE7. A cancelled or timed-out dialog returns the explicit no-answer text rather than an empty string or a negative.
 - A yes/no dialog that times out is distinguished from a real "No" — both resolve to `false`, so the assertion must prove the no-answer flag drives the result, not the resolved value.
